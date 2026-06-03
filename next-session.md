@@ -1,10 +1,51 @@
 # melk — next session handoff
 
-Project state as of the end of the previous session.
+## ⚠️ READ THIS FIRST — current in-progress work
 
-## TL;DR
+The **bend-intersection value-variation** feature has been a long iterative struggle this session. State as of the last message:
 
-**Phase 4 + 4.1–4.6 are all landed and signed off.** **216 tests pass + 3 skipped.** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), **Z-depth** (underground highways), and now a **pixel-aware track packer** with multi-layered coherence passes.
+**What it does:** When two trace bends visually intersect (i.e. their chamfer regions share an exact `(x, y)` point — example: ex 24 `hwy->sink_b` chamfer ends at `(236, 28)` and `hwy->sink_c` chamfer starts at `(236, 28)`), the lower trace's stroke gets split into three sub-paths. The middle sub-path is a 24px axial slice starting AT the intersection, with an inline `<linearGradient gradientUnits="userSpaceOnUse">` stroke that fades from `ink-primary` (dark, at the intersection) to `trace-default` (default, 24px past). The trace itself carries the variation — no overlay paths.
+
+**Detection rule (LOCKED — do not change without explicit user request):** Two bends intersect when their chamfer points (`lumpPoints[1..length-2]` of each bend, computed by `findBendCenters`) share an exact `(x, y)` value. Fan-outs don't intersect (each fan bend is at a different point). Pure '+' axial crossings have no chamfers so they don't qualify. Parallel stairsteps in adjacent rows don't share points so they're excluded too.
+
+**User's view of where variation should appear:**
+- ✅ Highway-exit bends in ex 24 (`hwy->sink_b` and `hwy->sink_c` interlocking at `(236, 28)`) → variation here is CORRECT
+- ❌ ext_2 LEFT-side parallel-offset bends → variation here was WRONG (user explicitly excluded these). Detection now skips them.
+
+**Files involved:**
+- [src/render/svg.ts](src/render/svg.ts) — `detectBendIntersections()` (line ~696), `renderEdge()` (line ~760 with intersection-splitting branch), `findBendCenters()`, `pointsUpTo`/`pointsFrom`/`directionFromIntersection` helpers
+- [test/bend-intersection.test.ts](test/bend-intersection.test.ts) — 7 tests covering the ex 24 fixture + fan-out negative cases. **All passing.** The CRITICAL test locks `hwy->sink_b` and `hwy->sink_c` having variation at the intersection. The negative tests confirm fan-outs DON'T trigger.
+
+**Final user feedback before context clear:** "yeah so now i see a gradient, but i don't know what to make of it". The user CAN see the gradient now. Whether the visual works for them aesthetically is still open — they didn't say it was wrong, just unclear. **Do not make further changes to this feature without explicit user direction.**
+
+**Hard-won lessons (see [feedback-intersection-means-crossing](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-intersection-means-crossing.md)):**
+- "Intersection" means literal screen-space crossing, NOT bbox proximity, NOT stairstep adjacency
+- Never assume what the user means — confirm with concrete coords from the actual SVG output before implementing
+- Write a unit test against the canonical ex 24 fixture FIRST, then make it pass
+
+**Tests:** **296 passing + 3 skipped** (was 216 + 3 at Phase 4 close). +43 theme tests, +14 text-fit tests, +7 bend-intersection tests, +12 misc. The bend-intersection tests are in a dedicated file so they run on every change.
+
+---
+
+## Phase 5 elegance pass — landed earlier this session
+
+Visual refresh across the whole renderer:
+
+- **Theming system** ([DESIGN-PHASE5-THEMING.md](DESIGN-PHASE5-THEMING.md)) — semantic-token Theme with four built-in themes (`document-light` default, `document-dark`, `schematic-light`, `schematic-dark`), `theme:` directive in .melk, `--theme=` CLI flag, `{ tags: [...] }` brace-attr for per-node/per-edge style overrides via tag rules in the theme.
+- **Softer-corporate palette** as new default: lighter slate traces (`#94a3b8`), charcoal ink (`#334155`), Tailwind 600 accents.
+- **10pt body / 9pt edge** typography (was 13/11).
+- **1.0px traces** (was 1.5px).
+- **Measured text-fit** ([src/layout/text-fit.ts](src/layout/text-fit.ts)) — bumps cell width/height to contain labels; diamond stays square, cylinder enforces 2:3 min aspect, circle stays 1×1 with label below.
+- **32px page margin** around the canvas.
+- **2px rounded corners on rect** shapes; roundrect stays at 8px.
+- **Highway nodes** render nothing (no enclosure); manhole circles only for `render: underground` highways, hollow, 2px radius.
+- **Trace bends as rounded corners** via Q/C Bezier emitter in `polylineD()` — straight lines with smooth corner arcs.
+- **Diamond trace endpoints clipped** to the diamond perimeter (was floating in the bounding-rect gap).
+- **Rounded linecap/linejoin** on all traces.
+
+## TL;DR (carried from previous session)
+
+**Phase 4 + 4.1–4.6 are all landed and signed off.** **216 tests pass + 3 skipped at Phase 4 close, 296 now (Phase 5 + bend-intersection variation added).** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), **Z-depth** (underground highways), and now a **pixel-aware track packer** with multi-layered coherence passes.
 
 **Git repository initialised** (2026-06-03). Initial commit `7fb9bb2`: src/, test/, scripts/, examples/*.melk sources, design docs. `.gitignore` excludes `node_modules/`, `dist/`, `examples/*.svg` (regenerate via `npx tsx src/cli.ts render`), `.claude/`, `tmp/`. No remote yet.
 

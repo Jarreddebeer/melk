@@ -85,11 +85,33 @@ export function renderSVG(
   const tx = -canvas.x;
   const ty = -canvas.y;
 
+  // Build a node-id → shape map for the diamond endpoint clip pass.
+  // Diamonds need their trace endpoints reprojected onto the diamond
+  // perimeter (the polyline pipeline targets the rect face, which leaves
+  // a visible gap to the inset diamond edge at non-vertex slots).
+  const shapeOf = new Map(model.nodes.map((n) => [n.id, n.shape]));
+
+  // We need the clipped polylines for both the main render AND the
+  // bend-disambiguation pass below.
+  const clippedPolys: Polyline[] = polylines.polylines.map((poly) => {
+    const edge = model.edges[poly.edgeIndex];
+    if (!edge) return poly;
+    return clipDiamondEndpoints(poly, edge, shapeOf, boxes);
+  });
+
+  // Bend-disambiguation pre-pass: find shared-chamfer-point bend
+  // intersections. Returns a map: polyIdx → list of intersection
+  // points. The renderer uses this to split the trace's stroke into
+  // sub-paths around each intersection, with a gradient stroke on the
+  // intersection-containing segment (default → darker → default).
+  const gradientDefs: string[] = [];
+  const intersectionsByPoly = detectBendIntersections(clippedPolys, model, theme, gradientDefs);
+
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fmt(W)} ${fmt(H)}" width="${fmt(W)}" height="${fmt(H)}" font-family="${escapeAttr(theme.typography.face)}" font-size="${theme.typography.size.body}" font-weight="${theme.typography.weight.label}">`,
   );
-  parts.push(renderDefs(theme));
+  parts.push(renderDefs(theme, gradientDefs));
   parts.push(
     `<rect width="${fmt(W)}" height="${fmt(H)}" fill="${theme.tokens.surface}"/>`,
   );
@@ -99,19 +121,13 @@ export function renderSVG(
     parts.push(renderNodeset(name, rect, theme));
   }
 
-  // Build a node-id → shape map for the diamond endpoint clip pass.
-  // Diamonds need their trace endpoints reprojected onto the diamond
-  // perimeter (the polyline pipeline targets the rect face, which leaves
-  // a visible gap to the inset diamond edge at non-vertex slots).
-  const shapeOf = new Map(model.nodes.map((n) => [n.id, n.shape]));
-
   for (let i = 0; i < polylines.polylines.length; i++) {
-    const poly = polylines.polylines[i]!;
+    const poly = clippedPolys[i]!;
     const edge = model.edges[poly.edgeIndex];
     if (!edge) continue;
     const overrides = resolveTags(theme, edge.tags, `edge '${edge.from} -> ${edge.to}'`);
-    const clipped = clipDiamondEndpoints(poly, edge, shapeOf, boxes);
-    parts.push(renderEdge(edge, clipped, theme, overrides));
+    const intersections = intersectionsByPoly.get(i) ?? [];
+    parts.push(renderEdge(edge, poly, theme, overrides, intersections));
   }
 
   // Via-pair through-segments. The slot allocator forces each via-
@@ -145,19 +161,29 @@ export function renderSVG(
     const underground = hwyNode?.render === "underground";
     const traceStroke = theme.tokens["trace-default"];
     if (underground) {
+      // Underground: trace dips below the surface at the entry manhole
+      // and re-emerges at the exit manhole. Render the faded line from
+      // centre to centre (so it visibly enters/exits the manhole), then
+      // hollow circles on top to mark the manholes themselves.
       const ugWidth = theme.strokes["underground-width"];
       const ugOpacity = theme.strokes["underground-opacity"];
       const r = theme.strokes["manhole-radius"];
+      // Manhole: outline only (fill=none) so the surface trace passes
+      // visibly through the centre — like a shoelace through an eyelet.
       parts.push(
         `<g data-via-through="${orig}" data-underground="1">` +
-          `<path d="M ${fmt(start.x)} ${fmt(start.y)} L ${fmt(end.x)} ${fmt(end.y)}" fill="none" stroke="${traceStroke}" stroke-width="${ugWidth}" stroke-opacity="${ugOpacity}" stroke-linecap="butt" stroke-linejoin="miter"/>` +
-          `<circle cx="${fmt(start.x)}" cy="${fmt(start.y)}" r="${r}" fill="${traceStroke}"/>` +
-          `<circle cx="${fmt(end.x)}" cy="${fmt(end.y)}" r="${r}" fill="${traceStroke}"/>` +
+          `<path d="M ${fmt(start.x)} ${fmt(start.y)} L ${fmt(end.x)} ${fmt(end.y)}" fill="none" stroke="${traceStroke}" stroke-width="${ugWidth}" stroke-opacity="${ugOpacity}" stroke-linecap="round" stroke-linejoin="round"/>` +
+          `<circle cx="${fmt(start.x)}" cy="${fmt(start.y)}" r="${r}" fill="none" stroke="${traceStroke}" stroke-width="${theme.strokes.trace}"/>` +
+          `<circle cx="${fmt(end.x)}" cy="${fmt(end.y)}" r="${r}" fill="none" stroke="${traceStroke}" stroke-width="${theme.strokes.trace}"/>` +
           `</g>`,
       );
     } else {
+      // Surface: trace runs continuously through the highway. No
+      // manholes — the line speaks for itself.
       parts.push(
-        `<g data-via-through="${orig}"><path d="M ${fmt(start.x)} ${fmt(start.y)} L ${fmt(end.x)} ${fmt(end.y)}" fill="none" stroke="${traceStroke}" stroke-width="${theme.strokes.trace}" stroke-linecap="butt" stroke-linejoin="miter"/></g>`,
+        `<g data-via-through="${orig}">` +
+          `<path d="M ${fmt(start.x)} ${fmt(start.y)} L ${fmt(end.x)} ${fmt(end.y)}" fill="none" stroke="${traceStroke}" stroke-width="${theme.strokes.trace}" stroke-linecap="round" stroke-linejoin="round"/>` +
+          `</g>`,
       );
     }
   }
@@ -325,23 +351,26 @@ function boxBounds(
 
 // --- pieces ---------------------------------------------------------------
 
-function renderDefs(theme: Theme): string {
-  // When the theme opts out of arrowheads (schematic convention), don't
-  // emit the marker at all. Callers also suppress marker-end on edges via
-  // the same theme flag so there's nothing to reference.
-  if (theme.strokes.arrow["head-shape"] === "none") {
+function renderDefs(theme: Theme, extraDefs: string[]): string {
+  // Arrow marker (skipped if the theme opts out of arrowheads).
+  const arrowDefs: string[] = [];
+  if (theme.strokes.arrow["head-shape"] !== "none") {
+    const arrowFill = theme.tokens["trace-default"];
+    const w = theme.strokes.arrow.scale;
+    const h = theme.strokes.arrow.scale;
+    arrowDefs.push(
+      `  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="${w}" markerHeight="${h}" orient="auto">`,
+      `    <path d="M 0 0 L 10 5 L 0 10 Z" fill="${arrowFill}"/>`,
+      `  </marker>`,
+    );
+  }
+  if (arrowDefs.length === 0 && extraDefs.length === 0) {
     return `<defs></defs>`;
   }
-  const arrowFill = theme.tokens["trace-default"];
-  // refX = 10 keeps the marker tip at the trace end. markerUnits defaults
-  // to "strokeWidth", so the arrow scales with the line.
-  const w = theme.strokes.arrow.scale;
-  const h = theme.strokes.arrow.scale;
   return [
     `<defs>`,
-    `  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="${w}" markerHeight="${h}" orient="auto">`,
-    `    <path d="M 0 0 L 10 5 L 0 10 Z" fill="${arrowFill}"/>`,
-    `  </marker>`,
+    ...arrowDefs,
+    ...extraDefs.map((d) => `  ${d}`),
     `</defs>`,
   ].join("\n");
 }
@@ -514,21 +543,319 @@ function projectOntoDiamond(p: Point, b: BoxBounds): Point {
   return { x: p.x, y: cy + (b.height / 2) * (1 - verticalNorm) };
 }
 
+/**
+ * Half-length (in pixels) of the gradient "lump" rendered on a trace
+ * at each detected bend-ambiguity. The lump fades in over
+ * BEND_LUMP_HALF px, peaks at the bend, and fades out over another
+ * BEND_LUMP_HALF px. Subtle — just enough to disambiguate which trace
+ * owns the corner where two chamfers interlock.
+ */
+const BEND_LUMP_HALF = 6;
+
+/**
+ * Find every chamfer (bend) in a polyline. A chamfer is a diagonal
+ * segment (or two collinear diagonals) between two axis-aligned
+ * segments. Returns one record per chamfer carrying:
+ *
+ *   - centre: midpoint of the diagonal — used for proximity detection
+ *   - incomingStart / chamferStart / chamferEnd / outgoingEnd:
+ *       points along the trace defining the bend region. The lump
+ *       sub-path follows the trace from incomingStart through the
+ *       chamfer to outgoingEnd, so it overlays the bend exactly.
+ *   - incomingHoriz / outgoingHoriz: orientation of surrounding axials
+ *       (for gradient orientation pick later).
+ */
+interface BendInfo {
+  centre: Point;
+  /**
+   * Sub-polyline tracing the lump's path — incomingStart, the
+   * chamfer's internal points, and outgoingEnd. polylineD on this
+   * produces the same Q/C curve the main trace renders, but bounded
+   * to the bend region so the gradient stroke only covers the bend.
+   */
+  lumpPoints: Point[];
+  incomingHoriz: boolean;
+  outgoingHoriz: boolean;
+}
+
+function findBendCenters(
+  points: Point[],
+  lumpHalf: number = BEND_LUMP_HALF,
+): BendInfo[] {
+  const out: BendInfo[] = [];
+  let i = 1;
+  while (i < points.length) {
+    const prev = points[i - 1]!;
+    const cur = points[i]!;
+    const dx = cur.x - prev.x;
+    const dy = cur.y - prev.y;
+    if (dx !== 0 && dy !== 0) {
+      const endIdx = findChamferEnd(points, i);
+      if (endIdx >= i) {
+        const chamferStart = prev;
+        const chamferEnd = points[endIdx]!;
+        const centre = {
+          x: (chamferStart.x + chamferEnd.x) / 2,
+          y: (chamferStart.y + chamferEnd.y) / 2,
+        };
+        const incomingPrev = i >= 2 ? points[i - 2]! : chamferStart;
+        const outgoingNext = endIdx + 1 < points.length ? points[endIdx + 1]! : chamferEnd;
+        const incomingHoriz =
+          chamferStart.y === incomingPrev.y && chamferStart.x !== incomingPrev.x;
+        const outgoingHoriz =
+          chamferEnd.y === outgoingNext.y && chamferEnd.x !== outgoingNext.x;
+        // For the lump sub-path, walk LUMP_HALF px back along the
+        // incoming axial from chamferStart and LUMP_HALF px forward
+        // along the outgoing axial from chamferEnd — clamped to the
+        // surrounding segment room.
+        const incomingRoom = incomingHoriz
+          ? Math.abs(chamferStart.x - incomingPrev.x)
+          : Math.abs(chamferStart.y - incomingPrev.y);
+        const outgoingRoom = outgoingHoriz
+          ? Math.abs(outgoingNext.x - chamferEnd.x)
+          : Math.abs(outgoingNext.y - chamferEnd.y);
+        const incomingLumpRoom = Math.min(lumpHalf, incomingRoom);
+        const outgoingLumpRoom = Math.min(lumpHalf, outgoingRoom);
+        const incomingStart: Point = incomingHoriz
+          ? {
+              x: chamferStart.x - Math.sign(chamferStart.x - incomingPrev.x) * incomingLumpRoom,
+              y: chamferStart.y,
+            }
+          : {
+              x: chamferStart.x,
+              y: chamferStart.y - Math.sign(chamferStart.y - incomingPrev.y) * incomingLumpRoom,
+            };
+        const outgoingEnd: Point = outgoingHoriz
+          ? {
+              x: chamferEnd.x + Math.sign(outgoingNext.x - chamferEnd.x) * outgoingLumpRoom,
+              y: chamferEnd.y,
+            }
+          : {
+              x: chamferEnd.x,
+              y: chamferEnd.y + Math.sign(outgoingNext.y - chamferEnd.y) * outgoingLumpRoom,
+            };
+        // lumpPoints follows the same axis layout polylineD expects:
+        // an axial → chamfer-internal pts → axial sub-path. Including
+        // the chamfer-internal pts (between chamferStart and
+        // chamferEnd) is critical — polylineD walks them to detect
+        // 4-point chamfers and the parallel-offset C-curve case.
+        const lumpPoints: Point[] = [incomingStart, chamferStart];
+        for (let k = i; k < endIdx; k++) lumpPoints.push(points[k]!);
+        lumpPoints.push(chamferEnd, outgoingEnd);
+        out.push({
+          centre,
+          lumpPoints,
+          incomingHoriz,
+          outgoingHoriz,
+        });
+        i = endIdx + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return out;
+}
+
+/**
+ * Find adjacent-bend ambiguities: pairs of chamfers from different
+ * polylines whose centres are within BEND_AMBIGUITY_THRESHOLD pixels
+ * of each other. For each such pair, emit a fading dark lump on the
+ * UPPER trace (= the polyline with the higher index) along its
+ * outgoing axis at the bend, so the eye can pick out the upper trace
+ * through the ambiguous region.
+ *
+ * The lump uses an SVG linear gradient: transparent → darker → transparent
+ * along the trace direction. The gradient is defined inline in `defs`
+ * and shared across all H-oriented or V-oriented lumps.
+ */
+/**
+ * Where the trace's stroke transitions to a darker tone for a bend
+ * intersection. `bendIdx` identifies which bend on the polyline; the
+ * intersection point is at that bend's chamfer-end (or chamfer-start,
+ * depending on the geometry).
+ */
+export interface BendIntersection {
+  bendIdx: number;
+  point: Point;
+  /**
+   * "primary" = LOWER trace at the intersection (rendered first, then
+   * the upper trace is drawn on top). Gets a deeper peak so it remains
+   * legible under the overlying chamfer.
+   * "secondary" = UPPER trace at the intersection. Gets a lighter peak
+   * so the eye can still see that *something* is happening at the
+   * corner without it competing with the lower trace.
+   */
+  tier: "primary" | "secondary";
+}
+
+
+/**
+ * BEND-INTERSECTION detector. Two bends visually intersect when they
+ * share a chamfer point — i.e. one bend's chamfer endpoint matches
+ * another bend's chamfer endpoint exactly.
+ *
+ * Canonical case (ex 24 hwy exit):
+ *   hwy->sink_b chamfer ends at (236, 28)
+ *   hwy->sink_c chamfer starts at (236, 28)
+ *   → shared point → bend intersection
+ *
+ * Returns a map: polyIdx → list of intersection points found on that
+ * polyline. The renderer uses this to split the trace into segments
+ * around each intersection, with a gradient stroke on the segment
+ * immediately after the intersection (default → darker → default).
+ *
+ * Also pushes the required gradient defs into `defs`.
+ */
+function detectBendIntersections(
+  polys: Polyline[],
+  _model: Model,
+  _theme: Theme,
+  _defs: string[],
+): Map<number, BendIntersection[]> {
+  const result = new Map<number, BendIntersection[]>();
+  const bendsOf = polys.map((p) => findBendCenters(p.points));
+  const chamferPointsOf: { x: number; y: number; bendIdx: number }[][] =
+    polys.map(() => []);
+  for (let pi = 0; pi < polys.length; pi++) {
+    bendsOf[pi]!.forEach((b, bIdx) => {
+      for (let k2 = 1; k2 < b.lumpPoints.length - 1; k2++) {
+        const p = b.lumpPoints[k2]!;
+        chamferPointsOf[pi]!.push({ x: p.x, y: p.y, bendIdx: bIdx });
+      }
+    });
+  }
+
+  // Axial segments per polyline: every straight piece between two
+  // consecutive polyline vertices that share an x or y.  Used to find
+  // collinear overlaps between distinct polylines — the structural
+  // condition for a "you can't tell which trace is which" tuck.
+  type AxialSeg = {
+    horiz: boolean;
+    fixed: number;
+    lo: number;
+    hi: number;
+  };
+  const axialsOf: AxialSeg[][] = polys.map(() => []);
+  for (let pi = 0; pi < polys.length; pi++) {
+    const pts = polys[pi]!.points;
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1]!;
+      const b = pts[k]!;
+      if (a.x === b.x && a.y !== b.y) {
+        axialsOf[pi]!.push({
+          horiz: false,
+          fixed: a.x,
+          lo: Math.min(a.y, b.y),
+          hi: Math.max(a.y, b.y),
+        });
+      } else if (a.y === b.y && a.x !== b.x) {
+        axialsOf[pi]!.push({
+          horiz: true,
+          fixed: a.y,
+          lo: Math.min(a.x, b.x),
+          hi: Math.max(a.x, b.x),
+        });
+      }
+    }
+  }
+
+  const addIntersection = (
+    polyIdx: number,
+    bendIdx: number,
+    p: Point,
+    tier: "primary" | "secondary",
+  ) => {
+    let list = result.get(polyIdx);
+    if (!list) {
+      list = [];
+      result.set(polyIdx, list);
+    }
+    if (list.some((it) => it.bendIdx === bendIdx && it.point.x === p.x && it.point.y === p.y)) {
+      return;
+    }
+    list.push({ bendIdx, point: { x: p.x, y: p.y }, tier });
+  };
+
+  // For an axial overlap to read as a "tuck", we need to mark the
+  // bend on each polyline whose endpoint lies at the overlap. Helper:
+  // find the bend on `polyIdx` whose chamferStart or chamferEnd sits
+  // at the overlap boundary on the shared axis.
+  const findBendAtOverlap = (
+    polyIdx: number,
+    horiz: boolean,
+    fixed: number,
+    lo: number,
+    hi: number,
+  ): { bendIdx: number; point: Point } | undefined => {
+    const bends = bendsOf[polyIdx]!;
+    for (let bIdx = 0; bIdx < bends.length; bIdx++) {
+      const b = bends[bIdx]!;
+      const cs = b.lumpPoints[1]!;
+      const ce = b.lumpPoints[b.lumpPoints.length - 2]!;
+      for (const ep of [cs, ce]) {
+        if (horiz && ep.y === fixed && ep.x >= lo && ep.x <= hi) {
+          return { bendIdx: bIdx, point: { x: ep.x, y: ep.y } };
+        }
+        if (!horiz && ep.x === fixed && ep.y >= lo && ep.y <= hi) {
+          return { bendIdx: bIdx, point: { x: ep.x, y: ep.y } };
+        }
+      }
+    }
+    return undefined;
+  };
+
+  for (let i = 0; i < polys.length; i++) {
+    for (let j = i + 1; j < polys.length; j++) {
+      // 1) Exact chamfer-point equality (canonical hwy exit interlock).
+      if (chamferPointsOf[i]!.length > 0 && chamferPointsOf[j]!.length > 0) {
+        for (const pi of chamferPointsOf[i]!) {
+          for (const pj of chamferPointsOf[j]!) {
+            if (pi.x !== pj.x || pi.y !== pj.y) continue;
+            addIntersection(i, pi.bendIdx, { x: pi.x, y: pi.y }, "primary");
+            addIntersection(j, pj.bendIdx, { x: pj.x, y: pj.y }, "secondary");
+          }
+        }
+      }
+      // 2) Collinear axial-segment overlap. When two polylines draw
+      //    on the same gridline over a shared coordinate range, the
+      //    eye literally cannot tell which trace is which. Mark the
+      //    bend on each polyline whose endpoint sits at the overlap.
+      for (const si of axialsOf[i]!) {
+        for (const sj of axialsOf[j]!) {
+          if (si.horiz !== sj.horiz) continue;
+          if (si.fixed !== sj.fixed) continue;
+          const lo = Math.max(si.lo, sj.lo);
+          const hi = Math.min(si.hi, sj.hi);
+          if (hi <= lo) continue; // touching at a single point doesn't count
+          const bi = findBendAtOverlap(i, si.horiz, si.fixed, lo, hi);
+          const bj = findBendAtOverlap(j, sj.horiz, sj.fixed, lo, hi);
+          if (!bi || !bj) continue;
+          addIntersection(i, bi.bendIdx, bi.point, "primary");
+          addIntersection(j, bj.bendIdx, bj.point, "secondary");
+        }
+      }
+    }
+  }
+  return result;
+}
+
+/** Look up a bend by index for use by the renderer when splitting a trace. */
+export function bendInfoAt(poly: Polyline, bendIdx: number): BendInfo | undefined {
+  const bends = findBendCenters(poly.points);
+  return bends[bendIdx];
+}
+
 function renderEdge(
   edge: ModelEdge,
   poly: Polyline,
   theme: Theme,
   overrides: TagRule,
+  intersections: BendIntersection[],
 ): string {
   if (poly.points.length < 2) return "";
-  const d = polylineD(poly.points);
-  // Back-edges get the back-edge dash. The trace itself uses the muted
-  // token, which most themes set close to trace-default but offer a knob
-  // for desaturation in dark themes (where any dashed line reads as the
-  // strongest visual element if drawn at full saturation).
-  //
-  // Tag overrides win over the theme default for the relevant properties
-  // (DESIGN-PHASE5-THEMING.md §5.2): trace colour, trace width, dash, opacity.
+  // Tag overrides win over theme defaults (DESIGN-PHASE5 §5.2):
+  // trace colour, trace width, dash, opacity.
   const baseStroke = edge.isBackEdge
     ? theme.tokens["trace-muted"]
     : theme.tokens["trace-default"];
@@ -536,9 +863,6 @@ function renderEdge(
     ? resolveColour(theme, overrides.trace)
     : baseStroke;
   const strokeWidth = overrides["trace-width"] ?? theme.strokes.trace;
-  // dash override: an explicit `null` means solid (clears the back-edge
-  // dash too); an array replaces it; undefined means "use theme default
-  // for this edge kind".
   let dashAttr = "";
   if (overrides.dash !== undefined) {
     if (overrides.dash !== null) {
@@ -551,16 +875,189 @@ function renderEdge(
     ? ` opacity="${overrides.opacity}"`
     : "";
   // First half of a via-pair (source -> highway): no arrowhead, since
-  // the visible trace continues into the second half (highway -> target)
-  // which carries the arrow. Also: the whole theme may opt out of arrows
-  // (schematic-style — direction comes from topology not glyphs).
+  // the visible trace continues into the second half. Also: the theme
+  // may opt out of arrows entirely (schematic style).
   const arrowsOn = theme.strokes.arrow["head-shape"] !== "none";
   const arrow = arrowsOn && !edge.viaFirstHalf ? ' marker-end="url(#arrow)"' : "";
-  return [
+  const lineCommon = `fill="none" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"${dashAttr}`;
+
+  // Fast path: no bend intersections, emit one solid trace path.
+  if (intersections.length === 0) {
+    const d = polylineD(poly.points);
+    return [
+      `<g data-edge="${escapeAttr(edge.from)}->${escapeAttr(edge.to)}"${opacityAttr}>`,
+      `  <path d="${d}" stroke="${stroke}" ${lineCommon}${arrow}/>`,
+      `</g>`,
+    ].join("\n");
+  }
+
+  // Bend-intersection path: paint the gradient on the CHAMFER ITSELF
+  // (plus ~BEND_LUMP_HALF px of each adjoining leg). The gradient is
+  // symmetric — default at both ends, peak (ink-primary) at the chamfer
+  // midpoint — so the corner reads as a curve highlight rather than a
+  // directional tail. The lump sub-path is built from bend.lumpPoints,
+  // which already includes the chamfer's internal points and pre-walks
+  // BEND_LUMP_HALF px back into each adjoining leg, so polylineD on
+  // lumpPoints reproduces the bend's exact Bezier geometry.
+  const parts: string[] = [
     `<g data-edge="${escapeAttr(edge.from)}->${escapeAttr(edge.to)}"${opacityAttr}>`,
-    `  <path d="${d}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="butt" stroke-linejoin="miter"${dashAttr}${arrow}/>`,
-    `</g>`,
-  ].join("\n");
+  ];
+  if (intersections.length === 1) {
+    const { bendIdx, point: ip, tier } = intersections[0]!;
+    // Secondary (upper) trace gets a longer lump so its lighter
+    // gradient has more room to read; primary stays tight so it
+    // doesn't pull the eye away from the corner itself.
+    const lumpHalf = tier === "secondary" ? BEND_LUMP_HALF * 2 : BEND_LUMP_HALF;
+    const bends = findBendCenters(poly.points, lumpHalf);
+    const bend = bends[bendIdx];
+    if (bend) {
+      const lumpStart = bend.lumpPoints[0]!;
+      const lumpEnd = bend.lumpPoints[bend.lumpPoints.length - 1]!;
+      const prePts = pointsUpToCut(poly.points, lumpStart);
+      const lumpD = polylineD(bend.lumpPoints);
+      const postPts = pointsFromCut(poly.points, lumpEnd);
+      const preD = prePts.length >= 2 ? polylineD(prePts) : "";
+      const postD = postPts.length >= 2 ? polylineD(postPts) : "";
+      // Peak position: project `ip` onto the line lumpStart→lumpEnd
+      // and use that fraction as the gradient stop. This lands the
+      // peak AT the actual intersection point — i.e. at the corner
+      // where the two traces overlap — rather than at the lump's
+      // geometric midpoint.
+      const peakFrac = projectFraction(lumpStart, lumpEnd, ip);
+      // Tier picks peak colour. Primary blends ink-secondary toward
+      // trace-default so the darker accent doesn't dominate the corner;
+      // secondary uses trace-muted (just a hair darker than default).
+      const defaultC = theme.tokens["trace-default"];
+      const peak = tier === "primary"
+        ? mixHex(theme.tokens["ink-secondary"], defaultC, 0.5)
+        : theme.tokens["trace-muted"];
+      const gradId = `bf-${escapeAttr(edge.from)}-${escapeAttr(edge.to)}-${fmt(bend.centre.x)}-${fmt(bend.centre.y)}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const peakStop = Math.round(peakFrac * 100);
+      parts.push(
+        `  <linearGradient id="${gradId}" gradientUnits="userSpaceOnUse" x1="${fmt(lumpStart.x)}" y1="${fmt(lumpStart.y)}" x2="${fmt(lumpEnd.x)}" y2="${fmt(lumpEnd.y)}">` +
+          `<stop offset="0%" stop-color="${defaultC}"/>` +
+          `<stop offset="${peakStop}%" stop-color="${peak}"/>` +
+          `<stop offset="100%" stop-color="${defaultC}"/>` +
+          `</linearGradient>`,
+      );
+      if (preD) {
+        parts.push(`  <path d="${preD}" stroke="${stroke}" ${lineCommon}/>`);
+      }
+      const lumpHasArrow = !postD;
+      parts.push(
+        `  <path d="${lumpD}" stroke="url(#${gradId})" ${lineCommon}${lumpHasArrow ? arrow : ""}/>`,
+      );
+      if (postD) {
+        parts.push(`  <path d="${postD}" stroke="${stroke}" ${lineCommon}${arrow}/>`);
+      }
+      parts.push(`</g>`);
+      return parts.join("\n");
+    }
+  }
+  // Fallback: solid stroke.
+  const d = polylineD(poly.points);
+  parts.push(
+    `  <path d="${d}" stroke="${stroke}" ${lineCommon}${arrow}/>`,
+  );
+  parts.push(`</g>`);
+  return parts.join("\n");
+}
+
+/**
+ * Return the prefix of `pts` up to and including `cut`, where `cut`
+ * may be a vertex OR lie on an axial segment between two consecutive
+ * vertices. In the latter case, the segment is split and `cut` becomes
+ * the final point of the prefix.
+ */
+function pointsUpToCut(pts: Point[], cut: Point): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    if (p.x === cut.x && p.y === cut.y) {
+      out.push(p);
+      return out;
+    }
+    out.push(p);
+    if (i + 1 < pts.length) {
+      const next = pts[i + 1]!;
+      if (pointOnAxialSegment(p, next, cut)) {
+        out.push(cut);
+        return out;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Return the suffix of `pts` starting at `cut`. Symmetric to
+ * pointsUpToCut: handles `cut` either at a vertex or mid-segment.
+ */
+function pointsFromCut(pts: Point[], cut: Point): Point[] {
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]!;
+    if (p.x === cut.x && p.y === cut.y) {
+      return pts.slice(i);
+    }
+    if (i + 1 < pts.length) {
+      const next = pts[i + 1]!;
+      if (pointOnAxialSegment(p, next, cut)) {
+        return [cut, ...pts.slice(i + 1)];
+      }
+    }
+  }
+  return [];
+}
+
+/**
+ * Linearly interpolate between two `#rrggbb` colours by `t` ∈ [0,1].
+ * t=0 returns `a`, t=1 returns `b`. Used to soften gradient peak
+ * stops by mixing a theme token with the trace's default colour.
+ */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ar = (pa >> 16) & 0xff;
+  const ag = (pa >> 8) & 0xff;
+  const ab = pa & 0xff;
+  const br = (pb >> 16) & 0xff;
+  const bg = (pb >> 8) & 0xff;
+  const bb = pb & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return `#${[r, g, bl].map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * Project `q` onto the line through `a` and `b`, returning its
+ * fractional position along the segment (0 = at a, 1 = at b). Clamps
+ * to [0, 1]. Used to place a gradient peak stop AT a specific point
+ * along a linearGradient's vector — the projection works correctly
+ * for both axial gradients (e.g. lumpStart and lumpEnd colinear) and
+ * diagonal ones (the L-shaped lump case).
+ */
+function projectFraction(a: Point, b: Point, q: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return 0;
+  const t = ((q.x - a.x) * dx + (q.y - a.y) * dy) / len2;
+  return Math.max(0, Math.min(1, t));
+}
+
+/**
+ * True iff `q` lies strictly between `a` and `b` on an axis-aligned
+ * segment (same x or same y).
+ */
+function pointOnAxialSegment(a: Point, b: Point, q: Point): boolean {
+  if (a.x === b.x && q.x === a.x) {
+    return (q.y > a.y && q.y < b.y) || (q.y > b.y && q.y < a.y);
+  }
+  if (a.y === b.y && q.y === a.y) {
+    return (q.x > a.x && q.x < b.x) || (q.x > b.x && q.x < a.x);
+  }
+  return false;
 }
 
 function renderPathHighlight(poly: Polyline, colour: string, width: number): string {
@@ -617,42 +1114,180 @@ function polylineD(points: Point[]): string {
     const dx = cur.x - prev.x;
     const dy = cur.y - prev.y;
     const isDiagonal = dx !== 0 && dy !== 0;
-    if (isDiagonal && i + 1 < points.length) {
-      const next = points[i + 1]!;
-      const dx2 = next.x - cur.x;
-      const dy2 = next.y - cur.y;
-      const nextIsDiagonal = dx2 !== 0 && dy2 !== 0;
-      // 4-point chamfer: two collinear diagonals followed by an axis-
-      // aligned segment. Curve from prev to next (= end of the second
-      // diagonal sub-segment).
-      if (
-        nextIsDiagonal &&
-        Math.sign(dx2) === Math.sign(dx) &&
-        Math.sign(dy2) === Math.sign(dy)
-      ) {
-        const corner = chamferCorner(points, i - 1, next);
-        d += ` Q ${fmt(corner.x)} ${fmt(corner.y)} ${fmt(next.x)} ${fmt(next.y)}`;
-        i += 2; // consumed cur AND next
+    if (isDiagonal) {
+      // Detect chamfer end-point: the first axis-aligned point after
+      // this diagonal. Handles both 3-point chamfers (single diagonal)
+      // and 4-point chamfers (two collinear diagonals).
+      const chamferEndIdx = findChamferEnd(points, i);
+      if (chamferEndIdx >= i) {
+        const chamferEnd = points[chamferEndIdx]!;
+        // Determine whether this is a true 90° corner (incoming and
+        // outgoing axials perpendicular) or a parallel-offset transition
+        // (incoming and outgoing axials parallel, with the chamfer
+        // bridging a small offset between them).
+        const before = points[i - 1]!;
+        const incomingPrev = i >= 2 ? points[i - 2]! : before;
+        const outgoingNext = chamferEndIdx + 1 < points.length
+          ? points[chamferEndIdx + 1]!
+          : chamferEnd;
+        const inHoriz = before.y === incomingPrev.y && before.x !== incomingPrev.x;
+        const outHoriz = outgoingNext.y === chamferEnd.y && outgoingNext.x !== chamferEnd.x;
+        const perpendicular = inHoriz !== outHoriz;
+
+        // Look ahead: is the segment after `chamferEnd` a short axial
+        // followed by another chamfer? That's an S-bend — render as
+        // one cubic Bezier across both chamfers.
+        const sBendInfo = detectSBend(points, i - 1, chamferEndIdx);
+        if (sBendInfo) {
+          d += ` C ${fmt(sBendInfo.cp1.x)} ${fmt(sBendInfo.cp1.y)} ${fmt(sBendInfo.cp2.x)} ${fmt(sBendInfo.cp2.y)} ${fmt(sBendInfo.end.x)} ${fmt(sBendInfo.end.y)}`;
+          i = sBendInfo.endIdx + 1;
+          continue;
+        }
+
+        if (perpendicular) {
+          // True 90° corner: Q via the right-angle corner.
+          const corner = chamferCorner(points, i - 1, chamferEnd);
+          d += ` Q ${fmt(corner.x)} ${fmt(corner.y)} ${fmt(chamferEnd.x)} ${fmt(chamferEnd.y)}`;
+        } else {
+          // Parallel-offset transition (no right-angle corner). Render
+          // as a smooth S using a cubic Bezier — control points sit on
+          // the axis just past each chamfer endpoint so the curve
+          // tangents match the incoming/outgoing axials. Looks like a
+          // smooth lane-change instead of a 90° elbow.
+          const midX = (before.x + chamferEnd.x) / 2;
+          const midY = (before.y + chamferEnd.y) / 2;
+          const cp1: Point = inHoriz
+            ? { x: midX, y: before.y }
+            : { x: before.x, y: midY };
+          const cp2: Point = outHoriz
+            ? { x: midX, y: chamferEnd.y }
+            : { x: chamferEnd.x, y: midY };
+          d += ` C ${fmt(cp1.x)} ${fmt(cp1.y)} ${fmt(cp2.x)} ${fmt(cp2.y)} ${fmt(chamferEnd.x)} ${fmt(chamferEnd.y)}`;
+        }
+        i = chamferEndIdx + 1;
         continue;
       }
-      // 3-point chamfer: single diagonal segment surrounded by axis-
-      // aligned segments. Curve from prev to cur. We need to confirm
-      // the next segment (cur → next) IS axis-aligned to qualify as a
-      // chamfer (rather than the start of an X-junction with two
-      // diagonals making an X).
-      if (!nextIsDiagonal) {
-        const corner = chamferCorner(points, i - 1, cur);
-        d += ` Q ${fmt(corner.x)} ${fmt(corner.y)} ${fmt(cur.x)} ${fmt(cur.y)}`;
-        i += 1; // consumed cur only
-        continue;
-      }
-      // Lone non-collinear diagonal: X-junction crossing. Fall through
-      // to plain L so the X visibly crosses.
+      // Lone diagonal not part of a chamfer (e.g. X-junction crossing):
+      // fall through to plain L.
     }
     d += ` L ${fmt(cur.x)} ${fmt(cur.y)}`;
     i++;
   }
   return d;
+}
+
+/**
+ * Walk forward from `i` (the end-index of a diagonal segment from
+ * points[i-1] to points[i]) through any further collinear-diagonal
+ * sub-segments. Returns the index of the chamfer's exit point: the
+ * last axis-aligned-bound point of the chamfer.
+ *
+ *   - Single-segment chamfer (3-point): returns `i`.
+ *   - Multi-segment chamfer (4-point and beyond): returns the last
+ *     collinear diagonal's end-index.
+ *
+ * Returns -1 if the chamfer isn't followed by an axis-aligned segment
+ * (X-junction crossings or end-of-polyline) — caller falls back to L.
+ */
+function findChamferEnd(points: Point[], i: number): number {
+  if (i >= points.length) return -1;
+  const prev = points[i - 1]!;
+  const cur = points[i]!;
+  const sx = Math.sign(cur.x - prev.x);
+  const sy = Math.sign(cur.y - prev.y);
+  let j = i;
+  // Extend through any further collinear diagonal sub-segments.
+  while (j + 1 < points.length) {
+    const a = points[j]!;
+    const b = points[j + 1]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const sameDiag = dx !== 0 && dy !== 0 &&
+      Math.sign(dx) === sx && Math.sign(dy) === sy;
+    if (!sameDiag) break;
+    j++;
+  }
+  // Now confirm what follows j is axial (or j is the polyline end and
+  // we treat the chamfer as terminating the polyline — but in that
+  // case we'd rather emit L). Require an axial successor for a true
+  // chamfer.
+  if (j + 1 >= points.length) return -1;
+  const a = points[j]!;
+  const b = points[j + 1]!;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const axial = (dx === 0) !== (dy === 0);
+  if (!axial) return -1;
+  return j;
+}
+
+/**
+ * Detect an "S-bend": two consecutive chamfers separated by a short
+ * axial segment, like [diag1, short-axial, diag2]. The eye reads this
+ * as one continuous transition; rendering each chamfer independently
+ * with a straight stub between them creates a visible kink.
+ *
+ *   chamferStartIdx: index of the diagonal-entry point (the axis-aligned
+ *     point where the FIRST chamfer started; = the point BEFORE
+ *     points[i] in polylineD).
+ *   firstChamferEndIdx: index of the axis-aligned point where the FIRST
+ *     chamfer ended (returned by findChamferEnd).
+ *
+ * Returns the cubic Bezier control points + the polyline end-index to
+ * skip past, or null if this isn't an S-bend pattern.
+ */
+function detectSBend(
+  points: Point[],
+  chamferStartIdx: number,
+  firstChamferEndIdx: number,
+): { cp1: Point; cp2: Point; end: Point; endIdx: number } | null {
+  // Need: [start (axial), ...diag1..., mid1 (axial), mid2 (axial), ...diag2..., end (axial)]
+  // where mid1→mid2 is a short axial segment.
+  const mid1Idx = firstChamferEndIdx;
+  const mid2Idx = firstChamferEndIdx + 1;
+  if (mid2Idx >= points.length) return null;
+  const mid1 = points[mid1Idx]!;
+  const mid2 = points[mid2Idx]!;
+  const midDx = mid2.x - mid1.x;
+  const midDy = mid2.y - mid1.y;
+  const midAxial = (midDx === 0) !== (midDy === 0);
+  if (!midAxial) return null;
+  // The middle segment must be short — we only want to merge tight
+  // S-bends. Long axial segments between bends are intentional and
+  // should be rendered as their own straight runs.
+  const midLen = Math.abs(midDx) + Math.abs(midDy);
+  if (midLen > 8) return null;
+  // After mid2, expect another chamfer (one or more collinear diagonals).
+  const secondChamferEndIdx = findChamferEnd(points, mid2Idx + 1);
+  if (secondChamferEndIdx <= mid2Idx) return null;
+  const end = points[secondChamferEndIdx]!;
+  // The two control points are the right-angle corners of each chamfer.
+  // Corner 1: intersection of axis-aligned incoming segment (ending at
+  // `start`) extended, and the perpendicular axis through mid1.
+  // Corner 2: perpendicular axis through mid2 + axis-aligned outgoing
+  // segment (starting at `end`) extended.
+  const cp1 = chamferCorner(points, chamferStartIdx, mid1);
+  const cp2 = chamferCornerOutgoing(points, secondChamferEndIdx, mid2);
+  return { cp1, cp2, end, endIdx: secondChamferEndIdx };
+}
+
+/**
+ * Mirror of chamferCorner but for the OUTGOING chamfer: `to` is the
+ * point inside the chamfer (mid2), and we look at the segment AFTER
+ * `fromIdx` (the end of the chamfer) to determine which axis the
+ * outgoing segment uses.
+ */
+function chamferCornerOutgoing(points: Point[], fromIdx: number, to: Point): Point {
+  const from = points[fromIdx]!;
+  if (fromIdx + 1 < points.length) {
+    const afterFrom = points[fromIdx + 1]!;
+    const outgoingHorizontal = afterFrom.y === from.y && afterFrom.x !== from.x;
+    if (outgoingHorizontal) return { x: to.x, y: from.y };
+    if (afterFrom.x === from.x && afterFrom.y !== from.y) {
+      return { x: from.x, y: to.y };
+    }
+  }
+  return { x: to.x, y: from.y };
 }
 
 /**
