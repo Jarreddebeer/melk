@@ -376,6 +376,37 @@ function assignTracksInCorridor(
   // which sibling occupies which already-allocated track.
   applySameSourceCoherence(tracks, model, placement, _reservation, corridorKeyStr);
 
+  // Cross-bundle stub-avoidance pass.
+  //
+  // After same-source coherence, two same-source-cell BUNDLES with
+  // overlapping pixel intervals can still sit on track-ordinal ranges
+  // that maximise their mutual stub crossings. The classic instance is
+  // example 29 in V1: backward bundle src_h3 -> hwy_h (entry NEAR-WEST,
+  // exit NEAR-EAST) sits on outer tracks {4,5,6}, while forward axial
+  // bundle hwy_v -> dst_v3 (top -> bottom) sits on inner {1,2,3}. The
+  // src_h3 entry stubs at y=424/432/440 cross the axial V-descents at
+  // x=40/48/56 — nine crossings.
+  //
+  // Swapping the two ranges (src_h3 to {1,2,3}, axial to {4,5,6}) puts
+  // src_h3's short entry stubs at small x where no axial trace exists,
+  // and its exit stubs at y=288/296/304 are above the axial y-range, so
+  // they don't gain new crossings. Net: -9.
+  //
+  // The pass detects exactly this pattern: two bundles whose pixel
+  // intervals overlap, where bundle A has all "side-aligned" endpoints
+  // (NEAR-WEST/NEAR-EAST for V, NEAR-NORTH/NEAR-SOUTH for H) and bundle
+  // B has all axial endpoints. If A's side preference (the side it
+  // enters from) is opposite to its current ordinal placement, swap
+  // their ordinal ranges.
+  applyCrossBundleStubAvoidance(
+    tracks,
+    model,
+    placement,
+    _reservation,
+    corridor,
+    corridorKeyStr,
+  );
+
   // For crossing detection, sort independently by entry long-axis.
   // The inversion check measures non-monotone endpoint orderings,
   // which is a topological property of the (entry, exit) pairs — it
@@ -620,6 +651,275 @@ function applySameSourceCoherence(
         assignedByOrdinal.set(chosen, existing);
       }
       for (const [t, ord] of newAssignments) t.track = ord;
+    }
+  }
+}
+
+/**
+ * Cross-bundle stub-avoidance pass.
+ *
+ * Operates AFTER `applySameSourceCoherence` has settled within-bundle
+ * track order. Looks for pairs of same-source-cell bundles in the same
+ * corridor where:
+ *
+ *   1. Their pixel intervals (union of member [entryPx, exitPx]) overlap.
+ *   2. Bundle A consists entirely of "side-aligned" traces — every
+ *      member has a non-axial endpoint on the same near side of the
+ *      corridor (NEAR-WEST for V, NEAR-NORTH for H).
+ *   3. Bundle B consists entirely of "fully axial" traces — both entry
+ *      and exit are corridor-corridor transitions.
+ *   4. The current ordinal layout has A on the FAR side of B (i.e., A's
+ *      median ordinal > B's median ordinal for NEAR-WEST/NEAR-NORTH
+ *      bundles, the side the bundle wants to be NEAR).
+ *
+ * Under those conditions, swapping A's and B's ordinal RANGES (preserving
+ * relative order within each bundle) eliminates A's entry-stub crossings
+ * with B's perpendicular descent. Symmetric for NEAR-EAST/NEAR-SOUTH
+ * (those want LARGE ordinals; swap if currently on the near side of B).
+ *
+ * The pass is a pure permutation of already-assigned track ordinals — no
+ * new tracks, no change to demand. Interval safety: since the two bundles'
+ * intervals OVERLAP, neither can share a track ordinal with the other,
+ * so after the swap each bundle still occupies a disjoint set of ordinals
+ * from the other.
+ *
+ * Limitations / scope at v1:
+ *
+ *   - Only handles pairs where A is uniformly side-aligned (all entries
+ *     on the same side AND all exits on the same side or all axial) and
+ *     B is uniformly fully-axial. Mixed bundles are skipped.
+ *   - Only one swap per corridor per pass — multi-bundle swaps would
+ *     need iteration to converge. Most diagrams are dominated by one
+ *     such pair (the ex 29 case).
+ *   - Doesn't track non-bundle tracks (e.g., the src_v3 axial forward
+ *     bundle in ex 29 shares ordinals 4-6 with src_h3 via interval reuse);
+ *     after the swap the multiset of ordinals each bundle occupies is the
+ *     same as before but redistributed, so the non-bundle co-tenants
+ *     don't move.
+ */
+function applyCrossBundleStubAvoidance(
+  tracks: TrackAssignment[],
+  model: Model,
+  placement: Placement,
+  reservation: Reservation,
+  corridor: Corridor,
+  corridorKeyStr: string,
+): void {
+  if (corridor.kind === "D") return; // not used at Step 6
+  const routeByEdge = new Map<number, Route>();
+  for (const r of reservation.routes) routeByEdge.set(r.edgeIndex, r);
+
+  // Classify each track's entry/exit side into the corridor.
+  type SidePref = "near-near" | "near-far" | "axial";
+  // For a V corridor: "near" = WEST (small x). "far" = EAST (large x).
+  // For an H corridor: "near" = NORTH (small y). "far" = SOUTH (large y).
+  const classify = (t: TrackAssignment): {
+    entryCls: SidePref;
+    exitCls: SidePref;
+  } => {
+    const edge = model.edges[t.edgeIndex]!;
+    const route = routeByEdge.get(t.edgeIndex)!;
+    const idxInSeq = route.corridorSequence.findIndex(
+      (c) => corridorKey(c) === corridorKeyStr,
+    );
+    const isFirst = idxInSeq === 0;
+    const isLast = idxInSeq === route.corridorSequence.length - 1;
+    const srcCell = placement.cells.get(edge.from)!;
+    const tgtCell = placement.cells.get(edge.to)!;
+    let entryCls: SidePref;
+    let exitCls: SidePref;
+    if (!isFirst) {
+      entryCls = "axial";
+    } else if (corridor.kind === "V") {
+      // Source's box is on a column adjacent to V(corridor.index).
+      // V(c) sits between col c-1 (west) and col c (east).
+      if (route.sourceSide === "E" && srcCell.col === corridor.index - 1) {
+        entryCls = "near-near"; // box at col c-1, east face -> west boundary of V
+      } else if (route.sourceSide === "W" && srcCell.col === corridor.index) {
+        entryCls = "near-far"; // box at col c, west face -> east boundary of V
+      } else {
+        entryCls = "axial"; // N/S face on a box that spans V — unusual
+      }
+    } else {
+      // H corridor; H(r) sits between row r-1 (north) and row r (south).
+      if (route.sourceSide === "S" && srcCell.row === corridor.index - 1) {
+        entryCls = "near-near"; // box north of H, south face -> north boundary
+      } else if (route.sourceSide === "N" && srcCell.row === corridor.index) {
+        entryCls = "near-far"; // box south of H, north face -> south boundary
+      } else {
+        entryCls = "axial";
+      }
+    }
+    if (!isLast) {
+      exitCls = "axial";
+    } else if (corridor.kind === "V") {
+      if (route.targetSide === "E" && tgtCell.col === corridor.index - 1) {
+        exitCls = "near-near";
+      } else if (route.targetSide === "W" && tgtCell.col === corridor.index) {
+        exitCls = "near-far";
+      } else {
+        exitCls = "axial";
+      }
+    } else {
+      if (route.targetSide === "S" && tgtCell.row === corridor.index - 1) {
+        exitCls = "near-near";
+      } else if (route.targetSide === "N" && tgtCell.row === corridor.index) {
+        exitCls = "near-far";
+      } else {
+        exitCls = "axial";
+      }
+    }
+    return { entryCls, exitCls };
+  };
+
+  // Group tracks by source NODE id (same key as applySameSourceCoherence).
+  const bundles = new Map<string, TrackAssignment[]>();
+  for (const t of tracks) {
+    const edge = model.edges[t.edgeIndex]!;
+    if (!bundles.has(edge.from)) bundles.set(edge.from, []);
+    bundles.get(edge.from)!.push(t);
+  }
+
+  // Per bundle, compute:
+  //   - aggregated entry/exit class (uniform across members, else "mixed")
+  //   - ordinal set
+  //   - pixel interval (lo, hi)
+  type BundleInfo = {
+    nodeId: string;
+    tracks: TrackAssignment[];
+    entryCls: SidePref | "mixed";
+    exitCls: SidePref | "mixed";
+    ordinals: number[];
+    lo: number;
+    hi: number;
+  };
+  const bundleInfos: BundleInfo[] = [];
+  for (const [nodeId, ts] of bundles) {
+    if (ts.length < 1) continue;
+    const classes = ts.map(classify);
+    const allEntrySame = classes.every((c) => c.entryCls === classes[0]!.entryCls);
+    const allExitSame = classes.every((c) => c.exitCls === classes[0]!.exitCls);
+    bundleInfos.push({
+      nodeId,
+      tracks: ts,
+      entryCls: allEntrySame ? classes[0]!.entryCls : "mixed",
+      exitCls: allExitSame ? classes[0]!.exitCls : "mixed",
+      ordinals: ts.map((t) => t.track).sort((a, b) => a - b),
+      lo: Math.min(...ts.map((t) => Math.min(t.entryPx, t.exitPx))),
+      hi: Math.max(...ts.map((t) => Math.max(t.entryPx, t.exitPx))),
+    });
+  }
+
+  // A bundle is "side-aligned" if its entry is near-near OR near-far,
+  // exit is the same OR axial. Its `side` is "near" or "far" accordingly.
+  // A bundle is "fully axial" if both entry and exit are axial.
+  type SideClass = "near" | "far" | null;
+  const classifyBundle = (b: BundleInfo): SideClass => {
+    const sides = [b.entryCls, b.exitCls].filter((c) => c !== "axial");
+    if (sides.length === 0) return null; // fully axial
+    if (sides.some((c) => c === "mixed")) return null;
+    const nearCount = sides.filter((c) => c === "near-near").length;
+    const farCount = sides.filter((c) => c === "near-far").length;
+    if (nearCount > 0 && farCount === 0) return "near";
+    if (farCount > 0 && nearCount === 0) return "far";
+    // Mixed near + far: e.g. src_h3 (entry near-near, exit near-far in V1).
+    // Treat as side-aligned to whichever endpoint sits at the y the bundle
+    // would conflict on. For the ex 29 case, src_h3 has entry y in
+    // [424,440] which overlaps with the axial bundle [320,448]; exit y in
+    // [288,304] does NOT overlap. So entry side dominates. Heuristic: pick
+    // the endpoint whose pixel position falls INSIDE the bundle's own
+    // [lo,hi] range and is INSIDE the conflicting bundle's interval as
+    // well — but the conflicting bundle isn't known at classify time. So
+    // we approximate by picking the side that contributes the wider
+    // overlap with [lo, hi].
+    //
+    // Simpler heuristic: if entry side and exit side disagree AND the
+    // bundle's exitPx range sits OUTSIDE the entry side's bend zone (i.e.,
+    // the exit doesn't actually cross anything at large ordinals because
+    // there's nothing there at that y), defer to entry.
+    //
+    // Most robust: try both and pick the swap that reduces total stub
+    // crossings. That's expensive though; for v1 we just defer to entry.
+    return b.entryCls === "near-near" ? "near" : "far";
+  };
+  const isFullyAxial = (b: BundleInfo): boolean =>
+    b.entryCls === "axial" && b.exitCls === "axial";
+
+  // Build the "side-aligned" and "fully-axial" lists.
+  const sideAligned = bundleInfos
+    .map((b) => ({ b, side: classifyBundle(b) }))
+    .filter((x): x is { b: BundleInfo; side: "near" | "far" } => x.side !== null);
+  const axialOnly = bundleInfos.filter(isFullyAxial);
+  if (sideAligned.length === 0 || axialOnly.length === 0) return;
+
+  // For each side-aligned bundle, check if any axial bundle has overlapping
+  // pixel interval AND is on the wrong side of the side-aligned bundle's
+  // preference. If yes, swap their ordinal ranges.
+  //
+  // Apply at most one swap per side-aligned bundle (the dominant pair),
+  // and never swap the same axial bundle twice.
+  const swappedAxials = new Set<string>();
+  for (const { b: aBundle, side } of sideAligned) {
+    if (aBundle.ordinals.length === 0) continue;
+    const aMedian = aBundle.ordinals[Math.floor(aBundle.ordinals.length / 2)]!;
+    for (const xBundle of axialOnly) {
+      if (swappedAxials.has(xBundle.nodeId)) continue;
+      if (xBundle.ordinals.length === 0) continue;
+      // Pixel-interval overlap (strict-open).
+      if (aBundle.hi <= xBundle.lo || aBundle.lo >= xBundle.hi) continue;
+      const xMedian = xBundle.ordinals[Math.floor(xBundle.ordinals.length / 2)]!;
+      // "Near" side-aligned wants SMALL ordinals; "far" wants LARGE.
+      const wrongSide = side === "near"
+        ? aMedian > xMedian
+        : aMedian < xMedian;
+      if (!wrongSide) continue;
+      // Swap the two ordinal ranges. Preserve relative order within
+      // each bundle (so e.g. ordinal 4 in aBundle -> ordinal 1 in
+      // xBundle's position, etc.).
+      //
+      // Get the ordinals each bundle occupies, sorted ascending. Note
+      // that interval-reuse may have a bundle's members sharing ordinals
+      // with other bundles' members; we only redistribute the ordinals
+      // BETWEEN this pair. Co-tenants stay on their original ordinals.
+      const aOrdinals = aBundle.tracks
+        .map((t) => t.track)
+        .sort((p, q) => p - q);
+      const xOrdinals = xBundle.tracks
+        .map((t) => t.track)
+        .sort((p, q) => p - q);
+      // Take the multiset UNION of ordinals; the side-aligned bundle
+      // should claim the side's end of the combined multiset, the axial
+      // gets the other end.
+      const combined = [...aOrdinals, ...xOrdinals].sort((p, q) => p - q);
+      const aCount = aOrdinals.length;
+      const xCount = xOrdinals.length;
+      const newAOrdinals = side === "near"
+        ? combined.slice(0, aCount)
+        : combined.slice(combined.length - aCount);
+      const newXOrdinals = side === "near"
+        ? combined.slice(combined.length - xCount)
+        : combined.slice(0, xCount);
+      // Sort each bundle's members by their CURRENT ordinal to assign
+      // new ordinals in the same relative order. For the side-aligned
+      // bundle: ascending CURRENT -> ascending NEW (so the trace that
+      // was innermost stays innermost relative to the bundle).
+      const aSorted = [...aBundle.tracks].sort((p, q) => p.track - q.track);
+      const xSorted = [...xBundle.tracks].sort((p, q) => p.track - q.track);
+      for (let i = 0; i < aSorted.length; i++) {
+        aSorted[i]!.track = newAOrdinals[i]!;
+      }
+      for (let i = 0; i < xSorted.length; i++) {
+        xSorted[i]!.track = newXOrdinals[i]!;
+      }
+      // Update aBundle's ordinals so further iterations see the new state.
+      aBundle.ordinals = aBundle.tracks
+        .map((t) => t.track)
+        .sort((p, q) => p - q);
+      xBundle.ordinals = xBundle.tracks
+        .map((t) => t.track)
+        .sort((p, q) => p - q);
+      swappedAxials.add(xBundle.nodeId);
+      break; // one swap per side-aligned bundle
     }
   }
 }
