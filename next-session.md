@@ -1,29 +1,30 @@
 # melk — next session handoff
 
-## ⚠️ READ THIS FIRST — current in-progress work
+## ⚠️ READ THIS FIRST — bend-intersection value-variation feature (LANDED, committed `4f93f9b`)
 
-The **bend-intersection value-variation** feature has been a long iterative struggle this session. State as of the last message:
+**What it does:** Paints a subtle gradient on chamfer lumps where two traces visually overlap, so the eye can tell them apart at the corner. The gradient is drawn ON the trace itself (no overlay paths) — the chamfer + ~6px of each adjoining leg becomes a `<linearGradient gradientUnits="userSpaceOnUse">` stroke, peak biased toward the intersection point.
 
-**What it does:** When two trace bends visually intersect (i.e. their chamfer regions share an exact `(x, y)` point — example: ex 24 `hwy->sink_b` chamfer ends at `(236, 28)` and `hwy->sink_c` chamfer starts at `(236, 28)`), the lower trace's stroke gets split into three sub-paths. The middle sub-path is a 24px axial slice starting AT the intersection, with an inline `<linearGradient gradientUnits="userSpaceOnUse">` stroke that fades from `ink-primary` (dark, at the intersection) to `trace-default` (default, 24px past). The trace itself carries the variation — no overlay paths.
+**Two detection rules** (`detectBendIntersections` in [src/render/svg.ts](src/render/svg.ts)):
 
-**Detection rule (LOCKED — do not change without explicit user request):** Two bends intersect when their chamfer points (`lumpPoints[1..length-2]` of each bend, computed by `findBendCenters`) share an exact `(x, y)` value. Fan-outs don't intersect (each fan bend is at a different point). Pure '+' axial crossings have no chamfers so they don't qualify. Parallel stairsteps in adjacent rows don't share points so they're excluded too.
+1. **Exact chamfer-point equality.** Two bends share a literal `(x, y)` point on their chamfer paths. Canonical case: ex 24 `hwy->sink_b` chamferEnd at `(236, 28)` = `hwy->sink_c` chamferStart at `(236, 28)`.
 
-**User's view of where variation should appear:**
-- ✅ Highway-exit bends in ex 24 (`hwy->sink_b` and `hwy->sink_c` interlocking at `(236, 28)`) → variation here is CORRECT
-- ❌ ext_2 LEFT-side parallel-offset bends → variation here was WRONG (user explicitly excluded these). Detection now skips them.
+2. **Collinear axial-segment overlap.** Two polylines literally draw on the same pixels along a shared gridline (`hi > lo` after intersecting their coordinate ranges). Canonical case: ex 18 `hwy->dst_z` and `hwy->dst_y` both occupy column x=92 over y∈[140, 148]. **This rule is what the user spent the longest correcting me on — see [feedback-axial-overlap-rule](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-axial-overlap-rule.md). Parallel-offset chamfers without literal segment overlap (ex 24 ext_2) MUST stay clean.**
 
-**Files involved:**
-- [src/render/svg.ts](src/render/svg.ts) — `detectBendIntersections()` (line ~696), `renderEdge()` (line ~760 with intersection-splitting branch), `findBendCenters()`, `pointsUpTo`/`pointsFrom`/`directionFromIntersection` helpers
-- [test/bend-intersection.test.ts](test/bend-intersection.test.ts) — 7 tests covering the ex 24 fixture + fan-out negative cases. **All passing.** The CRITICAL test locks `hwy->sink_b` and `hwy->sink_c` having variation at the intersection. The negative tests confirm fan-outs DON'T trigger.
+**Visual design:**
+- **Primary** (lower trace): peak colour is 50/50 mix of `ink-secondary` + `trace-default` (softer than full ink-secondary). Lump half-length = 6 px.
+- **Secondary** (upper trace): peak is `trace-muted`, lump half-length = 12 px (longer arc so the lighter accent has room to read).
+- Peak stop position: projected from the intersection point onto the lump's gradient vector, so the darkening lands AT the overlap, not at the lump's geometric midpoint.
 
-**Final user feedback before context clear:** "yeah so now i see a gradient, but i don't know what to make of it". The user CAN see the gradient now. Whether the visual works for them aesthetically is still open — they didn't say it was wrong, just unclear. **Do not make further changes to this feature without explicit user direction.**
+**Files:**
+- [src/render/svg.ts](src/render/svg.ts) — `detectBendIntersections()`, `BendInfo`, `findBendCenters(points, lumpHalf)`, `renderEdge()` (gradient branch), `mixHex()`, `projectFraction()`, `pointsUpToCut()`, `pointsFromCut()`.
+- [test/bend-intersection.test.ts](test/bend-intersection.test.ts) — 8 tests. Locks: ex 24 sink_b/sink_c interlock (rule 1), ex 18 dst_z/dst_y axial overlap (rule 2), and the negative cases (ext_2, probe_1, fan-outs, buses, straight pipelines).
 
-**Hard-won lessons (see [feedback-intersection-means-crossing](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-intersection-means-crossing.md)):**
-- "Intersection" means literal screen-space crossing, NOT bbox proximity, NOT stairstep adjacency
-- Never assume what the user means — confirm with concrete coords from the actual SVG output before implementing
-- Write a unit test against the canonical ex 24 fixture FIRST, then make it pass
+**Tests:** **297 passing + 3 skipped** (was 216 + 3 at Phase 4 close). +59 theme tests, +14 text-fit tests, +8 bend-intersection tests, +the rest from misc fixtures.
 
-**Tests:** **296 passing + 3 skipped** (was 216 + 3 at Phase 4 close). +43 theme tests, +14 text-fit tests, +7 bend-intersection tests, +12 misc. The bend-intersection tests are in a dedicated file so they run on every change.
+**Hard-won lessons (load both memories on the next session):**
+- [feedback-axial-overlap-rule](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-axial-overlap-rule.md) — "overlap" means literal stroke-on-stroke; not chamfer-point proximity, not shared Bezier control points, not parallel-offset stairsteps.
+- [feedback-intersection-means-crossing](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-intersection-means-crossing.md) — line-segment intersection math, never bbox heuristics.
+- When stuck: write a script that dumps polyline points + axial segments, find the actual overlap coords from the data, THEN reason about rules.
 
 ---
 
@@ -45,9 +46,16 @@ Visual refresh across the whole renderer:
 
 ## TL;DR (carried from previous session)
 
-**Phase 4 + 4.1–4.6 are all landed and signed off.** **216 tests pass + 3 skipped at Phase 4 close, 296 now (Phase 5 + bend-intersection variation added).** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), **Z-depth** (underground highways), and now a **pixel-aware track packer** with multi-layered coherence passes.
+**Phase 4 + 4.1–4.6 are all landed and signed off.** **216 tests pass + 3 skipped at Phase 4 close, 297 now (Phase 5 + bend-intersection variation added).** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), **Z-depth** (underground highways), and now a **pixel-aware track packer** with multi-layered coherence passes.
 
-**Git repository initialised** (2026-06-03). Initial commit `7fb9bb2`: src/, test/, scripts/, examples/*.melk sources, design docs. `.gitignore` excludes `node_modules/`, `dist/`, `examples/*.svg` (regenerate via `npx tsx src/cli.ts render`), `.claude/`, `tmp/`. No remote yet.
+**Git history:**
+- `7fb9bb2` initial commit (Phase 4 + 4.1–4.6)
+- `69581de` next-session.md updates
+- `058aa1a` cross-bundle stub-avoidance pass
+- `57e4d1e` Phase 5 theming + elegance pass
+- `4f93f9b` bend-intersection value-variation feature (this session)
+
+`.gitignore` excludes `node_modules/`, `dist/`, `examples/*.svg` (regenerate via `npx tsx src/cli.ts render`), `.claude/`, `tmp/`. No remote yet.
 
 Brace-attr routing knobs and node attributes:
 - `pivot: source | target` on edges (§11.7) — landed.
