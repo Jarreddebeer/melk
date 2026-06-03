@@ -3,12 +3,18 @@ layout: lr
 # Horizontal spine with two side-branches off the middle nodes.
 # `branch` does the 90° direction change; the named member sits one
 # cell perpendicular to its spine.
+#
+# This example also demonstrates theme tags (DESIGN-PHASE5-THEMING.md
+# §3): `enrich` is tagged `future` (not yet built — dashed warn-coloured
+# border in the default theme); `alert` is tagged `critical` (loud
+# error-coloured border). Swap the active theme and the tag visuals
+# follow — the `status-*` tokens are defined in every theme.
 
 transform { shape: rect,    size: 2x1, label: "ETL" }
 validate  { shape: diamond }
 publish   { shape: rect }
-enrich    { shape: roundrect }
-alert     { shape: roundrect, label: "alert!" }
+enrich    { shape: roundrect, tags: [future] }
+alert     { shape: roundrect, label: "alert!", tags: [critical] }
 
 pipeline main: ingest -> transform -> validate -> publish
 

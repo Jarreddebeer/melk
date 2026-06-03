@@ -58,8 +58,8 @@ export interface ViaRef {
 
 /**
  * Property values: identifiers, strings, numbers, a cell size, an
- * `avoid:` list, or a `via:` list. The previous "size-object" variant
- * is removed; size is expressed via `size: WxH` only.
+ * `avoid:` list, a `via:` list, or a `tags:` list. The previous
+ * "size-object" variant is removed; size is expressed via `size: WxH` only.
  */
 export type PropertyValue =
   | { kind: "ident"; value: string; span: SourceSpan }
@@ -67,7 +67,8 @@ export type PropertyValue =
   | { kind: "number"; value: number; span: SourceSpan }
   | { kind: "cells"; width: number; height: number; span: SourceSpan }
   | { kind: "avoid-list"; items: AvoidRef[]; span: SourceSpan }
-  | { kind: "via-list"; items: ViaRef[]; span: SourceSpan };
+  | { kind: "via-list"; items: ViaRef[]; span: SourceSpan }
+  | { kind: "tag-list"; items: { name: string; span: SourceSpan }[]; span: SourceSpan };
 
 export interface Property {
   key: string;
@@ -148,6 +149,25 @@ export interface LayoutDecl {
 export interface CrossingsDirective {
   kind: "crossings";
   budget: number;
+  span: SourceSpan;
+}
+
+/**
+ * Top-level theme directive (DESIGN-PHASE5-THEMING.md §2.1). Names the
+ * theme used to render this diagram. The value is either a built-in
+ * theme name (resolved from the catalogue) or a path to a JSON theme
+ * file (resolved relative to the .melk file's directory at render time).
+ *
+ *     theme: schematic-dark
+ *     theme: "./themes/acme.json"
+ *
+ * Defaults to "document-light" when absent. A CLI `--theme=NAME` flag
+ * overrides this value.
+ */
+export interface ThemeDirective {
+  kind: "theme";
+  /** The raw value as written (built-in name or path). */
+  value: string;
   span: SourceSpan;
 }
 
@@ -342,6 +362,7 @@ export type Statement =
   | BackEdgeDecl
   | LayoutDecl
   | CrossingsDirective
+  | ThemeDirective
   | PipelineDecl
   | BusDecl
   | FanOutDecl

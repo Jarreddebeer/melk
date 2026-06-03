@@ -1,8 +1,13 @@
 layout: lr
+theme:  document-dark
 
 # A linear flow with two labelled edges and a labelled back-edge from
 # client to api. Edges are explicit (not wrapped in `pipeline`) so each
 # can carry its own label.
+#
+# `theme: document-dark` demonstrates the swappable theme system
+# (DESIGN-PHASE5-THEMING.md). Geometry is identical to document-light;
+# only the palette and weights differ.
 
 transform { shape: rect,     size: 2x1, label: "ETL pipeline" }
 ods       { shape: cylinder, size: 2x1, label: "ODS" }

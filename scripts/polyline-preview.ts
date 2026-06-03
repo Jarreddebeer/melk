@@ -15,13 +15,17 @@ import { tokenize } from "../src/parser/lexer.js";
 import { parse } from "../src/parser/parser.js";
 import { bind } from "../src/bind/bind.js";
 import { place } from "../src/layout/place.js";
+import { applyTextFit } from "../src/layout/text-fit.js";
 import { reserveCorridors } from "../src/layout/corridors.js";
 import { packTracks } from "../src/layout/tracks.js";
 import { buildPolylines } from "../src/layout/polyline.js";
 import { renderSVG } from "../src/render/svg.js";
+import { loadTheme } from "../src/theme/theme.js";
 
 const OUT_DIR = "tmp/preview";
 mkdirSync(OUT_DIR, { recursive: true });
+
+const theme = loadTheme("document-light");
 
 const examples: { title: string; filename: string; src: string }[] = [
   {
@@ -103,11 +107,11 @@ const examples: { title: string; filename: string; src: string }[] = [
 for (const ex of examples) {
   try {
     const model = bind(parse(tokenize(ex.src)));
-    const placement = place(model);
+    const placement = applyTextFit(place(model), model, theme);
     const reservation = reserveCorridors(model, placement);
     const packing = packTracks(model, placement, reservation);
     const polylines = buildPolylines(model, placement, reservation, packing);
-    const svg = renderSVG(model, placement, reservation, polylines);
+    const svg = renderSVG(model, placement, reservation, polylines, theme);
     writeFileSync(`${OUT_DIR}/${ex.filename}`, svg);
     console.log(`✓ ${ex.title} → ${OUT_DIR}/${ex.filename}`);
   } catch (err) {

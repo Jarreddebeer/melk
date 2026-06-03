@@ -1,31 +1,83 @@
 #!/usr/bin/env node
 /**
- * Phase 4 CLI entry point. The full pipeline:
+ * Phase 4+5 CLI entry point. The full pipeline:
  *
  *   tokenize → parse → bind → place → reserveCorridors → packTracks
- *            → buildPolylines → renderSVG
+ *            → buildPolylines → renderSVG(theme)
+ *
+ * Theme resolution precedence (DESIGN-PHASE5-THEMING.md §2.2):
+ *   --theme=NAME flag  >  in-source `theme:` directive  >  default
+ *
+ * The theme value may be a built-in name (resolved from the catalogue)
+ * or a file path. Paths from `--theme=` resolve relative to cwd; paths
+ * from `theme:` directives resolve relative to the .melk file's directory.
  *
  * Subcommands expose intermediate stages for debugging; `render` runs
  * the whole thing and writes an SVG.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { tokenize } from "./parser/lexer.js";
 import { parse } from "./parser/parser.js";
 import { bind } from "./bind/bind.js";
 import { place } from "./layout/place.js";
+import { applyTextFit } from "./layout/text-fit.js";
 import { reserveCorridors } from "./layout/corridors.js";
 import { packTracks } from "./layout/tracks.js";
 import { buildPolylines } from "./layout/polyline.js";
 import { renderSVG } from "./render/svg.js";
+import {
+  BUILTIN_THEME_NAMES,
+  DEFAULT_THEME_NAME,
+  loadTheme,
+  type Theme,
+} from "./theme/theme.js";
 
 function usage(): never {
   process.stderr.write("usage: melk <command> <file.melk> [options]\n");
   process.stderr.write("commands:\n");
   process.stderr.write("  parse                 print the parsed AST as JSON\n");
   process.stderr.write("  bind                  print the bound Model as JSON\n");
-  process.stderr.write("  render [-o OUT.svg]   render to SVG (stdout, or to OUT.svg with -o)\n");
+  process.stderr.write("  render [-o OUT.svg] [--theme=NAME]\n");
+  process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
+  process.stderr.write("                        built-in themes: " + BUILTIN_THEME_NAMES.join(", ") + "\n");
   process.exit(1);
+}
+
+/**
+ * Pick a theme value from CLI flag (highest priority) or model directive,
+ * resolve it to a Theme. Paths are resolved against `baseDir` (the .melk
+ * file's directory) when the value originated from the source directive;
+ * CLI-flag paths resolve against cwd. Built-in names take precedence over
+ * file paths in both cases — `--theme=document-light` always finds the
+ * built-in, even if `./document-light.json` happens to exist.
+ */
+function resolveTheme(
+  cliValue: string | undefined,
+  modelValue: string | undefined,
+  baseDir: string,
+): Theme {
+  if (cliValue !== undefined) {
+    if (BUILTIN_THEME_NAMES.includes(cliValue)) return loadTheme(cliValue);
+    const path = isAbsolute(cliValue) ? cliValue : resolve(process.cwd(), cliValue);
+    return loadTheme(path);
+  }
+  if (modelValue !== undefined) {
+    if (BUILTIN_THEME_NAMES.includes(modelValue)) return loadTheme(modelValue);
+    const path = isAbsolute(modelValue) ? modelValue : resolve(baseDir, modelValue);
+    return loadTheme(path);
+  }
+  return loadTheme(DEFAULT_THEME_NAME);
+}
+
+function findFlag(argv: string[], name: string): string | undefined {
+  const prefix = `--${name}=`;
+  for (const a of argv) {
+    if (a.startsWith(prefix)) return a.slice(prefix.length);
+  }
+  const idx = argv.indexOf(`--${name}`);
+  if (idx >= 0 && idx + 1 < argv.length) return argv[idx + 1];
+  return undefined;
 }
 
 function main(): void {
@@ -51,11 +103,15 @@ function main(): void {
   }
 
   if (command === "render") {
-    const placement = place(model);
+    const cliTheme = findFlag(argv, "theme");
+    const theme = resolveTheme(cliTheme, model.themeName, dirname(filePath));
+
+    const rawPlacement = place(model);
+    const placement = applyTextFit(rawPlacement, model, theme);
     const reservation = reserveCorridors(model, placement);
     const packing = packTracks(model, placement, reservation);
     const polylines = buildPolylines(model, placement, reservation, packing);
-    const svg = renderSVG(model, placement, reservation, polylines);
+    const svg = renderSVG(model, placement, reservation, polylines, theme);
 
     const outIdx = argv.indexOf("-o");
     if (outIdx >= 0) {

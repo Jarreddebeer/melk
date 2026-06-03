@@ -1,5 +1,6 @@
 layout: lr
 crossings: 40
+theme:  schematic-dark
 
 # Larger `+` intersection (DESIGN-PHASE4.md §11.11/§11.13). hwy_h
 # carries 9 surface traces (3 sources × 3 sinks); hwy_v carries 9
@@ -8,6 +9,11 @@ crossings: 40
 # underground). The placer dodges member overlap by bumping the
 # underground highway's members outward along its flow axis until
 # they clear the surface highway's members.
+#
+# Themed schematic-dark: deep substrate, cyan PCB traces, no
+# arrowheads (direction comes from routing topology, as in real
+# schematics). The all-to-all crossings make this the canonical
+# circuit-board demonstration of the metaphor melk is built around.
 
 hwy_h { shape: highway }
 hwy_v { shape: highway, orient: vertical, render: underground }

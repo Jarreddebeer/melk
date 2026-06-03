@@ -66,6 +66,15 @@ export interface ModelNode {
    * face slots on the same node continue to use the default sort.
    */
   slotOrder?: "declaration";
+  /**
+   * Theme tags attached to this node (DESIGN-PHASE5-THEMING.md §3.1).
+   * Each name resolves to a tag rule in the active theme's `tags` table
+   * at render time. Multiple tags compose in declaration order — later
+   * tags' properties override earlier ones. Unknown tag names raise
+   * E_UNKNOWN_TAG at render-resolve time (not at bind time, because
+   * bind doesn't know which theme will be applied).
+   */
+  tags?: string[];
 }
 
 /**
@@ -173,6 +182,11 @@ export interface ModelEdge {
    * may be set.
    */
   entrySide?: EdgeSide;
+  /**
+   * Theme tags attached to this edge (DESIGN-PHASE5-THEMING.md §3.1).
+   * See `ModelNode.tags` for resolution semantics.
+   */
+  tags?: string[];
 }
 
 /**
@@ -326,6 +340,13 @@ export interface Intersection {
 export interface Model {
   layoutMode: LayoutMode;
   crossingsBudget: number;
+  /**
+   * Theme name or path, as written in the .melk source `theme:` directive
+   * (DESIGN-PHASE5-THEMING.md §2.1). Undefined when no directive was given;
+   * the renderer falls back to the default theme in that case.
+   * CLI `--theme=NAME` overrides this when supplied.
+   */
+  themeName?: string;
   nodes: ModelNode[];
   edges: ModelEdge[];
   pipelines: Pipeline[];

@@ -99,6 +99,7 @@ interface BindCtx {
   intersections: { highways: string[] }[];
   layoutMode: "tb" | "lr";
   crossingsBudget: number;
+  themeName?: string;
   /**
    * Pending `avoid:` references stashed during the first pass. Resolved
    * after every edge and primitive is in place (so that primitive names,
@@ -168,6 +169,11 @@ export function bind(program: Program): Model {
         break;
       case "crossings":
         ctx.crossingsBudget = stmt.budget;
+        break;
+      case "theme":
+        // Multiple `theme:` directives: last one wins. Matches `layout:`
+        // and `crossings:` precedent (no error for repetition).
+        ctx.themeName = stmt.value;
         break;
       case "pipeline":
         bindPipeline(stmt, ctx);
@@ -243,6 +249,7 @@ export function bind(program: Program): Model {
   return {
     layoutMode: ctx.layoutMode,
     crossingsBudget: ctx.crossingsBudget,
+    ...(ctx.themeName !== undefined ? { themeName: ctx.themeName } : {}),
     nodes: [...ctx.nodes.values()],
     edges: ctx.edges,
     pipelines: [...ctx.pipelines.values()],
@@ -273,6 +280,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   let orient: "horizontal" | "vertical" | undefined;
   let render: "surface" | "underground" | undefined;
   let slotOrder: "declaration" | undefined;
+  let tags: string[] | undefined;
   let orientSpan: { line: number; col: number; offset: number } | undefined;
   let renderSpan: { line: number; col: number; offset: number } | undefined;
   for (const prop of decl.properties) {
@@ -286,6 +294,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       (o) => (orient = o),
       (r) => (render = r),
       (so) => (slotOrder = so),
+      (t) => (tags = t),
     );
   }
   // §11.11: orient: and render: are highway-only.
@@ -307,6 +316,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   if (orient !== undefined) node.orient = orient;
   if (render !== undefined) node.render = render;
   if (slotOrder !== undefined) node.slotOrder = slotOrder;
+  if (tags !== undefined && tags.length > 0) node.tags = tags;
   ctx.nodes.set(decl.name, node);
   ctx.autoDeclared.delete(decl.name);
 }
@@ -325,6 +335,7 @@ function bindEdge(
   let viaItems: ViaRef[] | undefined;
   let exitSide: "N" | "E" | "S" | "W" | undefined;
   let entrySide: "N" | "E" | "S" | "W" | undefined;
+  let tags: string[] | undefined;
   for (const prop of decl.properties) {
     if (prop.key === "label") {
       if (prop.value.kind !== "string") {
@@ -385,6 +396,14 @@ function bindEdge(
       }
       if (prop.key === "exit") exitSide = v;
       else entrySide = v;
+    } else if (prop.key === "tags") {
+      if (prop.value.kind !== "tag-list") {
+        throw new BindError(
+          "tags must be a name or bracketed list of names",
+          prop.value.span,
+        );
+      }
+      tags = prop.value.items.map((it) => it.name);
     } else {
       throw new BindError(`unknown edge property: '${prop.key}'`, prop.span);
     }
@@ -407,6 +426,7 @@ function bindEdge(
   if (pivot !== undefined) edge.pivot = pivot;
   if (exitSide !== undefined) edge.exitSide = exitSide;
   if (entrySide !== undefined) edge.entrySide = entrySide;
+  if (tags !== undefined && tags.length > 0) edge.tags = tags;
   const edgeIndex = ctx.edges.length;
   ctx.edges.push(edge);
   if (avoidItems !== undefined) {
@@ -1132,6 +1152,7 @@ function applyNodeProperty(
   setOrient: (o: "horizontal" | "vertical") => void,
   setRender: (r: "surface" | "underground") => void,
   setSlotOrder: (so: "declaration") => void,
+  setTags: (t: string[]) => void,
 ): void {
   switch (prop.key) {
     case "shape":
@@ -1217,6 +1238,16 @@ function applyNodeProperty(
         );
       }
       setSlotOrder(prop.value.value);
+      break;
+    case "tags":
+      // The parser normalises bare and bracketed forms to tag-list.
+      if (prop.value.kind !== "tag-list") {
+        throw new BindError(
+          "tags must be a name or bracketed list of names",
+          prop.value.span,
+        );
+      }
+      setTags(prop.value.items.map((it) => it.name));
       break;
     default:
       throw new BindError(`unknown node property: '${prop.key}'`, prop.span);

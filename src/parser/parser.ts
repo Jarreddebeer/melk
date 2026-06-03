@@ -32,6 +32,7 @@ import type {
   DeprecatedLaneDecl,
   DeprecatedTagDecl,
   EdgeDecl,
+  ThemeDirective,
   EdgesetDecl,
   FanOutDecl,
   LayoutDecl,
@@ -83,6 +84,10 @@ class Parser {
       // Keyword: `crossings: <n>`
       if (tok.value === "crossings" && next.kind === "colon") {
         return this.crossingsDirective();
+      }
+      // Keyword: `theme: <name-or-path>` (DESIGN-PHASE5-THEMING.md §2.1)
+      if (tok.value === "theme" && next.kind === "colon") {
+        return this.themeDirective();
       }
       // Keyword: `pipeline <name>: ...`
       if (tok.value === "pipeline" && next.kind === "ident") {
@@ -176,6 +181,35 @@ class Parser {
       budget: n,
       span: { start: start.span.start, end: numTok.span.end },
     };
+  }
+
+  private themeDirective(): ThemeDirective {
+    const start = this.expect("ident"); // 'theme'
+    this.expect("colon");
+    // The theme value is either a bare identifier (built-in name like
+    // `schematic-dark`) or a quoted string (path like "./themes/x.json").
+    // Bare idents allow dashes via the lexer's standard identifier rule.
+    const tok = this.peek();
+    if (tok.kind === "ident") {
+      this.advance();
+      return {
+        kind: "theme",
+        value: tok.value,
+        span: { start: start.span.start, end: tok.span.end },
+      };
+    }
+    if (tok.kind === "string") {
+      this.advance();
+      return {
+        kind: "theme",
+        value: tok.value,
+        span: { start: start.span.start, end: tok.span.end },
+      };
+    }
+    throw new ParseError(
+      `theme value must be a built-in name or quoted path, got ${tok.kind}`,
+      tok.span,
+    );
   }
 
   // --- structured flow ------------------------------------------------
@@ -589,6 +623,8 @@ class Parser {
       value = this.avoidValue(key.span);
     } else if (key.value === "via") {
       value = this.viaValue(key.span);
+    } else if (key.value === "tags") {
+      value = this.tagsValue(key.span);
     } else {
       value = this.propertyValue();
     }
@@ -709,6 +745,45 @@ class Parser {
     const only = this.expect("ident");
     return {
       kind: "via-list",
+      items: [{ name: only.value, span: only.span }],
+      span: { start: keySpan.start, end: only.span.end },
+    };
+  }
+
+  /**
+   * Parse the value of a `tags:` brace-attr (DESIGN-PHASE5-THEMING.md §3.1).
+   * Two surface forms — a single name or a bracketed list:
+   *
+   *   tags: future
+   *   tags: [future, critical]
+   *   tags: []                  # equivalent to no tags attr
+   *
+   * Each value is a bare identifier (a tag name). The binder resolves it
+   * against the active theme; unknown tags raise E_UNKNOWN_TAG.
+   */
+  private tagsValue(keySpan: SourceSpan): PropertyValue {
+    if (this.peek().kind === "lbracket") {
+      this.advance();
+      const items: { name: string; span: SourceSpan }[] = [];
+      if (this.peek().kind !== "rbracket") {
+        const first = this.expect("ident");
+        items.push({ name: first.value, span: first.span });
+        while (this.peek().kind === "comma") {
+          this.advance();
+          const next = this.expect("ident");
+          items.push({ name: next.value, span: next.span });
+        }
+      }
+      const end = this.expect("rbracket");
+      return {
+        kind: "tag-list",
+        items,
+        span: { start: keySpan.start, end: end.span.end },
+      };
+    }
+    const only = this.expect("ident");
+    return {
+      kind: "tag-list",
       items: [{ name: only.value, span: only.span }],
       span: { start: keySpan.start, end: only.span.end },
     };
