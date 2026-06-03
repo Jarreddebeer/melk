@@ -4,7 +4,9 @@ Project state as of the end of the previous session.
 
 ## TL;DR
 
-**Phase 4 + 4.1–4.6 are all landed and signed off.** **202 tests pass + 6 skipped.** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), and now **Z-depth** (underground highways, future bridges).
+**Phase 4 + 4.1–4.6 are all landed and signed off.** **216 tests pass + 3 skipped.** 29 examples render. The grammar, placer, router, and renderer have been rewritten from the grammar up around grid-as-IR, tag-only annotations, strict-from-day-one errors, **local forward direction** (isometric primitives), **Z-depth** (underground highways), and now a **pixel-aware track packer** with multi-layered coherence passes.
+
+**Git repository initialised** (2026-06-03). Initial commit `7fb9bb2`: src/, test/, scripts/, examples/*.melk sources, design docs. `.gitignore` excludes `node_modules/`, `dist/`, `examples/*.svg` (regenerate via `npx tsx src/cli.ts render`), `.claude/`, `tmp/`. No remote yet.
 
 Brace-attr routing knobs and node attributes:
 - `pivot: source | target` on edges (§11.7) — landed.
@@ -17,9 +19,17 @@ Brace-attr routing knobs and node attributes:
 
 **Examples 28 (3×3 + 3×3 perpendicular highways)** and **29 (9 surface + 9 underground, full N×M crossings)** are the canonical demonstrations of §11.11 + §11.13 working together. **Example 27** demonstrates `render: underground` on a single highway with manholes.
 
+**Track packer refinements this session** ([src/layout/tracks.ts](src/layout/tracks.ts)):
+
+1. **Same-source intra-bundle coherence pass** (`applySameSourceCoherence`). After interval-reuse, traces from the same source NODE (not just cell — Z-stacked highways at `intersect`-shared cells need per-node grouping) are permuted within their bundle's occupied ordinals so the trace with the deepest bend lands on the INNER track. Fixes the "bent ribbon" (ex 20 svc_a→egress), the "cross-target tangle" (ex 19 ext_1 svc_a/svc_b), and ex 24 chamfer overlap. All three were the previously-skipped polyline tangle tests; all now un-skipped and passing.
+2. **Staircase flip rule.** For multi-corridor routes (e.g. `H1 → V1 → H2`), the trace's rank should FLIP at each chamfer. Position-parity is computed per-trace; when all siblings share the parity, the desired-order sort is inverted for odd positions. Fixes ex 29's `src_v3 → hwy_v` parallel ribbon.
+3. **Pixel-aware interval encoding.** The conflict check now operates on actual y/x pixel ranges via `PixelLayout` (extracted to new module [src/layout/pixels.ts](src/layout/pixels.ts), shared with `polyline.ts`). Replaces the abstract `boundaryIndex * 100 + slotIndex` encoding, which was pixel-unaware and treated same-cell-row endpoints on differently-sized boxes as occupying the same long-axis range. Concretely: same-row through-traces with no real V-leg (`src_h2 → hwy_h`) no longer block real V-leg bundles (src_h1, src_v3) from sharing inner tracks. The leftmost src_v3 trace in ex 29 now bends at x=64 (instead of x=56), clear of src_h1's topmost H stub.
+4. **Coherence direction signal switched to pixel-aware.** `applySameSourceCoherence` now uses `sign(exitPx - entryPx)` for bend direction (instead of `tgtCell.row - srcCell.row`). This catches the case where source and target are in the same cell row but their slot pixel-y's differ — needed for inlet→svc_a vs inlet→svc_b co-grouping in ex 19.
+5. **Interval-safe re-allocation in coherence.** The permutation now tracks per-ordinal interval lists and falls back gracefully when the desired-order sort would put two overlapping-interval traces on the same ordinal. Fixes the ex 19 svc_b column-stacking regression that appeared mid-pixel-aware refactor.
+
 **What's open right now:**
-- **Three skipped tangle tests** in [test/polyline.test.ts](test/polyline.test.ts): codified visible tangles in examples 19 (`inlet → svc_a/svc_b` chamfer-zone overlap), 20 (`svc_a → sink_x/sink_y` track-packer crossing), 24 (`ext_2 → highway` chamfer overlap). All three are chamfer/track-packer territory; `slot-order: declaration` (§11.12) didn't address them because the issue is in [src/layout/tracks.ts](src/layout/tracks.ts) `assignTracksInCorridor`'s interval-reuse rule, which is explicitly LOCKED per [feedback-highway-invariants](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-highway-invariants.md). Re-opening that rule needs a fresh design discussion with the user.
 - **3 still-skipped track tests** in [test/tracks.test.ts](test/tracks.test.ts): legacy forced-crossing tests that routed planarly after the slot-allocator improvements. New forced-crossing topologies (against genuinely non-planar graphs) are needed to restore coverage.
+- **Ex 19 ext_1 T-junction** (cosmetic): svc_a's V-leg endpoint touches svc_b's H stub at (136, 52). Segment-cross check says no actual crossing; user called the current state "perfect" but suggested a "silver bullet" where svc_a runs east further and turns down at the outer chamfer (x=152), sharing svc_b's column. The pair's pixel intervals overlap at [52, 56] (svc_a's chamfer zone), so they can't share an ordinal under the current strict-open conflict rule. Geometrically the chamfers would coexist (4px-offset parallels) but the rule is too conservative. User accepted "not worth the complexity" for one cosmetic touch-point.
 
 If you only read one thing, read [DESIGN-PHASE4.md](DESIGN-PHASE4.md) — especially §11.7–§11.13. Then [feedback memories](#memory). Then this file.
 
@@ -60,8 +70,18 @@ src/
 │   │                   edges use `opposite(forwardAt[edge.from])`. Corridor
 │   │                   sequence uses gutterIndex(cell, side) for both same-row
 │   │                   and same-col cases, eliminating the south-bias bug
-│   ├── tracks.ts       Phase 4 — packTracks; unchanged from Step 6
-│   └── polyline.ts     Phase 4 — buildPolylines; unchanged from Step 7
+│   ├── tracks.ts       Phase 4 — packTracks with pixel-aware interval
+│   │                   encoding (entryPx/exitPx) + same-source intra-
+│   │                   bundle coherence (deepest-target inner) + multi-
+│   │                   corridor staircase flip + interval-safe re-
+│   │                   allocation
+│   ├── pixels.ts       Phase 4 — shared PixelLayout, slotPixel,
+│   │                   computePixelLayout, vCorridorWestEdgeX,
+│   │                   hCorridorNorthEdgeY. Single source of truth for
+│   │                   pixel positions; consumed by both tracks.ts
+│   │                   (interval encoding) and polyline.ts (emission)
+│   └── polyline.ts     Phase 4 — buildPolylines; PixelLayout now from
+│                       ./pixels.js (was locally defined)
 ├── render/
 │   └── svg.ts          Phase 4 — Step 8 renderer. Inputs Model + Placement +
 │                       Reservation + Polylines. Layer order: bg → nodesets →
@@ -83,11 +103,15 @@ test/
 ├── place.test.ts       28 tests — anchor pass per primitive (incl. branch
 │                       left/right under LR + TB), conflicts, flow pass, units,
 │                       orphan parking, forwardAt isometry tests
-├── corridors.test.ts   25 tests — side assignment, corridor sequences, slot
+├── corridors.test.ts   83 tests — side assignment, corridor sequences, slot
 │                       indices, capacity errors, demand, gutter widening
-├── tracks.test.ts      14 tests (3 skipped, see "Slot-allocator …" below) —
-│                       track packing + crossings budget
-└── polyline.test.ts    12 tests — pixel layout, chamfers, X-junctions
+├── tracks.test.ts      22 tests (3 skipped — see "still-skipped track tests"
+│                       below) — track packing + crossings budget + same-
+│                       source coherence (bent ribbon, cross-target, staircase
+│                       flip, Z-stacked highway groups)
+└── polyline.test.ts    20 tests — pixel layout, chamfers, X-junctions, plus
+                        un-skipped tangle regressions (ex 19 ext_1, ex 20
+                        svc_a, ex 24 ext_2, ex 29 src_v3/hwy_v staircase)
 
 examples/
 ├── 01-simple.melk            Phase 4 — pipeline + back-edge + labels
@@ -252,14 +276,10 @@ Triggered by the user's `examples/10-multi-port-group.melk` complaint (`ingest -
 
 ### A) Address the remaining "10% issues"
 
-The user has eyeballed all 29 examples through the §11.13 work and signed off on the current state. Open issues remaining:
+The user has eyeballed all 29 examples through the §11.13 work plus the pixel-aware track packer refinements and signed off on the current state. Open issues remaining:
 
-- **3 skipped tangle tests** in [test/polyline.test.ts](test/polyline.test.ts):
-  - `ext_1 → svc_a/svc_b` (example 19) — chamfer-zone overlap. Track-packer territory.
-  - `svc_a → sink_x/sink_y` (example 20) — V-corridor track crossing.
-  - `ext_2 → highway` (example 24) — chamfer overlap when both via-halves bend up.
-  All three involve the track packer's interval-reuse rule, which is **LOCKED** per [feedback-highway-invariants](C:\Users\jarr2\.claude\projects\c--Users-jarr2-projects-melk\memory\feedback-highway-invariants.md). The user explicitly accepted that `slot-order: declaration` (§11.12) does NOT address these — that knob fixes only slot allocation, not track packing. Re-opening the track rule requires fresh design discussion.
 - **3 still-skipped track tests** in [test/tracks.test.ts](test/tracks.test.ts): legacy forced-crossing topologies that routed planarly after slot-allocator improvements. Need new genuinely-non-planar topologies to restore coverage.
+- **Ex 19 ext_1 T-junction** (cosmetic, accepted): svc_a's V-leg endpoint touches svc_b's H stub at (136, 52). Segment-cross check returns false. Could be fixed by relaxing the strict-open conflict rule to allow chamfer-zone overlap (≤ COMB_PITCH/2 = 4px), but that risks introducing real crossings elsewhere. User accepted "not worth the complexity".
 - **Highway composability limits** still partly in place:
   - Two highways sharing any member (source or target) raise `E_AMBIGUOUS_PLACEMENT` — the via-anchor offset math pins both highways to the same cell. Means no "shared sinks" or "shared sources" highway topologies.
   - Highway target nodes can't be `pipeline` roots — highway-via anchor runs after pipeline anchors in `Model.anchors[]`, so pipeline's (0,0) placement wins.
@@ -334,11 +354,11 @@ User-level feedback memories at `C:\Users\jarr2\.claude\projects\c--Users-jarr2-
 ## How to start the next session
 
 1. Read this file (you're doing it).
-2. Read [DESIGN-PHASE4.md](DESIGN-PHASE4.md) — focus on §2.5 (local forward direction), §6.4 (branch), §11.5–§11.6 (the recent additions) if you weren't around when they landed.
-3. `npx vitest run` — should show 142 passing + 3 skipped (66 parser + 28 place + 25 corridors + 14 tracks of which 3 skipped + 12 polyline).
-4. `npx tsx scripts/polyline-preview.ts` to regenerate `tmp/preview/*.svg`, and skim them to confirm the rendered output matches what's described.
-5. Open `examples/*.svg` (all 16) to see the full set the user signed off on at "90% correct".
-6. If picking up direction A (fix the 10%), start by opening each `examples/*.svg` with the user and capturing concrete defects.
+2. Read [DESIGN-PHASE4.md](DESIGN-PHASE4.md) — focus on §2.5 (local forward direction), §6.4 (branch), §11.5–§11.6 (isometric refactor) and §11.7–§11.13 if you weren't around when they landed.
+3. `npx vitest run` — should show 216 passing + 3 skipped (66 parser + 28 place + 83 corridors + 22 tracks of which 3 skipped + 20 polyline).
+4. `git log --oneline` — initial commit `7fb9bb2` lands all of Phase 4. No subsequent commits yet.
+5. Regenerate the 29 example SVGs (gitignored): `for f in examples/*.melk; do npx tsx src/cli.ts render "$f" -o "${f%.melk}.svg"; done` (bash) or the PowerShell equivalent. Then open `examples/*.svg` to eyeball.
+6. If picking up direction A (fix the 10%), the highest-leverage remaining issues are the highway composability limits (shared members, pipeline-rooted targets) — the track packer is in a good place after this session's pixel-aware refactor.
 
 ## Quick gotchas
 
@@ -348,4 +368,8 @@ User-level feedback memories at `C:\Users\jarr2\.claude\projects\c--Users-jarr2-
 - **Isometry isn't free for box sizes.** A `size: 2x3` box rotates to need `size: 3x2` under the orthogonal layout. The grammar doesn't auto-flip; user has to swap WxH explicitly. (Examples 15a/15b demonstrate.)
 - **`Model.anchors[]` is the source of truth for placement order.** The four typed arrays (`pipelines`, `buses`, `fanOuts`, `branches`) are unordered relative to each other; `anchors[]` records declaration order. If you ever add a new anchor kind, push it into `Model.anchors` from `bind.ts` and add a case in the placer's anchor loop.
 - **No fallback when `crossings:` is too low.** The router fails with `E_CROSSINGS_OVER_BUDGET` and points at the worst-offender corridor. Five examples (05, 06, 10, 11, 14, 15a, 15b) ship with explicit budgets > 0.
+- **Pixel-aware interval encoding is the new contract.** `tracks.ts` `assignTracksInCorridor` operates on `entryPx`/`exitPx` (real pixels via `PixelLayout`). Two traces conflict iff their actual y/x pixel ranges overlap (strict-open). If you ever modify the conflict semantics, remember: same-row through-traces (no V-leg) have degenerate intervals and SHOULD NOT block real V-leg traces — that's the whole point of the pixel-aware refactor.
+- **`pixels.ts` is shared by tracks and polyline.** `slotPixel`, `computePixelLayout`, corridor-edge helpers. Both stages must agree on pixel positions; don't duplicate the math in either.
+- **Same-source coherence groups by source NODE id, not cell.** `intersect a, b` lets two highways share a cell; node-id keys keep their outbound bundles separate for coherence purposes.
+- **Coherence direction is pixel-delta, not cell-delta.** `sign(exitPx - entryPx)` so inlet→svc_a (same row, slot 1 → slot 0.5) correctly groups with the southbound svc_b siblings rather than landing in a separate "flat" bucket.
 - **The user's "90% correct" qualifier.** Capture defects before declaring anything done in a follow-up session.
