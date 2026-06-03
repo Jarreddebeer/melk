@@ -1,0 +1,26 @@
+layout: lr
+crossings: 20
+
+# One highway with richer surrounding traffic: a bundle from three
+# producers to three sinks, plus a back-edge feedback loop from
+# sink_b to ext_2 routed outside the highway, plus an unrelated
+# bypass producer that emits direct to its own sink.
+#
+# Tests how a single highway composes with non-via traffic in the
+# same diagram: a back-edge, a bypass, and the bundle all coexist.
+
+hwy { shape: highway }
+
+# Main bundle: 3 producers, 3 sinks.
+ext_1 -> sink_a { via: hwy }
+ext_1 -> sink_b { via: hwy }
+ext_2 -> sink_b { via: hwy }
+ext_2 -> sink_c { via: hwy }
+ext_3 -> sink_a { via: hwy }
+ext_3 -> sink_c { via: hwy }
+
+# Feedback back-edge outside the bundle.
+sink_b >- ext_2 { label: "retry" }
+
+# Independent bypass producer.
+monitor -> alert

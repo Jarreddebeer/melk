@@ -1,0 +1,20 @@
+layout: lr
+crossings: 10
+
+# Horizontal highway acting as a parallel bundle (DESIGN-PHASE4.md §11.9).
+# Six logical traces from three sources (src_a/b/c) to three sinks
+# (dst_x/y/z) all route via the same invisible highway.
+#
+# No scaffolding declarations needed — `via: hwy` is enough to both
+# position the source/sink nodes (placer treats the highway as a fan-in
+# + fan-out anchor) and route each trace as a member of the highway's
+# parallel bundle.
+
+hwy { shape: highway }
+
+src_a -> dst_x { via: hwy }
+src_a -> dst_y { via: hwy }
+src_b -> dst_y { via: hwy }
+src_b -> dst_z { via: hwy }
+src_c -> dst_x { via: hwy }
+src_c -> dst_z { via: hwy }

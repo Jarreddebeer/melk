@@ -1,0 +1,33 @@
+layout: lr
+crossings: 20
+
+# Two highways flanking a service cluster: an `ingress` highway on
+# the western edge bundles inbound traffic from external producers,
+# and an `egress` highway on the eastern edge bundles outbound
+# traffic to external sinks. The cluster itself is three independent
+# services that each consume from ingress and emit to egress.
+#
+# Each highway is a separate via-anchor; the placer positions the
+# cluster between them automatically (sources west of ingress,
+# sinks east of egress).
+
+ingress { shape: highway }
+egress  { shape: highway }
+
+# Inbound: 3 externals feed all 3 services through ingress.
+ext_1 -> svc_a { via: ingress }
+ext_1 -> svc_b { via: ingress }
+ext_2 -> svc_b { via: ingress }
+ext_2 -> svc_c { via: ingress }
+ext_3 -> svc_a { via: ingress }
+ext_3 -> svc_c { via: ingress }
+
+# Outbound: each service emits to one or two downstream sinks
+# through egress.
+svc_a -> sink_x { via: egress }
+svc_a -> sink_y { via: egress }
+svc_b -> sink_y { via: egress }
+svc_c -> sink_y { via: egress }
+svc_c -> sink_z { via: egress }
+
+nodeset cluster: svc_a, svc_b, svc_c

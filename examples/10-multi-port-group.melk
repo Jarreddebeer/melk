@@ -1,0 +1,29 @@
+layout: lr
+crossings: 20
+
+# Service with six output channels, each routed to one or two
+# external consumers. Tests slot demand on the fan-out's east comb
+# and the convergence of multiple channels onto each cylinder.
+
+router     { shape: rect,     size: 2x3, label: "router" }
+source     { shape: rect,     label: "source" }
+prometheus { shape: cylinder, label: "prometheus" }
+kafka      { shape: cylinder, label: "kafka" }
+s3         { shape: cylinder, label: "s3" }
+pager      { shape: rect,     label: "pagerduty" }
+jaeger     { shape: cylinder, label: "jaeger" }
+
+source  -> ingest
+ingest  -> router { avoid: channels }
+fan-out channels: router -> [metrics, events, audit, alerts, traces, snapshots]
+
+metrics   -> prometheus
+traces    -> prometheus
+events    -> kafka
+audit     -> kafka
+audit     -> s3
+snapshots -> s3
+alerts    -> pager
+traces    -> jaeger
+
+nodeset Bus: ingest, router, metrics, events, audit, alerts, traces, snapshots

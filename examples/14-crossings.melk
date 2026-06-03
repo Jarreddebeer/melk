@@ -1,0 +1,21 @@
+layout: lr
+
+# Two parallel pipelines with cross-edges between their middles —
+# topologically non-planar. The strict compiler would reject this at
+# the default `crossings: 0` budget:
+#
+#     PackingError: E_CROSSINGS_OVER_BUDGET: routing requires 2
+#       crossings but budget is 0. Worst offender: corridor V1 with
+#       2 crossings. Restructure topology to reduce crossings, or
+#       raise the budget with a top-level 'crossings: N' directive.
+#
+# The fix is to opt in by declaring the budget explicitly:
+
+crossings: 5
+
+pipeline lhs: a -> x -> p
+pipeline rhs: b -> y -> q
+
+# These two edges cross each other in the V corridor between cols.
+a -> y
+b -> x

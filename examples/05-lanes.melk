@@ -1,0 +1,27 @@
+layout: lr
+crossings: 10
+
+# Three horizontal lanes. Phase 3's `lane` keyword is gone; lanes are
+# annotations now. Each lane becomes a top-level `pipeline` (which
+# parks on its own row), and the cross-lane edges are written
+# explicitly. The `nodeset`s add the visual grouping. Crossings are
+# inevitable with three stacked pipelines and cross-edges, hence the
+# explicit budget.
+
+transform  { shape: rect,     size: 2x1, label: "ETL" }
+auth       { shape: diamond }
+controller { shape: rect }
+ods        { shape: cylinder, size: 2x1, label: "ODS" }
+client     { shape: circle }
+
+pipeline data:    ingest -> transform -> ods
+pipeline control: auth -> controller
+pipeline egress:  api -> client
+
+transform  -> auth
+controller -> api
+ods        -> api
+
+nodeset data-plane: ingest, transform, ods
+nodeset control:    auth, controller
+nodeset egress:     api, client

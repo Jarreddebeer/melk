@@ -1,0 +1,16 @@
+layout: lr
+
+# Horizontal spine with two side-branches off the middle nodes.
+# `branch` does the 90° direction change; the named member sits one
+# cell perpendicular to its spine.
+
+transform { shape: rect,    size: 2x1, label: "ETL" }
+validate  { shape: diamond }
+publish   { shape: rect }
+enrich    { shape: roundrect }
+alert     { shape: roundrect, label: "alert!" }
+
+pipeline main: ingest -> transform -> validate -> publish
+
+branch enrichers:     transform -> enrich
+branch alerts:right:  validate  -> alert

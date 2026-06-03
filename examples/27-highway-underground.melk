@@ -1,0 +1,18 @@
+layout: lr
+crossings: 10
+
+# Variant of 16-highway-bundle.melk with the highway marked
+# `render: underground` (DESIGN-PHASE4.md §11.11). Each via-trace
+# through `hwy` dips below the surface: the interior stretch is
+# drawn at half opacity and thinner, with small manhole circles at
+# the entry (west) and exit (east) perimeter where the trace dips
+# down and surfaces again.
+
+hwy { shape: highway, render: underground }
+
+src_a -> dst_x { via: hwy }
+src_a -> dst_y { via: hwy }
+src_b -> dst_y { via: hwy }
+src_b -> dst_z { via: hwy }
+src_c -> dst_x { via: hwy }
+src_c -> dst_z { via: hwy }

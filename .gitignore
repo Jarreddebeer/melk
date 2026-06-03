@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Generated example renders (regenerate via `npx tsx src/cli.ts render`).
+examples/*.svg
+
+# Tool-local Claude Code state.
+.claude/
+
+# Scratch / ad-hoc.
+tmp/

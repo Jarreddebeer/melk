@@ -1,0 +1,13 @@
+layout: lr
+
+# Annotations are pure decoration: `nodeset` draws a dashed bounding
+# rectangle around its members; `path` overlays a coloured highlight
+# along the named chain of edges. Neither influences placement or
+# routing — they sit on top of whatever the placer produces.
+
+pipeline main: ingest -> parse -> validate -> enrich -> publish
+
+# Two overlapping nodesets and one highlighted path through the spine.
+nodeset preprocessing: ingest, parse, validate
+nodeset enrichment:    validate, enrich, publish
+path    happy:         ingest -> parse -> validate -> enrich -> publish

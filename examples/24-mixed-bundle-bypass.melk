@@ -1,0 +1,29 @@
+layout: lr
+crossings: 30
+
+# Two fully-disjoint highways in the same diagram. ext_1 bypasses
+# the main bundle entirely; ext_2 and ext_3 go through `hwy` to
+# sink_b / sink_c. A separate metrics bundle (`hwy_m`) carries
+# probe traffic to a metrics store in a band below.
+#
+# Neither highway shares any node with the other, so the placer
+# parks the second bundle at a fresh row beneath the first without
+# anchor conflicts.
+
+hwy   { shape: highway }
+hwy_m { shape: highway }
+
+# ext_1 bypasses the highway entirely.
+ext_1 -> sink_a
+
+# Main bundle: ext_2 and ext_3 go through hwy.
+ext_2 -> sink_b { via: hwy }
+ext_2 -> sink_c { via: hwy }
+ext_3 -> sink_b { via: hwy }
+ext_3 -> sink_c { via: hwy }
+
+# Disjoint second bundle: probes feed a metrics store.
+probe_1 -> metric_x { via: hwy_m }
+probe_1 -> metric_y { via: hwy_m }
+probe_2 -> metric_x { via: hwy_m }
+probe_2 -> metric_y { via: hwy_m }

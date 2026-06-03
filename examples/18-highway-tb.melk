@@ -1,0 +1,25 @@
+layout: tb
+crossings: 10
+
+# TB variant of `16-highway-bundle.melk`. Same body, only the layout
+# directive changes — the isometric refactor (§11.6) means the entire
+# diagram rotates 90° with no other edits. The highway is now vertical:
+# sources stack horizontally to the north, sinks stack horizontally
+# to the south, and the bundle's traces run top-to-bottom through
+# the dashed highway box.
+
+hwy { shape: highway }
+
+# §11.12: src_b's outgoing traces are author-ordered. By declaring
+# `src_b -> dst_z` first, the slot allocator places that trace at
+# slot 0 (left under TB) of src_b's S face; `src_b -> dst_y` lands
+# at slot 1. Without slot-order: declaration the default sort
+# (by target column) would swap them.
+src_b { slot-order: declaration }
+
+src_a -> dst_x { via: hwy }
+src_a -> dst_y { via: hwy }
+src_b -> dst_z { via: hwy }
+src_b -> dst_y { via: hwy }
+src_c -> dst_x { via: hwy }
+src_c -> dst_z { via: hwy }

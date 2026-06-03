@@ -1,0 +1,16 @@
+layout: lr
+
+# A linear flow with two labelled edges and a labelled back-edge from
+# client to api. Edges are explicit (not wrapped in `pipeline`) so each
+# can carry its own label.
+
+transform { shape: rect,     size: 2x1, label: "ETL pipeline" }
+ods       { shape: cylinder, size: 2x1, label: "ODS" }
+
+ingest    -> transform
+transform -> ods    { label: "write" }
+ods       -> api    { label: "read" }
+api       -> client
+client    >- api    { label: "retry" }
+
+client { shape: circle }

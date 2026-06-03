@@ -1,0 +1,17 @@
+layout: lr
+
+# Phase 3 nested `group A { group B { … } }` is gone. The chain
+# becomes a `pipeline`; A and B become overlapping `nodeset`
+# rectangles (nesting is purely visual under Phase 4).
+
+client     { shape: circle }
+sink       { shape: rect }
+preprocess { shape: rect }
+verify     { shape: diamond }
+audit      { shape: cylinder, label: "audit log" }
+postprocess { shape: rect }
+
+pipeline main: client -> request -> preprocess -> input -> verify -> audit -> result -> postprocess -> response -> sink
+
+nodeset A: request, preprocess, input, verify, audit, result, postprocess, response
+nodeset B: input, verify, audit, result

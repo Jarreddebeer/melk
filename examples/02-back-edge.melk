@@ -1,0 +1,14 @@
+layout: lr
+
+# Fan-out into a, b, c; fan-in back into a single join; labelled back-edge
+# from the sink to the fanout. Exercises bus/fan-out anchoring and the
+# rear-face back-edge corridor.
+
+fanout { shape: rect, size: 1x3 }
+join   { shape: rect, size: 1x3 }
+
+src    -> fanout
+fan-out broadcast: fanout -> [a, b, c]
+bus    converge:   [a, b, c] -> join
+join   -> sink
+sink   >- fanout { label: "retry" }

@@ -1,0 +1,21 @@
+layout: tb
+crossings: 5
+
+# Top-to-bottom flow with mixed shapes and two back-edges. `api` fans out
+# to three downstream nodes — wrapped in `fan-out` so the placer can park
+# auth/cache/worker at distinct rows below api. Back-edges intersect
+# forward traffic in shared corridors, hence the explicit budget.
+
+client { shape: circle }
+api    { shape: rect, size: 3x1 }
+auth   { shape: diamond }
+cache  { shape: cylinder }
+db     { shape: cylinder, size: 1x2, label: "ODS" }
+worker { shape: rect }
+
+client -> api
+fan-out downstream: api -> [auth, cache, worker]
+auth   >- api    { label: "401" }
+cache  -> db
+worker -> db
+db     >- api    { label: "result" }

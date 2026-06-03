@@ -1,0 +1,22 @@
+layout: lr
+crossings: 10
+
+# Phase 3 `group AuthService { in: …; out: … }` is gone. Group ports
+# become regular nodes; the group itself becomes a `nodeset` for visual
+# grouping. The fan-in into verify is a `bus`, the fan-out is a `fan-out`.
+
+client    { shape: circle }
+dashboard { shape: rect }
+verify    { shape: diamond }
+log       { shape: cylinder, label: "audit log" }
+
+bus     auth-in:  [request, token] -> verify
+fan-out auth-out: verify -> [identity, log]
+
+log      -> error { label: "fail" }
+client   -> request
+client   -> token
+identity -> dashboard
+error    -> dashboard { label: "401" }
+
+nodeset AuthService: request, token, verify, log, identity, error

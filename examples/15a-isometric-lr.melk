@@ -1,0 +1,14 @@
+layout: lr
+crossings: 5
+
+# Isometric pair (LR variant). The same source body — pipeline + bus
+# + fan-out + branch — renders rotated 90° under `layout: tb` (see
+# 15b-isometric-tb.melk). Every primitive is local-forward-relative,
+# so swapping the layout directive rotates the diagram without any
+# other edits (DESIGN-PHASE4.md §2.5 / §11.6).
+
+hub { shape: rect, size: 2x3, label: "hub" }
+
+bus     into-hub:    [p1, p2, p3] -> hub
+fan-out out-of-hub:  hub -> [c1, c2, c3]
+branch  side-shoot:  hub -> sidecar

@@ -1,0 +1,21 @@
+layout: lr
+crossings: 10
+
+# A subset of producers bypass the highway entirely. ext_1 emits
+# directly to sink_a; ext_2 and ext_3 go through the bundle.
+#
+# Layout quirk: ext_1 is an orphan free edge — the placer parks
+# it at col 0 of a fresh row, which (after normalisation) lands in
+# the same column as the highway, not the producer column. The
+# bypass trace is still topologically correct; it just visually
+# sits under the dashed box rather than alongside ext_2/ext_3.
+# There is no positional-hint primitive in Phase 4 to fix this.
+
+hwy { shape: highway }
+
+ext_1 -> sink_a
+
+ext_2 -> sink_b { via: hwy }
+ext_2 -> sink_c { via: hwy }
+ext_3 -> sink_b { via: hwy }
+ext_3 -> sink_c { via: hwy }

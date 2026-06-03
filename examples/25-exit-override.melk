@@ -1,0 +1,30 @@
+layout: lr
+crossings: 20
+
+# Variant of 21-highway-mixed.melk demonstrating the §11.10 `exit:`
+# brace-attr. The svc_c -> log edge here carries `{ exit: E }` to
+# override §3.3's long-axis side derivation.
+#
+# Without the override (see 21-highway-mixed): the cell delta
+# svc_c(2,2) -> log(0,3) is (-2, +1); long-axis = N → source exits
+# N face → trace wraps east through three gutters and up V(3) to
+# enter log from below.
+#
+# With { exit: E }: source exits E face → trace runs east into V(3),
+# then north up to log's S face. Same number of corridors but a
+# different shape.
+
+hwy { shape: highway }
+log { shape: cylinder, label: "audit" }
+
+# Bundle edges (via highway).
+ext_1 -> svc_a { via: hwy }
+ext_1 -> svc_b { via: hwy }
+ext_2 -> svc_a { via: hwy }
+ext_2 -> svc_b { via: hwy }
+ext_3 -> svc_b { via: hwy }
+ext_3 -> svc_c { via: hwy }
+
+# Direct edges (no via).
+svc_a -> log { label: "audit" }
+svc_c -> log { label: "audit", exit: E }

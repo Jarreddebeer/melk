@@ -1,0 +1,26 @@
+layout: lr
+crossings: 30
+
+# Two highways crossing at a `+` (DESIGN-PHASE4.md §11.11). hwy_h is
+# horizontal (the lr default) and runs left-to-right between src_a/b
+# and dst_x/y. hwy_v is vertical and runs top-to-bottom between top_p/q
+# and bot_p/q. The `intersect hwy_h, hwy_v` declaration pre-places
+# both highways at the same cell.
+#
+# hwy_v is marked `render: underground` so where the two highways
+# visually cross, hwy_v's traces dip below hwy_h's surface traces —
+# rendered at half opacity and thinner, with manhole circles at the
+# N and S perimeter where each trace dips and surfaces.
+
+hwy_h { shape: highway }
+hwy_v { shape: highway, orient: vertical, render: underground }
+
+intersect hwy_h, hwy_v
+
+src_a -> dst_x { via: hwy_h }
+src_a -> dst_y { via: hwy_h }
+src_a -> dst_z { via: hwy_h }
+
+top_p -> bot_p { via: hwy_v }
+top_p -> bot_q { via: hwy_v }
+top_p -> bot_r { via: hwy_v }

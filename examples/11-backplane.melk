@@ -1,0 +1,23 @@
+layout: lr
+crossings: 30
+
+# Three parallel pipelines (lanes a/b/c) with cross-lane edges between
+# stages. Stresses gutter widening + crossings on the V corridors
+# between stages.
+
+pipeline lane-a: ingest_a -> parse_a -> enrich_a -> sink_a
+pipeline lane-b: ingest_b -> parse_b -> enrich_b -> sink_b
+pipeline lane-c: ingest_c -> parse_c -> enrich_c -> sink_c
+
+# Cross-lane forwards between parse and enrich.
+parse_a -> enrich_b
+parse_b -> enrich_c
+parse_c -> enrich_a
+
+# Cross-lane forwards between enrich and sink.
+enrich_a -> sink_b
+enrich_b -> sink_c
+
+nodeset lane-a-group: ingest_a, parse_a, enrich_a, sink_a
+nodeset lane-b-group: ingest_b, parse_b, enrich_b, sink_b
+nodeset lane-c-group: ingest_c, parse_c, enrich_c, sink_c

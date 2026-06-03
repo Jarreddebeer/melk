@@ -1,0 +1,20 @@
+layout: lr
+crossings: 10
+
+# Highway acting as an inlet to a service cluster (DESIGN-PHASE4.md §11.9).
+# External nodes (ext_1..3) all feed services (svc_a/b/c) through a
+# single inlet highway parked at the cluster's western boundary.
+#
+# No scaffolding declarations needed — `via: inlet` is enough.
+
+inlet { shape: highway }
+
+ext_1 -> svc_a { via: inlet }
+ext_1 -> svc_b { via: inlet }
+ext_2 -> svc_b { via: inlet }
+ext_2 -> svc_c { via: inlet }
+ext_3 -> svc_a { via: inlet }
+ext_3 -> svc_c { via: inlet }
+
+# Container annotation around the services.
+nodeset cluster: svc_a, svc_b, svc_c

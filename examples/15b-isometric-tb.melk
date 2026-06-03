@@ -1,0 +1,19 @@
+layout: tb
+crossings: 5
+
+# Isometric pair (TB variant). Identical body to 15a-isometric-lr.melk
+# except for two things: the `layout:` directive and the hub's `size`
+# (cell dimensions don't rotate — a 2x3 hub stays 2x3 in cells, so a
+# fan that ran along the 3-tall face under LR needs a 3-wide face
+# under TB; hence `3x2`).
+#
+# All primitive *geometry* rotates automatically: bus producers run
+# east-west instead of north-south, fan-out consumers run east-west,
+# and the branch points east (CCW of S = E) instead of north
+# (CCW of E = N). No other edits required.
+
+hub { shape: rect, size: 3x2, label: "hub" }
+
+bus     into-hub:    [p1, p2, p3] -> hub
+fan-out out-of-hub:  hub -> [c1, c2, c3]
+branch  side-shoot:  hub -> sidecar

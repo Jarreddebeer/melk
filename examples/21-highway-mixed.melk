@@ -1,0 +1,24 @@
+layout: lr
+crossings: 20
+
+# Mixed graph: some edges route via a shared highway, others stay
+# direct. Demonstrates that the highway primitive doesn't claim
+# exclusive control of its endpoint nodes — `svc_a` participates in
+# the bundle but also has a direct side-edge to a logger that
+# doesn't pass through the highway.
+
+hwy { shape: highway }
+log { shape: cylinder, label: "audit" }
+
+# Bundle edges (via highway).
+ext_1 -> svc_a { via: hwy }
+ext_1 -> svc_b { via: hwy }
+ext_2 -> svc_a { via: hwy }
+ext_2 -> svc_b { via: hwy }
+ext_3 -> svc_b { via: hwy }
+ext_3 -> svc_c { via: hwy }
+
+# Direct edges (no via). svc_a both consumes from the bundle and
+# emits a separate trace to the audit log.
+svc_a -> log { label: "audit" }
+svc_c -> log { label: "audit" }
