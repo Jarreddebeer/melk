@@ -75,6 +75,18 @@ export interface ModelNode {
    * bind doesn't know which theme will be applied).
    */
   tags?: string[];
+  /**
+   * Icon reference (DESIGN-PHASE5-ICONS §2, §3). When `shape === "icon"`
+   * the icon is the node body; otherwise it renders as a badge inside
+   * the regular shape. Bind validates that the referenced alias exists
+   * in `Model.iconPacks`.
+   */
+  icon?: IconNodeRef;
+  /**
+   * Badge placement (DESIGN-PHASE5-ICONS §3.3). Only meaningful when
+   * `shape !== "icon"`. Defaults to "inline" at render time.
+   */
+  iconPosition?: "inline" | "corner";
 }
 
 /**
@@ -383,6 +395,12 @@ export interface Model {
    * separate strip below the diagram body. Independent of title/subtitle.
    */
   caption?: string;
+  /**
+   * Icon packs registered via `icons:` directives
+   * (DESIGN-PHASE5-ICONS §1.1). Order is declaration order; the
+   * renderer's icon registry indexes by alias.
+   */
+  iconPacks: IconPackRef[];
   nodes: ModelNode[];
   edges: ModelEdge[];
   pipelines: Pipeline[];
@@ -401,4 +419,24 @@ export interface Model {
   highwayMemberships: HighwayMembership[];
   /** Highway co-placement groups (§11.11). */
   intersections: Intersection[];
+}
+
+/**
+ * One registered icon pack (DESIGN-PHASE5-ICONS.md §1.1). The source is
+ * either a local filesystem path or an `https://` URL; the renderer
+ * resolves it against the .melk file's directory at render time.
+ */
+export interface IconPackRef {
+  alias: string;
+  source: string;
+}
+
+/**
+ * A resolved icon reference (DESIGN-PHASE5-ICONS.md §2.1, §3.1). The
+ * `alias` matches a registered pack; the `name` is the slash-joined
+ * path within the pack.
+ */
+export interface IconNodeRef {
+  alias: string;
+  name: string;
 }

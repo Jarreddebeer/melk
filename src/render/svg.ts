@@ -41,6 +41,14 @@ import {
   renderTitleStrip,
   type TitleStripLayout,
 } from "./titles.js";
+import {
+  buildIconRegistry,
+  loadIcon,
+  renderIconBadge,
+  renderIconBody,
+  renderIconPlaceholder,
+  type IconRegistry,
+} from "./icons.js";
 
 // --- pixel and bounds layout ---------------------------------------------
 
@@ -57,10 +65,28 @@ const PAGE_MARGIN = 32;
 
 // --- entry point ----------------------------------------------------------
 
+export interface RenderOpts {
+  /**
+   * Directory the .melk file lives in. Used to resolve local icon-pack
+   * paths and to place the .melk-cache/ directory. Defaults to cwd
+   * when omitted.
+   */
+  meltFileDir?: string;
+  /**
+   * When false, URL icon packs become cache-only (no HTTPS fetches).
+   * CLI passes the inverse of `--no-network`. Defaults to true.
+   */
+  allowNetwork?: boolean;
+}
+
 /**
  * Pure function: same inputs → same SVG byte-for-byte. The Theme is part
  * of the input contract: re-rendering with a different Theme gives a
  * different SVG, with no other change.
+ *
+ * The optional `opts` argument carries side-effect configuration for
+ * the icon-pack loader (DESIGN-PHASE5-ICONS): the directory to resolve
+ * relative pack paths from, and whether URL packs may hit the network.
  */
 export function renderSVG(
   model: Model,
@@ -68,7 +94,18 @@ export function renderSVG(
   reservation: Reservation,
   polylines: Polylines,
   theme: Theme,
+  opts: RenderOpts = {},
 ): string {
+  // DESIGN-PHASE5-ICONS §5.1 — build the icon registry once per render.
+  // Side effects (disk reads / HTTPS fetches / cache writes / stderr
+  // warnings) all live in icons.ts; the rest of this function still
+  // produces the same SVG for the same inputs.
+  const iconRegistry = buildIconRegistry(
+    model,
+    opts.meltFileDir ?? process.cwd(),
+    opts.allowNetwork ?? true,
+  );
+
   const layout = pixelLayout(placement, reservation);
   const boxes = boxBounds(model, placement, layout);
 
@@ -288,7 +325,7 @@ export function renderSVG(
     const b = boxes.get(n.id);
     if (!b) continue;
     const overrides = resolveTags(theme, n.tags, `node '${n.id}'`);
-    parts.push(renderNode(n, b, theme, overrides, renderZ));
+    parts.push(renderNode(n, b, theme, overrides, renderZ, iconRegistry));
   }
 
   for (let i = 0; i < polylines.polylines.length; i++) {
@@ -1424,6 +1461,7 @@ function renderNode(
   theme: Theme,
   overrides: TagRule,
   z: number = 0,
+  iconRegistry?: IconRegistry,
 ): string {
   // §11.13: nodes at z < 0 (underground) render faded to imply depth.
   // The fade amount scales with depth: z=-1 → 0.45 opacity, z=-2 → 0.30,
@@ -1451,6 +1489,21 @@ function renderNode(
     : theme.tokens["ink-primary"];
   const textWeight = overrides["text-weight"];
   const textWeightAttr = textWeight !== undefined ? ` font-weight="${textWeight}"` : "";
+
+  // DESIGN-PHASE5-ICONS §2 — icon as the node body. Renders the icon
+  // (or placeholder) at box bounds; label sits below the icon, mirroring
+  // the circle convention.
+  if (n.shape === "icon") {
+    const iconBlock = renderIconAsBody(n, b, theme, iconRegistry);
+    const labelY = b.y + b.height + theme.typography.size.body * 0.9 + 4;
+    return [
+      groupOpen,
+      `  ${iconBlock}`,
+      `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
+      `</g>`,
+    ].join("\n");
+  }
+
   // Circles render their label BELOW the shape (BPMN/flowchart
   // convention for sources, sinks, and events — small markers with
   // adjacent text). The renderer reserves vertical room in
@@ -1464,12 +1517,71 @@ function renderNode(
       `</g>`,
     ].join("\n");
   }
+
+  // DESIGN-PHASE5-ICONS §3 — badge form. If `icon:` set on a non-icon
+  // shape, draw the badge between shape and label.
+  const badge = n.icon
+    ? renderIconAsBadge(n, b, theme, iconRegistry)
+    : "";
+
   return [
     groupOpen,
     `  ${nodeShape(n.shape, b, theme, overrides)}`,
+    ...(badge ? [`  ${badge}`] : []),
     `  <text x="${fmt(cx)}" y="${fmt(cy)}" text-anchor="middle" dominant-baseline="central" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
     `</g>`,
   ].join("\n");
+}
+
+/**
+ * Body-form helper — loads the icon and emits either the icon SVG or
+ * the hatched placeholder, at the box's full pixel bounds.
+ */
+function renderIconAsBody(
+  n: ModelNode,
+  b: BoxBounds,
+  theme: Theme,
+  iconRegistry: IconRegistry | undefined,
+): string {
+  if (!n.icon || !iconRegistry) {
+    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
+  }
+  const loaded = loadIcon(iconRegistry, n.icon);
+  if (!loaded) {
+    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
+  }
+  return renderIconBody(loaded, b.x, b.y, b.width, b.height, theme);
+}
+
+/**
+ * Badge-form helper — loads the icon and emits either the badge SVG or
+ * a small hatched placeholder, placed per icon-position.
+ */
+function renderIconAsBadge(
+  n: ModelNode,
+  b: BoxBounds,
+  theme: Theme,
+  iconRegistry: IconRegistry | undefined,
+): string {
+  if (!n.icon || !iconRegistry) return "";
+  const loaded = loadIcon(iconRegistry, n.icon);
+  const position = n.iconPosition ?? "inline";
+  if (!loaded) {
+    // Small placeholder roughly where a badge would go.
+    if (position === "corner") {
+      const size = Math.min(24, Math.min(b.width, b.height) * 0.3);
+      return renderIconPlaceholder(b.x + 4, b.y + 4, size, size, theme);
+    }
+    const size = Math.min(16, Math.min(b.width, b.height) * 0.3);
+    return renderIconPlaceholder(
+      b.x + (b.width - size) / 2,
+      b.y + (b.height - size) / 2,
+      size,
+      size,
+      theme,
+    );
+  }
+  return renderIconBadge(loaded, b.x, b.y, b.width, b.height, position, undefined, theme);
 }
 
 function nodeShape(

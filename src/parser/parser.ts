@@ -39,6 +39,8 @@ import type {
   TitleDirective,
   SubtitleDirective,
   CaptionDirective,
+  IconsDirective,
+  IconRef,
   EdgesetDecl,
   FanOutDecl,
   LayoutDecl,
@@ -114,6 +116,10 @@ class Parser {
       // Keyword: `caption: "..."` (DESIGN-PHASE5-TITLES §1.1)
       if (tok.value === "caption" && next.kind === "colon") {
         return this.captionDirective();
+      }
+      // Keyword: `icons: <alias> from "<source>"` (DESIGN-PHASE5-ICONS §1.1)
+      if (tok.value === "icons" && next.kind === "colon") {
+        return this.iconsDirective();
       }
       // Keyword: `pipeline <name>: ...`
       if (tok.value === "pipeline" && next.kind === "ident") {
@@ -250,6 +256,28 @@ class Parser {
       kind: "subtitle",
       value: tok.value,
       span: { start: start.span.start, end: tok.span.end },
+    };
+  }
+
+  private iconsDirective(): IconsDirective {
+    const start = this.expect("ident"); // 'icons'
+    this.expect("colon");
+    const aliasTok = this.expect("ident");
+    // The `from` keyword is contextual — it's only special inside this
+    // directive. We expect a literal `from` ident here.
+    const fromTok = this.expect("ident");
+    if (fromTok.value !== "from") {
+      throw new ParseError(
+        `icons directive expects \`from\` after alias, got '${fromTok.value}'`,
+        fromTok.span,
+      );
+    }
+    const sourceTok = this.expect("string");
+    return {
+      kind: "icons",
+      alias: aliasTok.value,
+      source: sourceTok.value,
+      span: { start: start.span.start, end: sourceTok.span.end },
     };
   }
 
@@ -759,6 +787,8 @@ class Parser {
       value = this.viaValue(key.span);
     } else if (key.value === "tags") {
       value = this.tagsValue(key.span);
+    } else if (key.value === "icon") {
+      value = this.iconRefValue(key.span);
     } else {
       value = this.propertyValue();
     }
@@ -785,10 +815,79 @@ class Parser {
       return { kind: "cells", width: w!, height: h!, span: tok.span };
     }
     if (tok.kind === "ident") {
+      // Call form: `icon(alias/name)` (DESIGN-PHASE5-ICONS §2.1). Reserved
+      // only when the ident is exactly `icon` followed by a `lparen`.
+      // Any other ident-then-lparen sequence is a parse error caught
+      // below.
+      if (tok.value === "icon" && this.peekAhead(1).kind === "lparen") {
+        return this.iconCallValue();
+      }
       this.advance();
       return { kind: "ident", value: tok.value, span: tok.span };
     }
     throw new ParseError(`expected value, got ${tok.kind}`, tok.span);
+  }
+
+  /**
+   * Parse the call-form `icon(alias/name)` (DESIGN-PHASE5-ICONS §2.1).
+   * Used as a value for `shape: icon(...)`.
+   */
+  private iconCallValue(): PropertyValue {
+    const start = this.expect("ident"); // 'icon'
+    this.expect("lparen");
+    const ref = this.iconRefBody();
+    const end = this.expect("rparen");
+    return {
+      kind: "icon-call",
+      iconRef: { ...ref, span: { start: start.span.start, end: end.span.end } },
+      span: { start: start.span.start, end: end.span.end },
+    };
+  }
+
+  /**
+   * Parse the value of an `icon:` brace-attr (DESIGN-PHASE5-ICONS §3.1).
+   * Form is `alias/name[/sub/...]` — slash-separated identifiers, at
+   * least two segments (alias + name).
+   */
+  private iconRefValue(keySpan: SourceSpan): PropertyValue {
+    const ref = this.iconRefBody();
+    return {
+      kind: "icon-ref",
+      iconRef: { ...ref, span: { start: keySpan.start, end: ref.span.end } },
+      span: { start: keySpan.start, end: ref.span.end },
+    };
+  }
+
+  /**
+   * Shared icon-reference parser. Consumes `alias/name[/sub/...]` and
+   * returns the alias + the joined name. The slash is its own token
+   * (DESIGN-PHASE5-ICONS §1.2 — subdirectories inside a pack are
+   * treated as path separators in the icon name).
+   */
+  private iconRefBody(): IconRef {
+    const aliasTok = this.expect("ident");
+    if (this.peek().kind !== "slash") {
+      throw new ParseError(
+        `E_ICON_BAD_REF: icon reference must be of the form \`alias/name\`, got '${aliasTok.value}'`,
+        aliasTok.span,
+      );
+    }
+    this.expect("slash");
+    const parts: string[] = [];
+    const firstSegment = this.expect("ident");
+    parts.push(firstSegment.value);
+    let lastSpanEnd = firstSegment.span.end;
+    while (this.peek().kind === "slash") {
+      this.expect("slash");
+      const next = this.expect("ident");
+      parts.push(next.value);
+      lastSpanEnd = next.span.end;
+    }
+    return {
+      alias: aliasTok.value,
+      name: parts.join("/"),
+      span: { start: aliasTok.span.start, end: lastSpanEnd },
+    };
   }
 
   /**

@@ -1,0 +1,32 @@
+layout: lr
+title: "Icon Pack Demo"
+caption: "Demonstrates shape: icon(...) body form and icon: badge form"
+
+# DESIGN-PHASE5-ICONS.md — registers a local pack at examples/icons/basic/
+# and uses both forms:
+#
+#   - body form: `shape: icon(basic/server)` makes the icon the node body;
+#     label sits below. Same convention as `circle` shapes.
+#   - badge form: `shape: rect, icon: basic/database` keeps the rectangle
+#     and overlays the icon (inline by default; corner via icon-position).
+#
+# Monochrome icons inherit `currentColor` so the theme's `ink-primary`
+# token tints them. Swap themes (`--theme=schematic-dark`) and the icons
+# follow.
+
+icons: basic from "./icons/basic/"
+
+# Body-form: the icon IS the node body. Label sits below.
+api      { shape: icon(basic/server),    label: "API" }
+store    { shape: icon(basic/database),  label: "Store" }
+
+# Badge-form: rect shape, icon as a corner badge.
+gateway  { shape: rect, icon: basic/server, icon-position: corner, label: "Gateway" }
+
+# Demonstrate the missing-icon placeholder (deliberately wrong name).
+mystery  { shape: icon(basic/does-not-exist), label: "missing" }
+
+pipeline traffic: gateway -> api -> store
+
+# Off-spine branch — anchors `mystery` perpendicular to `store`.
+branch fallback:right: store -> mystery

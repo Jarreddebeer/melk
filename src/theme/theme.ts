@@ -151,6 +151,17 @@ export interface ThemeTypography {
 
 export type ArrowHeadShape = "filled-triangle" | "none";
 
+/**
+ * Icon rendering style (DESIGN-PHASE5-ICONS §5, addendum). `filled`
+ * (default) preserves the icon's authored fills; monochrome icons that
+ * use `fill="currentColor"` pick up the theme's `ink-primary` token.
+ * `outlined` strips the fill on the wrapping `<g>` and adds a stroke,
+ * so icons render as line-art using the same stroke width as box
+ * borders (`strokes.outline`). Icons that hardcode `fill="#hex"` on
+ * inner elements (multi-colour brand icons) ignore the override.
+ */
+export type IconStyle = "filled" | "outlined";
+
 export interface ThemeStrokes {
   outline: number;
   trace: number;
@@ -167,6 +178,11 @@ export interface ThemeStrokes {
     scale: number;
     "head-shape": ArrowHeadShape;
   };
+  /**
+   * Icon render style — see IconStyle. Optional; defaults to "filled"
+   * when absent so existing themes round-trip unchanged.
+   */
+  "icon-style"?: IconStyle;
 }
 
 /**
@@ -282,6 +298,7 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       "manhole-radius": 2,
       dash: { frame: [4, 3], "back-edge": [5, 3] },
       arrow: { scale: 4.5, "head-shape": "filled-triangle" },
+      "icon-style": "outlined",
     },
     tags: {
       future: {
@@ -343,6 +360,7 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       "manhole-radius": 2,
       dash: { frame: [4, 3], "back-edge": [5, 3] },
       arrow: { scale: 4.5, "head-shape": "filled-triangle" },
+      "icon-style": "outlined",
     },
     tags: {
       future: {
@@ -401,6 +419,7 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       "manhole-radius": 2,
       dash: { frame: [4, 3], "back-edge": [5, 3] },
       arrow: { scale: 4.5, "head-shape": "none" },
+      "icon-style": "outlined",
     },
     tags: {
       future: {
@@ -459,6 +478,7 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       "manhole-radius": 2,
       dash: { frame: [4, 3], "back-edge": [5, 3] },
       arrow: { scale: 4.5, "head-shape": "none" },
+      "icon-style": "outlined",
     },
     tags: {
       future: {
@@ -661,6 +681,18 @@ function validateStrokes(raw: unknown, source: string): ThemeStrokes {
       `E_THEME_BAD_VALUE: theme ${source} 'strokes.arrow.head-shape' must be 'filled-triangle' or 'none', got '${String(headShapeRaw)}'`,
     );
   }
+  // Optional `strokes.icon-style` — defaults to "filled" if absent.
+  // Validated when present so a typo (e.g. "outline" instead of
+  // "outlined") fails loudly rather than silently using the default.
+  let iconStyle: IconStyle | undefined;
+  if (raw["icon-style"] !== undefined) {
+    if (raw["icon-style"] !== "filled" && raw["icon-style"] !== "outlined") {
+      throw new ThemeError(
+        `E_THEME_BAD_VALUE: theme ${source} 'strokes.icon-style' must be 'filled' or 'outlined', got '${String(raw["icon-style"])}'`,
+      );
+    }
+    iconStyle = raw["icon-style"];
+  }
   return {
     outline,
     trace,
@@ -671,6 +703,7 @@ function validateStrokes(raw: unknown, source: string): ThemeStrokes {
     "manhole-radius": manhole,
     dash: { frame: dashFrame, "back-edge": dashBack },
     arrow: { scale: arrowScale, "head-shape": headShapeRaw },
+    ...(iconStyle !== undefined ? { "icon-style": iconStyle } : {}),
   };
 }
 

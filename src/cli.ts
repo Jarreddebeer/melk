@@ -40,12 +40,13 @@ function usage(): never {
   process.stderr.write("  parse                 print the parsed AST as JSON\n");
   process.stderr.write("  bind                  print the bound Model as JSON\n");
   process.stderr.write("  render [-o OUT.svg] [--theme=NAME] [--legend=VALUE]\n");
-  process.stderr.write("         [--title=STR] [--subtitle=STR] [--caption=STR]\n");
+  process.stderr.write("         [--title=STR] [--subtitle=STR] [--caption=STR] [--no-network]\n");
   process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
   process.stderr.write("                        built-in themes: " + BUILTIN_THEME_NAMES.join(", ") + "\n");
   process.stderr.write("                        --legend values: on, off, or a position (bottom|right|top|left)\n");
   process.stderr.write("                        --title / --subtitle / --caption override in-source values;\n");
   process.stderr.write("                          empty string (e.g. --title=\"\") disables\n");
+  process.stderr.write("                        --no-network: URL icon packs become cache-only\n");
   process.exit(1);
 }
 
@@ -184,7 +185,11 @@ function main(): void {
     const reservation = reserveCorridors(model, placement);
     const packing = packTracks(model, placement, reservation);
     const polylines = buildPolylines(model, placement, reservation, packing);
-    const svg = renderSVG(model, placement, reservation, polylines, theme);
+    const noNetwork = argv.includes("--no-network");
+    const svg = renderSVG(model, placement, reservation, polylines, theme, {
+      meltFileDir: dirname(filePath),
+      allowNetwork: !noNetwork,
+    });
 
     const outIdx = argv.indexOf("-o");
     if (outIdx >= 0) {

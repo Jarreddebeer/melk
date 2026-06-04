@@ -114,6 +114,13 @@ interface BindCtx {
   /** Latest `caption:` directive value (last-wins). */
   caption?: string;
   /**
+   * Registered icon packs in declaration order
+   * (DESIGN-PHASE5-ICONS §1.1). Aliases must be unique;
+   * duplicate aliases raise E_ICON_PACK_DUPLICATE_ALIAS.
+   * Sources starting with `http://` raise E_ICON_PACK_INSECURE.
+   */
+  iconPacks: { alias: string; source: string }[];
+  /**
    * Pending `avoid:` references stashed during the first pass. Resolved
    * after every edge and primitive is in place (so that primitive names,
    * edgeset names, and edge refs all have something to resolve against).
@@ -153,6 +160,7 @@ export function bind(program: Program): Model {
     layoutMode: "lr",
     crossingsBudget: 0,
     legendOn: false,
+    iconPacks: [],
     pendingAvoids: [],
     pendingVias: [],
   };
@@ -209,6 +217,9 @@ export function bind(program: Program): Model {
         break;
       case "caption":
         ctx.caption = stmt.value;
+        break;
+      case "icons":
+        bindIconsDirective(stmt, ctx);
         break;
       case "pipeline":
         bindPipeline(stmt, ctx);
@@ -282,6 +293,12 @@ export function bind(program: Program): Model {
     );
   }
 
+  // DESIGN-PHASE5-ICONS §4.1 — every node-level icon ref must resolve
+  // against a registered alias. Runs after the first pass so that an
+  // `icons:` directive declared AFTER a referencing node still
+  // registers in time.
+  validateIconRefs(ctx);
+
   rejectHighwayEndpoints(ctx);
   buildHighwayMemberships(ctx);
   // §11.13: bindIntersect must run BEFORE autoSizeHighways so the
@@ -304,6 +321,7 @@ export function bind(program: Program): Model {
     ...(ctx.title !== undefined ? { title: ctx.title } : {}),
     ...(ctx.subtitle !== undefined ? { subtitle: ctx.subtitle } : {}),
     ...(ctx.caption !== undefined ? { caption: ctx.caption } : {}),
+    iconPacks: ctx.iconPacks,
     nodes: [...ctx.nodes.values()],
     edges: ctx.edges,
     pipelines: [...ctx.pipelines.values()],
@@ -335,11 +353,17 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   let render: "surface" | "underground" | undefined;
   let slotOrder: "declaration" | undefined;
   let tags: string[] | undefined;
+  let icon: { alias: string; name: string } | undefined;
+  let iconPosition: "inline" | "corner" | undefined;
+  let iconPositionSeen = false;
+  let iconSeen = false;
   let orientSpan: { line: number; col: number; offset: number } | undefined;
   let renderSpan: { line: number; col: number; offset: number } | undefined;
   for (const prop of decl.properties) {
     if (prop.key === "orient") orientSpan = prop.span.start;
     if (prop.key === "render") renderSpan = prop.span.start;
+    if (prop.key === "icon") iconSeen = true;
+    if (prop.key === "icon-position") iconPositionSeen = true;
     applyNodeProperty(
       prop,
       (s) => (shapeBox.value = s),
@@ -349,6 +373,40 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       (r) => (render = r),
       (so) => (slotOrder = so),
       (t) => (tags = t),
+      (i) => (icon = i),
+      (p) => (iconPosition = p),
+    );
+  }
+  // DESIGN-PHASE5-ICONS §3.2 — both shape: icon(...) and icon: on the
+  // same node is rejected. The body form already names the icon; an
+  // extra badge attr would compete for the same visual real estate.
+  if (shapeBox.value === "icon" && iconSeen) {
+    throw new BindError(
+      "E_ICON_SHAPE_WITH_ICON_ATTR: a node cannot use both `shape: icon(...)` and `icon:`. " +
+        "Pick one (DESIGN-PHASE5-ICONS §3.2).",
+      decl.span,
+    );
+  }
+  // DESIGN-PHASE5-ICONS §2.1 — `shape: icon` without a call-form
+  // argument is meaningless: the shape needs to know WHICH icon. Either
+  // the author wrote `shape: icon(alias/name)` (which sets `icon` via
+  // the call-form path) or they typed `shape: icon` standalone — the
+  // latter is a mistake.
+  if (shapeBox.value === "icon" && icon === undefined) {
+    throw new BindError(
+      "E_ICON_BAD_REF: `shape: icon` requires a call-form argument like `shape: icon(alias/name)` " +
+        "(DESIGN-PHASE5-ICONS §2.1).",
+      decl.span,
+    );
+  }
+  // DESIGN-PHASE5-ICONS §3.1 — icon-position: without icon: is meaningless.
+  // Reject loudly so a typo'd icon attr (e.g. `icno:` instead of `icon:`)
+  // doesn't silently leave a misleading orphan position.
+  if (iconPositionSeen && !iconSeen && shapeBox.value !== "icon") {
+    throw new BindError(
+      "E_ICON_POSITION_WITHOUT_ICON: `icon-position:` requires `icon:` or `shape: icon(...)`. " +
+        "Either add an `icon:` attribute or remove this directive.",
+      decl.span,
     );
   }
   // §11.11: orient: and render: are highway-only.
@@ -371,6 +429,8 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   if (render !== undefined) node.render = render;
   if (slotOrder !== undefined) node.slotOrder = slotOrder;
   if (tags !== undefined && tags.length > 0) node.tags = tags;
+  if (icon !== undefined) node.icon = icon;
+  if (iconPosition !== undefined) node.iconPosition = iconPosition;
   ctx.nodes.set(decl.name, node);
   ctx.autoDeclared.delete(decl.name);
 }
@@ -1207,9 +1267,21 @@ function applyNodeProperty(
   setRender: (r: "surface" | "underground") => void,
   setSlotOrder: (so: "declaration") => void,
   setTags: (t: string[]) => void,
+  setIcon: (i: { alias: string; name: string }) => void,
+  setIconPosition: (p: "inline" | "corner") => void,
 ): void {
   switch (prop.key) {
     case "shape":
+      // Bare ident → primitive shape (rect / roundrect / ... / highway).
+      // Call form `icon(alias/name)` is parsed as an `icon-call` value.
+      if (prop.value.kind === "icon-call") {
+        setShape("icon");
+        setIcon({
+          alias: prop.value.iconRef.alias,
+          name: prop.value.iconRef.name,
+        });
+        break;
+      }
       if (prop.value.kind !== "ident") {
         throw new BindError("shape must be an identifier", prop.value.span);
       }
@@ -1220,6 +1292,33 @@ function applyNodeProperty(
         );
       }
       setShape(prop.value.value);
+      break;
+    case "icon":
+      if (prop.value.kind !== "icon-ref") {
+        throw new BindError(
+          "E_ICON_BAD_REF: icon must be a reference of the form `alias/name`",
+          prop.value.span,
+        );
+      }
+      setIcon({
+        alias: prop.value.iconRef.alias,
+        name: prop.value.iconRef.name,
+      });
+      break;
+    case "icon-position":
+      if (prop.value.kind !== "ident") {
+        throw new BindError(
+          "E_INVALID_ICON_POSITION: icon-position must be `inline` or `corner` (DESIGN-PHASE5-ICONS §3.3)",
+          prop.value.span,
+        );
+      }
+      if (prop.value.value !== "inline" && prop.value.value !== "corner") {
+        throw new BindError(
+          `E_INVALID_ICON_POSITION: unknown icon-position value: '${prop.value.value}'. Expected \`inline\` or \`corner\`.`,
+          prop.value.span,
+        );
+      }
+      setIconPosition(prop.value.value);
       break;
     case "size":
       if (prop.value.kind === "ident") {
@@ -1310,5 +1409,52 @@ function applyNodeProperty(
 
 function isShape(v: string): v is ShapeName {
   return v === "rect" || v === "roundrect" || v === "circle" ||
-    v === "diamond" || v === "cylinder" || v === "highway";
+    v === "diamond" || v === "cylinder" || v === "highway" || v === "icon";
+}
+
+/**
+ * Register an `icons:` directive (DESIGN-PHASE5-ICONS §1.1). Duplicate
+ * aliases raise E_ICON_PACK_DUPLICATE_ALIAS. `http://` URLs raise
+ * E_ICON_PACK_INSECURE (security: prevent silent man-in-the-middle on
+ * unauthenticated icon fetches).
+ */
+function bindIconsDirective(
+  stmt: { alias: string; source: string; span: { start: { line: number; col: number; offset: number }; end: { line: number; col: number; offset: number } } },
+  ctx: BindCtx,
+): void {
+  if (stmt.source.startsWith("http://")) {
+    throw new BindError(
+      `E_ICON_PACK_INSECURE: icon pack source must be https:// (DESIGN-PHASE5-ICONS §1.3). ` +
+        `Got '${stmt.source}'.`,
+      stmt.span,
+    );
+  }
+  if (ctx.iconPacks.some((p) => p.alias === stmt.alias)) {
+    throw new BindError(
+      `E_ICON_PACK_DUPLICATE_ALIAS: icon pack alias '${stmt.alias}' is already registered. ` +
+        `Each \`icons:\` directive must use a unique alias.`,
+      stmt.span,
+    );
+  }
+  ctx.iconPacks.push({ alias: stmt.alias, source: stmt.source });
+}
+
+/**
+ * Validate that every node-level icon reference targets a registered
+ * pack alias (DESIGN-PHASE5-ICONS §4.1, E_ICON_PACK_UNKNOWN). Runs
+ * after the first pass so that `icons:` directives appearing AFTER a
+ * node that references them still resolve correctly.
+ */
+function validateIconRefs(ctx: BindCtx): void {
+  const aliases = new Set(ctx.iconPacks.map((p) => p.alias));
+  for (const node of ctx.nodes.values()) {
+    if (node.icon === undefined) continue;
+    if (!aliases.has(node.icon.alias)) {
+      throw new BindError(
+        `E_ICON_PACK_UNKNOWN: node '${node.id}' references icon pack '${node.icon.alias}' ` +
+          `which is not registered. Add \`icons: ${node.icon.alias} from "..."\` at the top of the file.`,
+        { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 0, offset: 0 } },
+      );
+    }
+  }
 }

@@ -20,7 +20,14 @@ export interface SourceSpan {
   end: SourcePos;
 }
 
-export type ShapeName = "rect" | "roundrect" | "circle" | "diamond" | "cylinder" | "highway";
+export type ShapeName =
+  | "rect"
+  | "roundrect"
+  | "circle"
+  | "diamond"
+  | "cylinder"
+  | "highway"
+  | "icon";
 export type LayoutMode = "tb" | "lr";
 
 /**
@@ -57,9 +64,23 @@ export interface ViaRef {
 }
 
 /**
+ * A reference to an icon inside a registered pack
+ * (DESIGN-PHASE5-ICONS.md §1, §2.1, §3.1). The `alias` is the
+ * `icons:` pack alias; the `name` is the slash-joined path inside
+ * the pack (e.g. "aws/s3" or "aws/storage/glacier").
+ */
+export interface IconRef {
+  alias: string;
+  name: string;
+  span: SourceSpan;
+}
+
+/**
  * Property values: identifiers, strings, numbers, a cell size, an
- * `avoid:` list, a `via:` list, or a `tags:` list. The previous
- * "size-object" variant is removed; size is expressed via `size: WxH` only.
+ * `avoid:` list, a `via:` list, a `tags:` list, an `icon-call` (for
+ * `shape: icon(alias/name)`), or an `icon-ref` (for `icon: alias/name`).
+ * The previous "size-object" variant is removed; size is expressed via
+ * `size: WxH` only.
  */
 export type PropertyValue =
   | { kind: "ident"; value: string; span: SourceSpan }
@@ -68,7 +89,9 @@ export type PropertyValue =
   | { kind: "cells"; width: number; height: number; span: SourceSpan }
   | { kind: "avoid-list"; items: AvoidRef[]; span: SourceSpan }
   | { kind: "via-list"; items: ViaRef[]; span: SourceSpan }
-  | { kind: "tag-list"; items: { name: string; span: SourceSpan }[]; span: SourceSpan };
+  | { kind: "tag-list"; items: { name: string; span: SourceSpan }[]; span: SourceSpan }
+  | { kind: "icon-call"; iconRef: IconRef; span: SourceSpan }
+  | { kind: "icon-ref"; iconRef: IconRef; span: SourceSpan };
 
 export interface Property {
   key: string;
@@ -241,6 +264,26 @@ export interface SubtitleDirective {
 export interface CaptionDirective {
   kind: "caption";
   value: string;
+  span: SourceSpan;
+}
+
+/**
+ * Top-level icon pack directive (DESIGN-PHASE5-ICONS.md §1.1).
+ *
+ *     icons: aws from "./icons/aws/"
+ *     icons: azure from "https://cdn.example.com/azure-icons/v3/"
+ *
+ * The alias is a bare identifier authors use later
+ * (`shape: icon(alias/name)` or `icon: alias/name`). The source is a
+ * quoted string: a relative/absolute filesystem path, or an `https://`
+ * URL. `http://` URLs are rejected at bind time
+ * (`E_ICON_PACK_INSECURE`). Multiple `icons:` directives are legal and
+ * additive; duplicate aliases raise `E_ICON_PACK_DUPLICATE_ALIAS`.
+ */
+export interface IconsDirective {
+  kind: "icons";
+  alias: string;
+  source: string;
   span: SourceSpan;
 }
 
@@ -441,6 +484,7 @@ export type Statement =
   | TitleDirective
   | SubtitleDirective
   | CaptionDirective
+  | IconsDirective
   | PipelineDecl
   | BusDecl
   | FanOutDecl

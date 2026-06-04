@@ -10,6 +10,9 @@ export type TokenKind =
   | "colon"
   | "comma"
   | "dot"
+  | "slash"
+  | "lparen"
+  | "rparen"
   | "lbrace"
   | "rbrace"
   | "lbracket"
@@ -123,6 +126,27 @@ export function tokenize(source: string): Token[] {
       const start = here();
       advance();
       tokens.push({ kind: "dot", value: ".", span: span(start) });
+      continue;
+    }
+
+    if (ch === "/") {
+      const start = here();
+      advance();
+      tokens.push({ kind: "slash", value: "/", span: span(start) });
+      continue;
+    }
+
+    if (ch === "(") {
+      const start = here();
+      advance();
+      tokens.push({ kind: "lparen", value: "(", span: span(start) });
+      continue;
+    }
+
+    if (ch === ")") {
+      const start = here();
+      advance();
+      tokens.push({ kind: "rparen", value: ")", span: span(start) });
       continue;
     }
 
