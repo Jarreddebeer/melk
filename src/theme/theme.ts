@@ -70,7 +70,7 @@ const NUMBER_VALUED_TAG_PROPS = new Set([
 /** Tag-rule property that accepts an array-of-numbers or null. */
 const DASH_VALUED_TAG_PROPS = new Set(["dash"]);
 
-/** The full set of legal tag-rule property names (DESIGN-PHASE5 §1.5). */
+/** The full set of legal tag-rule property names (DESIGN-PHASE5 §1.5 + legend §1.1, §1.2). */
 export const TAG_PROPERTY_NAMES = [
   "fill",
   "border",
@@ -81,11 +81,24 @@ export const TAG_PROPERTY_NAMES = [
   "trace-width",
   "dash",
   "opacity",
+  "legend",
+  "swatch",
 ] as const;
 
 export type TagPropertyName = (typeof TAG_PROPERTY_NAMES)[number];
 
 const TAG_PROPERTY_SET = new Set<string>(TAG_PROPERTY_NAMES);
+
+/** Classification of each tag-rule property for swatch inference (DESIGN-PHASE5-LEGEND §1.4). */
+const NODE_ONLY_TAG_PROPS = new Set([
+  "fill",
+  "border",
+  "border-width",
+  "text",
+  "text-weight",
+]);
+
+const EDGE_ONLY_TAG_PROPS = new Set(["trace", "trace-width"]);
 
 // --- theme shape ----------------------------------------------------------
 
@@ -164,6 +177,21 @@ export interface TagRule {
   /** Array of dash/gap pixel lengths, or null for solid. */
   dash?: number[] | null;
   opacity?: number;
+  /**
+   * Single-line caption used by the legend feature
+   * (DESIGN-PHASE5-LEGEND §1.1). Optional. When present, the tag becomes
+   * eligible to appear in the legend; without it, the tag is renderable
+   * but excluded from the legend (and a diagram with `legend: on` that
+   * uses the tag will raise E_LEGEND_TAG_HAS_NO_CAPTION). Embedded
+   * newlines are rejected at validation time.
+   */
+  legend?: string;
+  /**
+   * Per-tag swatch override for the legend (DESIGN-PHASE5-LEGEND §1.2).
+   * Values: "box" or "line". When absent, the swatch is inferred from
+   * the rule's other properties via classifyTagRuleSwatch.
+   */
+  swatch?: "box" | "line";
 }
 
 export interface Theme {
@@ -246,9 +274,23 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       arrow: { scale: 4.5, "head-shape": "filled-triangle" },
     },
     tags: {
-      future: { border: "status-warn", "border-width": 1.5, dash: [4, 3] },
-      critical: { border: "status-error", "border-width": 1.5 },
-      deprecated: { trace: "ink-secondary", dash: [3, 3], opacity: 0.6 },
+      future: {
+        border: "status-warn",
+        "border-width": 1.5,
+        dash: [4, 3],
+        legend: "Future state",
+      },
+      critical: {
+        border: "status-error",
+        "border-width": 1.5,
+        legend: "Critical path",
+      },
+      deprecated: {
+        trace: "ink-secondary",
+        dash: [3, 3],
+        opacity: 0.6,
+        legend: "Deprecated route",
+      },
     },
   },
 
@@ -293,9 +335,23 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       arrow: { scale: 4.5, "head-shape": "filled-triangle" },
     },
     tags: {
-      future: { border: "status-warn", "border-width": 1.5, dash: [4, 3] },
-      critical: { border: "status-error", "border-width": 1.5 },
-      deprecated: { trace: "ink-secondary", dash: [3, 3], opacity: 0.6 },
+      future: {
+        border: "status-warn",
+        "border-width": 1.5,
+        dash: [4, 3],
+        legend: "Future state",
+      },
+      critical: {
+        border: "status-error",
+        "border-width": 1.5,
+        legend: "Critical path",
+      },
+      deprecated: {
+        trace: "ink-secondary",
+        dash: [3, 3],
+        opacity: 0.6,
+        legend: "Deprecated route",
+      },
     },
   },
 
@@ -337,9 +393,23 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       arrow: { scale: 4.5, "head-shape": "none" },
     },
     tags: {
-      future: { border: "status-warn", "border-width": 1.5, dash: [4, 3] },
-      critical: { border: "status-error", "border-width": 1.5 },
-      deprecated: { trace: "ink-secondary", dash: [3, 3], opacity: 0.6 },
+      future: {
+        border: "status-warn",
+        "border-width": 1.5,
+        dash: [4, 3],
+        legend: "Future state",
+      },
+      critical: {
+        border: "status-error",
+        "border-width": 1.5,
+        legend: "Critical path",
+      },
+      deprecated: {
+        trace: "ink-secondary",
+        dash: [3, 3],
+        opacity: 0.6,
+        legend: "Deprecated route",
+      },
     },
   },
 
@@ -381,9 +451,23 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       arrow: { scale: 4.5, "head-shape": "none" },
     },
     tags: {
-      future: { border: "status-warn", "border-width": 1.5, dash: [4, 3] },
-      critical: { border: "status-error", "border-width": 1.5 },
-      deprecated: { trace: "ink-secondary", dash: [3, 3], opacity: 0.6 },
+      future: {
+        border: "status-warn",
+        "border-width": 1.5,
+        dash: [4, 3],
+        legend: "Future state",
+      },
+      critical: {
+        border: "status-error",
+        "border-width": 1.5,
+        legend: "Critical path",
+      },
+      deprecated: {
+        trace: "ink-secondary",
+        dash: [3, 3],
+        opacity: 0.6,
+        legend: "Deprecated route",
+      },
     },
   },
 };
@@ -652,9 +736,51 @@ function validateTagRule(
           `E_THEME_BAD_VALUE: theme ${source} tag '${tagName}.dash' must be an array of numbers or null, got '${String(value)}'`,
         );
       }
+    } else if (prop === "legend") {
+      if (typeof value !== "string" || value.length === 0) {
+        throw new ThemeError(
+          `E_THEME_BAD_VALUE: theme ${source} tag '${tagName}.legend' must be a non-empty string, got '${String(value)}'`,
+        );
+      }
+      if (value.includes("\n") || value.includes("\r")) {
+        throw new ThemeError(
+          `E_THEME_BAD_VALUE: theme ${source} tag '${tagName}.legend' must be single-line (no newlines)`,
+        );
+      }
+      (out as Record<string, unknown>)[prop] = value;
+    } else if (prop === "swatch") {
+      if (value !== "box" && value !== "line") {
+        throw new ThemeError(
+          `E_THEME_BAD_VALUE: theme ${source} tag '${tagName}.swatch' must be 'box' or 'line', got '${String(value)}'`,
+        );
+      }
+      (out as Record<string, unknown>)[prop] = value;
     }
   }
   return out;
+}
+
+/**
+ * Classify a tag rule's swatch kind for the legend (DESIGN-PHASE5-LEGEND §1.4).
+ *
+ * If the rule sets an explicit `swatch:` field, returns that. Otherwise
+ * infers from which properties are touched: node-only → box, edge-only →
+ * line, both / neither → box (fallback).
+ *
+ * Properties without a class affiliation (`legend`, `swatch` itself,
+ * `dash`, `opacity`) are ignored by the inference.
+ */
+export function classifyTagRuleSwatch(rule: TagRule): "box" | "line" {
+  if (rule.swatch !== undefined) return rule.swatch;
+  let hasNode = false;
+  let hasEdge = false;
+  for (const key of Object.keys(rule)) {
+    if (NODE_ONLY_TAG_PROPS.has(key)) hasNode = true;
+    else if (EDGE_ONLY_TAG_PROPS.has(key)) hasEdge = true;
+  }
+  if (hasNode) return "box";
+  if (hasEdge) return "line";
+  return "box";
 }
 
 // --- resolution helpers ---------------------------------------------------

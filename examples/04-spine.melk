@@ -1,4 +1,5 @@
 layout: lr
+legend: on
 
 # Horizontal spine with two side-branches off the middle nodes.
 # `branch` does the 90° direction change; the named member sits one
@@ -9,6 +10,10 @@ layout: lr
 # border in the default theme); `alert` is tagged `critical` (loud
 # error-coloured border). Swap the active theme and the tag visuals
 # follow — the `status-*` tokens are defined in every theme.
+#
+# `legend: on` opts into the legend strip at the bottom of the canvas;
+# the theme's `tags.future.legend` and `tags.critical.legend` captions
+# show up next to swatches matching the tag's resolved visual style.
 
 transform { shape: rect,    size: 2x1, label: "ETL" }
 validate  { shape: diamond }

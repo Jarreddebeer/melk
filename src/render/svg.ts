@@ -34,6 +34,7 @@ import { CELL_PX } from "../layout/corridors.js";
 import type { Point, Polyline, Polylines } from "../layout/polyline.js";
 import type { TagRule, Theme } from "../theme/theme.js";
 import { resolveColour, resolveTags } from "../theme/theme.js";
+import { buildLegend, renderLegend, type LegendLayout } from "./legend.js";
 
 // --- pixel and bounds layout ---------------------------------------------
 
@@ -80,10 +81,45 @@ export function renderSVG(
   // label-pixel extent so canvasBounds can expand the canvas to fit.
   const circleLabelExtents = collectCircleLabelExtents(model, boxes, theme);
   const canvas = canvasBounds(polylines, nodesetRects, circleLabelExtents, frameLabelSize);
-  const W = canvas.width;
-  const H = canvas.height;
-  const tx = -canvas.x;
-  const ty = -canvas.y;
+  let W = canvas.width;
+  let H = canvas.height;
+  let tx = -canvas.x;
+  let ty = -canvas.y;
+
+  // DESIGN-PHASE5-LEGEND §3.4 — compute legend strip if enabled and extend
+  // canvas accordingly. The diagram body stays where it is; the legend
+  // takes the new space. Translate (tx, ty) accounts for top/left
+  // positioning where the diagram shifts inward to make room.
+  let legendLayout: LegendLayout | undefined;
+  let legendOriginX = 0;
+  let legendOriginY = 0;
+  if (model.legend?.on) {
+    legendLayout = buildLegend(model, theme, model.legend.position, W, H);
+    switch (model.legend.position) {
+      case "bottom":
+        legendOriginX = 0;
+        legendOriginY = H;
+        H += legendLayout.height;
+        break;
+      case "top":
+        legendOriginX = 0;
+        legendOriginY = 0;
+        ty += legendLayout.height;
+        H += legendLayout.height;
+        break;
+      case "right":
+        legendOriginX = W;
+        legendOriginY = 0;
+        W += legendLayout.width;
+        break;
+      case "left":
+        legendOriginX = 0;
+        legendOriginY = 0;
+        tx += legendLayout.width;
+        W += legendLayout.width;
+        break;
+    }
+  }
 
   // Build a node-id → shape map for the diamond endpoint clip pass.
   // Diamonds need their trace endpoints reprojected onto the diamond
@@ -230,6 +266,9 @@ export function renderSVG(
   }
 
   parts.push(`</g>`);
+  if (legendLayout) {
+    parts.push(renderLegend(legendLayout, legendOriginX, legendOriginY, theme));
+  }
   parts.push(`</svg>`);
   return parts.join("\n");
 }
@@ -1519,15 +1558,15 @@ function longestStraightSegment(poly: Point[]): SegmentRef | null {
   return best;
 }
 
-function fmt(n: number): string {
+export function fmt(n: number): string {
   return Number(n.toFixed(2)).toString();
 }
 
-function escapeText(s: string): string {
+export function escapeText(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function escapeAttr(s: string): string {
+export function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 

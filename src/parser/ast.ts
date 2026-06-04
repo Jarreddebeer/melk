@@ -172,6 +172,42 @@ export interface ThemeDirective {
 }
 
 /**
+ * Top-level legend on/off directive (DESIGN-PHASE5-LEGEND §2.1).
+ *
+ *     legend: on
+ *
+ * The value `on` enables the legend. Any other value (including `off`,
+ * typos like `onn`, or a missing directive entirely) leaves the legend
+ * disabled. Rationale: the worst case (missing legend) is visible to the
+ * author at eyeball time, so making typos noisy would be friction without
+ * payoff for an opt-in feature.
+ */
+export interface LegendDirective {
+  kind: "legend";
+  /** True when the value was exactly `on`; false otherwise. */
+  on: boolean;
+  span: SourceSpan;
+}
+
+/**
+ * Top-level legend position directive (DESIGN-PHASE5-LEGEND §2.2).
+ *
+ *     legend-position: right
+ *
+ * Values: `bottom` (default), `right`, `top`, `left`. Strict — typos
+ * raise `E_LEGEND_BAD_POSITION`. The bind step enforces that this
+ * directive only appears alongside an enabling `legend: on`; an orphan
+ * raises `E_LEGEND_POSITION_WITHOUT_LEGEND`.
+ */
+export type LegendPosition = "bottom" | "right" | "top" | "left";
+
+export interface LegendPositionDirective {
+  kind: "legend-position";
+  position: LegendPosition;
+  span: SourceSpan;
+}
+
+/**
  * A linear flow declaration. Members occupy consecutive grid cells along
  * the flow axis at the same row.
  *
@@ -363,6 +399,8 @@ export type Statement =
   | LayoutDecl
   | CrossingsDirective
   | ThemeDirective
+  | LegendDirective
+  | LegendPositionDirective
   | PipelineDecl
   | BusDecl
   | FanOutDecl

@@ -33,6 +33,9 @@ import type {
   DeprecatedTagDecl,
   EdgeDecl,
   ThemeDirective,
+  LegendDirective,
+  LegendPosition,
+  LegendPositionDirective,
   EdgesetDecl,
   FanOutDecl,
   LayoutDecl,
@@ -88,6 +91,14 @@ class Parser {
       // Keyword: `theme: <name-or-path>` (DESIGN-PHASE5-THEMING.md §2.1)
       if (tok.value === "theme" && next.kind === "colon") {
         return this.themeDirective();
+      }
+      // Keyword: `legend: on|off|...` (DESIGN-PHASE5-LEGEND §2.1)
+      if (tok.value === "legend" && next.kind === "colon") {
+        return this.legendDirective();
+      }
+      // Keyword: `legend-position: bottom|right|top|left` (DESIGN-PHASE5-LEGEND §2.2)
+      if (tok.value === "legend-position" && next.kind === "colon") {
+        return this.legendPositionDirective();
       }
       // Keyword: `pipeline <name>: ...`
       if (tok.value === "pipeline" && next.kind === "ident") {
@@ -180,6 +191,50 @@ class Parser {
       kind: "crossings",
       budget: n,
       span: { start: start.span.start, end: numTok.span.end },
+    };
+  }
+
+  private legendDirective(): LegendDirective {
+    const start = this.expect("ident"); // 'legend'
+    this.expect("colon");
+    // Binary by content-match: only `on` enables. Any other ident value
+    // leaves the legend disabled. We still consume one ident token so the
+    // statement is well-formed and the duplicate-directive check can fire
+    // on a repeat.
+    const tok = this.peek();
+    if (tok.kind !== "ident") {
+      throw new ParseError(
+        `legend value must be an identifier, got ${tok.kind}`,
+        tok.span,
+      );
+    }
+    this.advance();
+    return {
+      kind: "legend",
+      on: tok.value === "on",
+      span: { start: start.span.start, end: tok.span.end },
+    };
+  }
+
+  private legendPositionDirective(): LegendPositionDirective {
+    const start = this.expect("ident"); // 'legend-position'
+    this.expect("colon");
+    const tok = this.expect("ident");
+    if (
+      tok.value !== "bottom" &&
+      tok.value !== "right" &&
+      tok.value !== "top" &&
+      tok.value !== "left"
+    ) {
+      throw new ParseError(
+        `E_LEGEND_BAD_POSITION: legend-position must be 'bottom', 'right', 'top', or 'left', got '${tok.value}'`,
+        tok.span,
+      );
+    }
+    return {
+      kind: "legend-position",
+      position: tok.value as LegendPosition,
+      span: { start: start.span.start, end: tok.span.end },
     };
   }
 

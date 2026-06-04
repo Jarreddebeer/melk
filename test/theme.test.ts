@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import {
   BUILTIN_THEME_NAMES,
+  classifyTagRuleSwatch,
   COLOUR_TOKEN_NAMES,
   DEFAULT_THEME_NAME,
   loadTheme,
@@ -110,6 +111,15 @@ describe("built-in catalogue", () => {
     for (const name of BUILTIN_THEME_NAMES) {
       const tags = loadTheme(name).tags;
       expect(Object.keys(tags).sort()).toEqual(["critical", "deprecated", "future"]);
+    }
+  });
+
+  it("built-in tags ship with legend captions in every theme", () => {
+    for (const name of BUILTIN_THEME_NAMES) {
+      const tags = loadTheme(name).tags;
+      expect(tags["future"]?.legend).toBe("Future state");
+      expect(tags["critical"]?.legend).toBe("Critical path");
+      expect(tags["deprecated"]?.legend).toBe("Deprecated route");
     }
   });
 });
@@ -314,6 +324,8 @@ describe("validateTheme — tag rules", () => {
         "trace-width": 2,
         dash: [4, 3],
         opacity: 0.8,
+        legend: "All properties",
+        swatch: "box",
       },
     };
     const t = validateTheme(raw, "test");
@@ -322,6 +334,97 @@ describe("validateTheme — tag rules", () => {
     for (const prop of TAG_PROPERTY_NAMES) {
       expect(rule).toHaveProperty(prop);
     }
+  });
+});
+
+describe("validateTheme — legend caption", () => {
+  it("accepts a non-empty single-line legend", () => {
+    const raw = validRaw();
+    raw["tags"] = { future: { border: "status-warn", legend: "Future state" } };
+    const t = validateTheme(raw, "test");
+    expect(t.tags["future"]?.legend).toBe("Future state");
+  });
+
+  it("rejects empty legend string", () => {
+    const raw = validRaw();
+    raw["tags"] = { future: { border: "status-warn", legend: "" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_VALUE.*legend/);
+  });
+
+  it("rejects non-string legend", () => {
+    const raw = validRaw();
+    raw["tags"] = { future: { border: "status-warn", legend: 42 } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_VALUE.*legend/);
+  });
+
+  it("rejects multi-line legend (newline)", () => {
+    const raw = validRaw();
+    raw["tags"] = { future: { border: "status-warn", legend: "line1\nline2" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_VALUE.*single-line/);
+  });
+
+  it("rejects multi-line legend (carriage return)", () => {
+    const raw = validRaw();
+    raw["tags"] = { future: { border: "status-warn", legend: "line1\rline2" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_VALUE.*single-line/);
+  });
+});
+
+describe("validateTheme — swatch override", () => {
+  it("accepts 'box' and 'line'", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      a: { border: "status-warn", swatch: "box" },
+      b: { trace: "trace-default", swatch: "line" },
+    };
+    const t = validateTheme(raw, "test");
+    expect(t.tags["a"]?.swatch).toBe("box");
+    expect(t.tags["b"]?.swatch).toBe("line");
+  });
+
+  it("rejects bogus swatch value", () => {
+    const raw = validRaw();
+    raw["tags"] = { a: { border: "status-warn", swatch: "circle" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_VALUE.*swatch/);
+  });
+});
+
+describe("classifyTagRuleSwatch", () => {
+  it("classifies node-only rule as box", () => {
+    expect(classifyTagRuleSwatch({ border: "status-warn", "border-width": 2 })).toBe("box");
+    expect(classifyTagRuleSwatch({ fill: "#fff" })).toBe("box");
+    expect(classifyTagRuleSwatch({ text: "#000", "text-weight": 600 })).toBe("box");
+  });
+
+  it("classifies edge-only rule as line", () => {
+    expect(classifyTagRuleSwatch({ trace: "ink-secondary" })).toBe("line");
+    expect(classifyTagRuleSwatch({ "trace-width": 2 })).toBe("line");
+  });
+
+  it("falls back to box for dash/opacity-only rule", () => {
+    expect(classifyTagRuleSwatch({ dash: [4, 3] })).toBe("box");
+    expect(classifyTagRuleSwatch({ opacity: 0.5 })).toBe("box");
+    expect(classifyTagRuleSwatch({ dash: [4, 3], opacity: 0.5 })).toBe("box");
+    expect(classifyTagRuleSwatch({})).toBe("box");
+  });
+
+  it("classifies mixed node+edge rule as box (node wins)", () => {
+    // Mixed should prefer box per the inference rule (node check runs first).
+    expect(classifyTagRuleSwatch({ border: "status-warn", trace: "trace-default" })).toBe(
+      "box",
+    );
+  });
+
+  it("explicit swatch override wins over inference", () => {
+    expect(classifyTagRuleSwatch({ border: "status-warn", swatch: "line" })).toBe("line");
+    expect(classifyTagRuleSwatch({ trace: "trace-default", swatch: "box" })).toBe("box");
+    expect(classifyTagRuleSwatch({ swatch: "line" })).toBe("line");
+  });
+
+  it("ignores legend caption during inference", () => {
+    // Caption is not a class affiliation.
+    expect(classifyTagRuleSwatch({ legend: "Hello" })).toBe("box"); // fallback
+    expect(classifyTagRuleSwatch({ legend: "X", trace: "trace-default" })).toBe("line");
   });
 });
 
@@ -385,6 +488,71 @@ describe("`theme:` directive + bind", () => {
   it("multiple directives: last wins", () => {
     const m = bind(parse(tokenize("theme: document-dark\ntheme: schematic-light\na -> b")));
     expect(m.themeName).toBe("schematic-light");
+  });
+});
+
+describe("`legend:` directive + bind (DESIGN-PHASE5-LEGEND §2.1)", () => {
+  it("legend: on enables the legend with default position", () => {
+    const m = bind(parse(tokenize("legend: on\na -> b")));
+    expect(m.legend).toEqual({ on: true, position: "bottom" });
+  });
+
+  it("absence of directive leaves legend off (undefined field)", () => {
+    const m = bind(parse(tokenize("a -> b")));
+    expect(m.legend).toBeUndefined();
+  });
+
+  it("legend: off disables", () => {
+    const m = bind(parse(tokenize("legend: off\na -> b")));
+    expect(m.legend).toBeUndefined();
+  });
+
+  it("legend: <typo> silently disables (binary by content match)", () => {
+    // Per the design, anything other than `on` is off. No error.
+    const m = bind(parse(tokenize("legend: onn\na -> b")));
+    expect(m.legend).toBeUndefined();
+  });
+
+  it("legend: on followed by legend: off → off (last wins)", () => {
+    const m = bind(parse(tokenize("legend: on\nlegend: off\na -> b")));
+    expect(m.legend).toBeUndefined();
+  });
+
+  it("legend: off followed by legend: on → on (last wins)", () => {
+    const m = bind(parse(tokenize("legend: off\nlegend: on\na -> b")));
+    expect(m.legend?.on).toBe(true);
+  });
+});
+
+describe("`legend-position:` directive + bind (DESIGN-PHASE5-LEGEND §2.2)", () => {
+  it("propagates to Model.legend.position when paired with legend: on", () => {
+    const m = bind(parse(tokenize("legend: on\nlegend-position: right\na -> b")));
+    expect(m.legend).toEqual({ on: true, position: "right" });
+  });
+
+  it("accepts all four legal positions", () => {
+    for (const pos of ["bottom", "right", "top", "left"]) {
+      const m = bind(parse(tokenize(`legend: on\nlegend-position: ${pos}\na -> b`)));
+      expect(m.legend?.position).toBe(pos);
+    }
+  });
+
+  it("rejects unknown position with E_LEGEND_BAD_POSITION", () => {
+    expect(() => parse(tokenize("legend: on\nlegend-position: rite\na -> b"))).toThrow(
+      /E_LEGEND_BAD_POSITION/,
+    );
+  });
+
+  it("orphan legend-position (no legend: on) raises E_LEGEND_POSITION_WITHOUT_LEGEND", () => {
+    expect(() => bind(parse(tokenize("legend-position: right\na -> b")))).toThrow(
+      /E_LEGEND_POSITION_WITHOUT_LEGEND/,
+    );
+  });
+
+  it("orphan legend-position even when legend: off raises the error", () => {
+    expect(() =>
+      bind(parse(tokenize("legend: off\nlegend-position: right\na -> b"))),
+    ).toThrow(/E_LEGEND_POSITION_WITHOUT_LEGEND/);
   });
 });
 

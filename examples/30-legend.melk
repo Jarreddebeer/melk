@@ -1,0 +1,31 @@
+layout: lr
+legend: on
+legend-position: right
+
+# Demonstrates the `legend` feature (DESIGN-PHASE5-LEGEND.md).
+#
+# Tags used in this diagram are translated by the theme into a key
+# rendered to the right of the canvas. Each entry's swatch is inferred
+# from the tag rule:
+#
+#   - `future`     (node-affecting: border, border-width, dash) → box swatch
+#   - `critical`   (node-affecting: border, border-width)       → box swatch
+#   - `deprecated` (edge-affecting: trace, dash, opacity)       → line swatch
+#
+# Theme owns the captions; swap themes and the visuals change but the
+# captions stay consistent (every built-in theme ships the same three
+# captions for these tags).
+
+ingest    { shape: rect, label: "ingest" }
+transform { shape: rect, size: 2x1, label: "ETL" }
+publish   { shape: rect, label: "publish" }
+audit     { shape: roundrect, tags: [future] }
+alert     { shape: roundrect, label: "alert!", tags: [critical] }
+
+pipeline main: ingest -> transform -> publish
+
+branch enrichers:    transform -> audit
+branch alerts:right: publish   -> alert
+
+# Edge-level tag: the deprecated route becomes a dimmed dashed trace.
+transform -> alert { tags: [deprecated] }

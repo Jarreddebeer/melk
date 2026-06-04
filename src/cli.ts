@@ -38,10 +38,35 @@ function usage(): never {
   process.stderr.write("commands:\n");
   process.stderr.write("  parse                 print the parsed AST as JSON\n");
   process.stderr.write("  bind                  print the bound Model as JSON\n");
-  process.stderr.write("  render [-o OUT.svg] [--theme=NAME]\n");
+  process.stderr.write("  render [-o OUT.svg] [--theme=NAME] [--legend=VALUE]\n");
   process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
   process.stderr.write("                        built-in themes: " + BUILTIN_THEME_NAMES.join(", ") + "\n");
+  process.stderr.write("                        --legend values: on, off, or a position (bottom|right|top|left)\n");
   process.exit(1);
+}
+
+/**
+ * Resolve the CLI --legend=VALUE flag into a LegendConfig override (or
+ * undefined if no flag was supplied). Values:
+ *   - "on"     → enable legend, keep model's position (or default bottom)
+ *   - "off"    → disable legend
+ *   - position → enable legend, use this position (bottom|right|top|left)
+ *   - anything else → off (same binary content-match rule as the
+ *     `legend:` directive)
+ */
+function resolveLegendFlag(
+  cliValue: string | undefined,
+  modelLegend: { on: boolean; position: "bottom" | "right" | "top" | "left" } | undefined,
+): { on: boolean; position: "bottom" | "right" | "top" | "left" } | undefined {
+  if (cliValue === undefined) return modelLegend;
+  if (cliValue === "on") {
+    return { on: true, position: modelLegend?.position ?? "bottom" };
+  }
+  if (cliValue === "bottom" || cliValue === "right" || cliValue === "top" || cliValue === "left") {
+    return { on: true, position: cliValue };
+  }
+  // Anything else (including "off") disables.
+  return undefined;
 }
 
 /**
@@ -105,6 +130,13 @@ function main(): void {
   if (command === "render") {
     const cliTheme = findFlag(argv, "theme");
     const theme = resolveTheme(cliTheme, model.themeName, dirname(filePath));
+    const cliLegend = findFlag(argv, "legend");
+    const legendOverride = resolveLegendFlag(cliLegend, model.legend);
+    if (legendOverride !== undefined) {
+      model.legend = legendOverride;
+    } else {
+      delete model.legend;
+    }
 
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);

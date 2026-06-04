@@ -40,6 +40,7 @@ import type {
   EdgesetDecl,
   FanOutDecl,
   IntersectDecl,
+  LegendPosition,
   NodeDecl,
   NodesetDecl,
   PathDecl,
@@ -100,6 +101,12 @@ interface BindCtx {
   layoutMode: "tb" | "lr";
   crossingsBudget: number;
   themeName?: string;
+  /** Latest `legend: on` directive (last-wins). Undefined if never `on`. */
+  legendOn: boolean;
+  /** Latest `legend-position:` directive (last-wins). */
+  legendPosition?: LegendPosition;
+  /** Span of the most recent `legend-position:` directive (for error reporting). */
+  legendPositionSpan?: SourceSpan;
   /**
    * Pending `avoid:` references stashed during the first pass. Resolved
    * after every edge and primitive is in place (so that primitive names,
@@ -139,6 +146,7 @@ export function bind(program: Program): Model {
     intersections: [],
     layoutMode: "lr",
     crossingsBudget: 0,
+    legendOn: false,
     pendingAvoids: [],
     pendingVias: [],
   };
@@ -174,6 +182,18 @@ export function bind(program: Program): Model {
         // Multiple `theme:` directives: last one wins. Matches `layout:`
         // and `crossings:` precedent (no error for repetition).
         ctx.themeName = stmt.value;
+        break;
+      case "legend":
+        // Last-wins, same as `theme:` / `layout:`. The directive is binary
+        // by content match (DESIGN-PHASE5-LEGEND §2.1): `on` enables; any
+        // other value silently disables. The parser already stamped that
+        // boolean onto stmt.on, so a later `legend: off` (or typo) flips
+        // back to off without error.
+        ctx.legendOn = stmt.on;
+        break;
+      case "legend-position":
+        ctx.legendPosition = stmt.position;
+        ctx.legendPositionSpan = stmt.span;
         break;
       case "pipeline":
         bindPipeline(stmt, ctx);
@@ -234,6 +254,19 @@ export function bind(program: Program): Model {
   //   5. expand via-edges into pairs of synthetic via-half sub-edges
   //      (`a -> hwy`, `hwy -> b`). After this point, downstream stages
   //      see no `viaHighways` — they see two regular edges per via.
+  // DESIGN-PHASE5-LEGEND §2.2: legend-position: without legend: on is an
+  // error. Catches the upstream typo case (e.g. `legend: onn`) silently
+  // disabling the legend while the author still expects a positioned
+  // strip. Fires at bind time so the offending source location is
+  // pointed at; renderer doesn't have to re-check.
+  if (ctx.legendPosition !== undefined && !ctx.legendOn) {
+    throw new BindError(
+      "E_LEGEND_POSITION_WITHOUT_LEGEND: `legend-position:` requires `legend: on`. " +
+        "Either add `legend: on` or remove this directive.",
+      ctx.legendPositionSpan!,
+    );
+  }
+
   rejectHighwayEndpoints(ctx);
   buildHighwayMemberships(ctx);
   // §11.13: bindIntersect must run BEFORE autoSizeHighways so the
@@ -250,6 +283,9 @@ export function bind(program: Program): Model {
     layoutMode: ctx.layoutMode,
     crossingsBudget: ctx.crossingsBudget,
     ...(ctx.themeName !== undefined ? { themeName: ctx.themeName } : {}),
+    ...(ctx.legendOn
+      ? { legend: { on: true, position: ctx.legendPosition ?? "bottom" } }
+      : {}),
     nodes: [...ctx.nodes.values()],
     edges: ctx.edges,
     pipelines: [...ctx.pipelines.values()],

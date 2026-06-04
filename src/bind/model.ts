@@ -21,7 +21,7 @@
  * The bind step raises a BindError before producing an inconsistent
  * Model.
  */
-import type { BranchSide, LayoutMode, ShapeName } from "../parser/ast.js";
+import type { BranchSide, LayoutMode, LegendPosition, ShapeName } from "../parser/ast.js";
 
 /** The four cardinal sides of a box. Mirrors `layout/corridors.ts` Side. */
 export type EdgeSide = "N" | "E" | "S" | "W";
@@ -337,6 +337,19 @@ export interface Intersection {
   highways: string[];
 }
 
+/**
+ * Legend opt-in + position (DESIGN-PHASE5-LEGEND §2). Populated by bind
+ * from the `legend:` and `legend-position:` directives. When the source
+ * has no `legend: on`, this field is absent and the renderer emits no
+ * legend strip.
+ *
+ * CLI `--legend=VALUE` can override this between bind and render.
+ */
+export interface LegendConfig {
+  on: boolean;
+  position: LegendPosition;
+}
+
 export interface Model {
   layoutMode: LayoutMode;
   crossingsBudget: number;
@@ -347,6 +360,12 @@ export interface Model {
    * CLI `--theme=NAME` overrides this when supplied.
    */
   themeName?: string;
+  /**
+   * Legend configuration (DESIGN-PHASE5-LEGEND §2). Undefined when the
+   * source has no `legend: on` (i.e. the legend is off). Present and
+   * with `on: true` when an enabling directive was seen.
+   */
+  legend?: LegendConfig;
   nodes: ModelNode[];
   edges: ModelEdge[];
   pipelines: Pipeline[];
