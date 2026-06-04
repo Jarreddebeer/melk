@@ -32,6 +32,7 @@ import type {
 } from "./corridors.js";
 import { COMB_PITCH, corridorKey } from "./corridors.js";
 import type { Packing, TrackAssignment } from "./tracks.js";
+import { buildModulePortIndex, type ModulePortInfo } from "./module-route.js";
 import { computePixelLayout, slotPixel } from "./pixels.js";
 import type { PixelLayout, Point } from "./pixels.js";
 
@@ -85,6 +86,13 @@ export function buildPolylines(
 ): Polylines {
   const layout = computePixelLayout(placement, reservation);
 
+  // DESIGN-PHASE5-MODULES.md §4.1, §4.2 — module-internal port pixel
+  // positions are needed for any edge with `fromInternal` /
+  // `toInternal` set, so the polyline lands on the actual internal node
+  // instead of the synthetic module cell's face center. Empty map when
+  // the model has no imports.
+  const modulePortIndex = buildModulePortIndex(model, placement, reservation);
+
   // Map edge index → its track assignments by corridor for quick lookup.
   const trackByEdgeAndCorridor = new Map<string, TrackAssignment>();
   for (const t of packing.tracks) {
@@ -103,6 +111,7 @@ export function buildPolylines(
         placement,
         model,
         trackByEdgeAndCorridor,
+        modulePortIndex,
       ),
     );
   }
@@ -259,12 +268,72 @@ function trackPerpCoord(
  *   - Multi-col diagonal: [V, H, V] (real corridor-following traffic)
  *   - Back-edges: [V, H, V] (with H = page margin, wraps around)
  */
+/**
+ * DESIGN-PHASE5-MODULES.md §4.1, §4.5, §4.7 — resolve a polyline's
+ * source or target pixel.
+ *
+ *   - Qualified module ref (`alias.internal`): pixel is the internal
+ *     node's translated centroid (so the trace lands on that specific
+ *     node).
+ *   - Face-to-face module ref (`alias`, no internal): the slot
+ *     allocator assigns each edge a slot along the synthetic cell's
+ *     face. We compute the slot's intended pixel via `fallback()`,
+ *     then snap it to the closest face port candidate (each at a
+ *     visible internal node's matching face midpoint). Multiple
+ *     incoming edges with different slots naturally distribute across
+ *     distinct candidates by proximity. A single edge centers and
+ *     snaps to the closest candidate.
+ *   - Non-module endpoint: pixel is the synthetic cell's slot pixel
+ *     computed by `fallback()`.
+ */
+function portPointFor(
+  parentId: string,
+  internalName: string | undefined,
+  side: "N" | "S" | "E" | "W",
+  fallback: () => Point,
+  modulePortIndex: Map<string, ModulePortInfo>,
+): Point {
+  const info = modulePortIndex.get(parentId);
+  if (info === undefined) return fallback();
+  if (internalName !== undefined) {
+    const port = info.ports.get(internalName);
+    if (port === undefined) return fallback();
+    return { x: info.originX + port.localX, y: info.originY + port.localY };
+  }
+  // Face-to-face: snap the slot's intended pixel to the closest face
+  // port candidate. The slot's intended pixel is the cell-face slot
+  // (= fallback()); the face port candidates are at visible internal
+  // nodes' matching face midpoints. Snap by proximity along the face
+  // axis: for E/W, match by y; for N/S, match by x.
+  const candidates = info.facePorts[side];
+  if (candidates.length === 0) return fallback();
+  const slotPx = fallback();
+  // Distance along face axis to each candidate, find min.
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i]!;
+    const cx = info.originX + c.localX;
+    const cy = info.originY + c.localY;
+    const d = side === "E" || side === "W"
+      ? Math.abs(slotPx.y - cy)
+      : Math.abs(slotPx.x - cx);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i;
+    }
+  }
+  const fp = candidates[bestIdx]!;
+  return { x: info.originX + fp.localX, y: info.originY + fp.localY };
+}
+
 function buildOrthogonalPolyline(
   route: Route,
   layout: PixelLayout,
   placement: Placement,
   model: Model,
   trackLookup: Map<string, TrackAssignment>,
+  modulePortIndex: Map<string, ModulePortInfo>,
 ): Point[] {
   const edge = model.edges[route.edgeIndex]!;
   const srcCell = placement.cells.get(edge.from)!;
@@ -278,21 +347,41 @@ function buildOrthogonalPolyline(
     height: 1,
   };
 
-  const startPoint = slotPixel(
+  // DESIGN-PHASE5-MODULES.md §4.1 — when the edge source is a qualified
+  // module ref (`mod.foo`), the slot pixel is the *internal* node's
+  // translated pixel position, not the synthetic cell's face slot.
+  // Same for the target. The corridor sequence is still planned around
+  // the synthetic cell (because that's what the parent placer sees),
+  // but the trace enters/leaves the corridor at the internal-node's
+  // position, giving a clean perpendicular L-bend inside the module
+  // body instead of a face-to-face trunk with a jump at each end.
+  const startPoint = portPointFor(
+    edge.from,
+    edge.fromInternal,
     route.sourceSide,
-    route.sourceSlot,
-    srcCell,
-    srcSize.width,
-    srcSize.height,
-    layout,
+    () => slotPixel(
+      route.sourceSide,
+      route.sourceSlot,
+      srcCell,
+      srcSize.width,
+      srcSize.height,
+      layout,
+    ),
+    modulePortIndex,
   );
-  const endPoint = slotPixel(
+  const endPoint = portPointFor(
+    edge.to,
+    edge.toInternal,
     route.targetSide,
-    route.targetSlot,
-    tgtCell,
-    tgtSize.width,
-    tgtSize.height,
-    layout,
+    () => slotPixel(
+      route.targetSide,
+      route.targetSlot,
+      tgtCell,
+      tgtSize.width,
+      tgtSize.height,
+      layout,
+    ),
+    modulePortIndex,
   );
 
   // Precompute, for each corridor in the sequence:

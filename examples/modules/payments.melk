@@ -1,0 +1,10 @@
+# A small payments subsystem rendered as a standalone diagram.
+#
+# When imported (see `examples/33-modules-basic.melk`), the parent treats
+# this whole file as a single opaque cell. Internal nodes (`api`, `auth`,
+# `ledger`, `gateway`) become addressable from outside as `payments.api`,
+# `payments.gateway`, etc.
+
+layout: lr
+
+pipeline ingress: api -> auth -> ledger -> gateway

@@ -1,0 +1,17 @@
+# Phase 5 module imports (DESIGN-PHASE5-MODULES.md).
+#
+# `import "<path>" as <alias>` loads a second .melk file and treats it as
+# an opaque cell on the parent canvas. Cross-module references use
+# `alias.node_name`; the parent edge router translates to the actual
+# internal node's pixel position so traces visually enter the module and
+# land on the named internal node.
+
+layout: lr
+title: "End-to-end request flow"
+
+import "./modules/payments.melk" as payments
+import "./modules/notifier.melk" as notifier
+
+frontend -> payments.api
+payments.gateway -> notifier.receive
+notifier.deliver -> customer

@@ -27,7 +27,8 @@ export type ShapeName =
   | "diamond"
   | "cylinder"
   | "highway"
-  | "icon";
+  | "icon"
+  | "module";
 export type LayoutMode = "tb" | "lr";
 
 /**
@@ -100,10 +101,20 @@ export interface Property {
 }
 
 /**
- * Reference to a node, optionally qualified by a port name.
- * Form: `foo` or `foo:port`.
+ * Reference to a node.
+ *
+ * Three forms:
+ *   `foo`              — plain local node
+ *   `foo:port`         — local node with port suffix
+ *   `mod.foo`          — node `foo` inside imported module `mod`
+ *                        (DESIGN-PHASE5-MODULES.md §2)
+ *
+ * `module` is set when the source had a `mod.foo` qualifier; otherwise it
+ * is `undefined`. `node` always carries the *unqualified* node identifier
+ * (so `mod.foo` parses as `{ module: "mod", node: "foo" }`).
  */
 export interface NodeRef {
+  module?: string;
   node: string;
   port?: string;
   span: SourceSpan;
@@ -284,6 +295,44 @@ export interface IconsDirective {
   kind: "icons";
   alias: string;
   source: string;
+  span: SourceSpan;
+}
+
+/**
+ * A raw override value inside an `import` brace block
+ * (DESIGN-PHASE5-MODULES.md §1.1). Each entry is a key (the name of a
+ * top-level directive — `theme`, `layout`, `legend`, `title`, `subtitle`,
+ * `caption`) and its raw value as written. The binder applies these to
+ * the imported module's bind context before parsing its own directives.
+ *
+ * Values are stored unstructured at parse time; the binder validates them
+ * against the directive they're overriding.
+ */
+export type ImportOverride =
+  | { kind: "ident"; key: string; value: string; span: SourceSpan }
+  | { kind: "string"; key: string; value: string; span: SourceSpan };
+
+/**
+ * Top-level import directive (DESIGN-PHASE5-MODULES.md §1.1).
+ *
+ *     import "./payments.melk" as payments
+ *     import "./auth.melk"     as auth     { theme: dark }
+ *     import "./ingest.melk"   as ingest   { theme: light, layout: tb }
+ *
+ * The `path` is a quoted string (relative paths resolve against the
+ * importing file's directory at bind time). The `alias` is a bare
+ * identifier; cross-module refs use `alias.node_name`. The optional
+ * `overrides` block lets the importer override the module's theme,
+ * layout, legend, title, subtitle, or caption at the call site.
+ *
+ * Multiple `import` directives in one file are legal; duplicate aliases
+ * raise `E_MODULE_ALIAS_DUPLICATE`.
+ */
+export interface ImportDecl {
+  kind: "import";
+  path: string;
+  alias: string;
+  overrides: ImportOverride[];
   span: SourceSpan;
 }
 
@@ -485,6 +534,7 @@ export type Statement =
   | SubtitleDirective
   | CaptionDirective
   | IconsDirective
+  | ImportDecl
   | PipelineDecl
   | BusDecl
   | FanOutDecl

@@ -486,6 +486,119 @@ describe("bind — path projection", () => {
   });
 });
 
+describe("parser — import directive (Phase 5 modules)", () => {
+  it("parses a bare `import` directive", () => {
+    const prog = ast('import "./payments.melk" as payments');
+    expect(prog.statements).toHaveLength(1);
+    const stmt = prog.statements[0]!;
+    expect(stmt.kind).toBe("import");
+    if (stmt.kind !== "import") throw new Error("unreachable");
+    expect(stmt.path).toBe("./payments.melk");
+    expect(stmt.alias).toBe("payments");
+    expect(stmt.overrides).toEqual([]);
+  });
+
+  it("parses an import with theme override (ident)", () => {
+    const prog = ast('import "./auth.melk" as auth { theme: dark }');
+    const stmt = prog.statements[0]!;
+    if (stmt.kind !== "import") throw new Error("expected import");
+    expect(stmt.alias).toBe("auth");
+    expect(stmt.overrides).toHaveLength(1);
+    expect(stmt.overrides[0]!.kind).toBe("ident");
+    expect(stmt.overrides[0]!.key).toBe("theme");
+    expect(stmt.overrides[0]!.value).toBe("dark");
+  });
+
+  it("parses an import with multiple overrides", () => {
+    const prog = ast('import "./ingest.melk" as ingest { theme: light, layout: tb }');
+    const stmt = prog.statements[0]!;
+    if (stmt.kind !== "import") throw new Error("expected import");
+    expect(stmt.overrides).toHaveLength(2);
+    expect(stmt.overrides.map((o) => [o.key, o.value])).toEqual([
+      ["theme", "light"],
+      ["layout", "tb"],
+    ]);
+  });
+
+  it("parses an import with a quoted-string override value", () => {
+    const prog = ast('import "./x.melk" as x { theme: "./themes/acme.json" }');
+    const stmt = prog.statements[0]!;
+    if (stmt.kind !== "import") throw new Error("expected import");
+    expect(stmt.overrides).toHaveLength(1);
+    expect(stmt.overrides[0]!.kind).toBe("string");
+    expect(stmt.overrides[0]!.value).toBe("./themes/acme.json");
+  });
+
+  it("parses an import with overrides on separate lines", () => {
+    const prog = ast(
+      [
+        'import "./payments.melk" as payments {',
+        "  theme: dark",
+        "  layout: tb",
+        "}",
+      ].join("\n"),
+    );
+    const stmt = prog.statements[0]!;
+    if (stmt.kind !== "import") throw new Error("expected import");
+    expect(stmt.overrides).toHaveLength(2);
+  });
+
+  it("rejects an `import` without `as`", () => {
+    expect(() => ast('import "./x.melk" payments'))
+      .toThrow(/expects `as`/);
+  });
+
+  it("rejects an empty import path", () => {
+    expect(() => ast('import "" as foo'))
+      .toThrow(/E_MODULE_PATH_EMPTY/);
+  });
+
+  it("rejects an override value that isn't ident or string", () => {
+    expect(() => ast('import "./x.melk" as foo { layout: 3 }'))
+      .toThrow(/import override value must be/);
+  });
+});
+
+describe("parser — qualified node refs (Phase 5 modules)", () => {
+  it("parses `mod.foo -> bar` with module qualifier on the source", () => {
+    const prog = ast('import "./m.melk" as m\nm.foo -> bar');
+    const edge = prog.statements[1]!;
+    if (edge.kind !== "edge") throw new Error("expected edge");
+    expect(edge.from.module).toBe("m");
+    expect(edge.from.node).toBe("foo");
+    expect(edge.to.module).toBeUndefined();
+    expect(edge.to.node).toBe("bar");
+  });
+
+  it("parses `bar -> mod.foo` with module qualifier on the target", () => {
+    const prog = ast('import "./m.melk" as m\nbar -> m.foo');
+    const edge = prog.statements[1]!;
+    if (edge.kind !== "edge") throw new Error("expected edge");
+    expect(edge.from.module).toBeUndefined();
+    expect(edge.from.node).toBe("bar");
+    expect(edge.to.module).toBe("m");
+    expect(edge.to.node).toBe("foo");
+  });
+
+  it("parses qualifiers on both sides (`a.x -> b.y`)", () => {
+    const prog = ast('import "./a.melk" as a\nimport "./b.melk" as b\na.x -> b.y');
+    const edge = prog.statements[2]!;
+    if (edge.kind !== "edge") throw new Error("expected edge");
+    expect(edge.from.module).toBe("a");
+    expect(edge.from.node).toBe("x");
+    expect(edge.to.module).toBe("b");
+    expect(edge.to.node).toBe("y");
+  });
+
+  it("plain (unqualified) refs have undefined module", () => {
+    const prog = ast("a -> b");
+    const edge = prog.statements[0]!;
+    if (edge.kind !== "edge") throw new Error("expected edge");
+    expect(edge.from.module).toBeUndefined();
+    expect(edge.to.module).toBeUndefined();
+  });
+});
+
 describe("bind — deprecation errors", () => {
   it("rejects deprecated `lane` blocks", () => {
     expect(() => run('lane "data": horizontal { a, b }'))

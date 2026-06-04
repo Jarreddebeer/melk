@@ -26,7 +26,8 @@
  * dot was useful during the eyeball checkpoint but is not part of the
  * shipped output.
  */
-import type { Model, ModelEdge, ModelNode } from "../bind/model.js";
+import type { ImportedModule, Model, ModelEdge, ModelNode } from "../bind/model.js";
+import type { ModulePlacedBody } from "../layout/module-place.js";
 import type { ShapeName } from "../parser/ast.js";
 import type { Placement } from "../layout/placement.js";
 import type { Reservation } from "../layout/corridors.js";
@@ -348,6 +349,17 @@ export function renderSVG(
   for (const { n, renderZ } of nodeOrder) {
     const b = boxes.get(n.id);
     if (!b) continue;
+    // DESIGN-PHASE5-MODULES.md §11 — module-shape nodes emit a
+    // <g transform> containing the module's body rendered under its
+    // own theme. The body is the placed sub-model that the per-module
+    // placement pass stashed on `ImportedModule.body`.
+    if (n.shape === "module") {
+      const imported = model.imports.find((m) => m.alias === n.id);
+      if (imported !== undefined && imported.body !== undefined) {
+        parts.push(renderModuleBody(imported, b, theme, opts, iconRegistry));
+      }
+      continue;
+    }
     const overrides = resolveTags(theme, n.tags, `node '${n.id}'`);
     parts.push(renderNode(n, b, theme, overrides, renderZ, iconRegistry, fillResolver));
   }
@@ -1758,6 +1770,170 @@ function renderIconAsBadge(
   return renderIconBadge(loaded, b.x, b.y, b.width, b.height, position, undefined, theme, tint);
 }
 
+/**
+ * Render an imported module's body inside a parent-frame `<g transform>`
+ * (DESIGN-PHASE5-MODULES.md §11). The module's placed body
+ * (`imported.body`) was produced by the per-module placement pass and
+ * carries the placement, reservation, polylines, and the module's own
+ * resolved theme.
+ *
+ * The body is rendered under the module's theme — palette and weights
+ * stay local to the `<g>`. The parent's theme covers parent-level
+ * chrome.
+ *
+ * Subset rendered at v1: nodes (regular shapes + recursive modules) and
+ * edge polylines. Skipped at v1: nodesets-inside-modules, bend-
+ * intersection gradients, via-pair through-segments, path highlights.
+ * Real-world modules that need those are a Cut 9 follow-up.
+ */
+function renderModuleBody(
+  imported: ImportedModule,
+  parentBox: BoxBounds,
+  parentTheme: Theme,
+  opts: RenderOpts,
+  parentIconRegistry: IconRegistry | undefined,
+): string {
+  const body = imported.body as ModulePlacedBody | undefined;
+  if (body === undefined) return "";
+  const subModel = imported.model;
+  const subTheme = body.theme;
+
+  // Center the module's local frame within the synthetic node's box
+  // (the parent placer may have allocated a cell larger than the
+  // module's pixel footprint because ceil() rounded up).
+  const pixelWidth = imported.pixelWidth ?? body.polylines.width;
+  const pixelHeight = imported.pixelHeight ?? body.polylines.height;
+  const padX = Math.max(0, (parentBox.width - pixelWidth) / 2);
+  const padY = Math.max(0, (parentBox.height - pixelHeight) / 2);
+  const originX = parentBox.x + padX;
+  const originY = parentBox.y + padY;
+
+  // Build the sub-model's pixel layout + box bounds the same way the
+  // top-level renderer does. We can't call renderSVG recursively
+  // because it emits a full <svg> document; instead we replay the
+  // node/edge emission loops inside our own <g>.
+  const subLayout = pixelLayout(body.placement, body.reservation);
+  const subBoxes = boxBounds(subModel, body.placement, subLayout);
+
+  // The icon registry is built per-render in the main entry; modules
+  // may register their own packs. For v1, reuse the parent's registry
+  // (which already includes any packs the parent imported).
+  // TODO(Cut 9): if a module registers packs the parent doesn't know
+  // about, build a per-module registry from `subModel.iconPacks`.
+  const iconRegistry = parentIconRegistry;
+  void opts;
+
+  // Defs for any gradient paints in the sub-model. The module's body
+  // is a self-contained context; its <linearGradient> defs live inside
+  // its <defs>, so they don't conflict with parent gradient ids.
+  const subDefs: string[] = [];
+  const subFillResolver = createFillResolver(subTheme, subDefs);
+  for (const n of subModel.nodes) {
+    const o = resolveTags(subTheme, n.tags, `node '${n.id}' (module ${imported.alias})`);
+    if (o.fill !== undefined) subFillResolver(o.fill);
+    if (o.border !== undefined) subFillResolver(o.border);
+    if (o["icon-color"] !== undefined) subFillResolver(o["icon-color"]);
+  }
+
+  const parts: string[] = [];
+  parts.push(
+    `<g data-module="${escapeAttr(imported.alias)}" transform="translate(${fmt(originX)} ${fmt(originY)})">`,
+  );
+  if (subDefs.length > 0) {
+    parts.push(`<defs>${subDefs.join("")}</defs>`);
+  }
+
+  // DESIGN-PHASE5-MODULES.md §6 — optional module frame, opt-in via the
+  // parent theme's `modules` block. Drawn FIRST so it sits behind the
+  // body (the body's nodes/edges paint over the frame interior). The
+  // frame's outer dimensions are pixelWidth x pixelHeight + padding on
+  // each side.
+  const modulesTheme = parentTheme.modules;
+  if (modulesTheme !== undefined && modulesTheme.border !== undefined) {
+    const pad = modulesTheme.padding ?? 0;
+    const w = modulesTheme["border-width"] ?? 1.0;
+    const borderColour = resolveColour(parentTheme, modulesTheme.border);
+    let dashAttr = "";
+    if (modulesTheme.dash !== undefined && modulesTheme.dash !== null) {
+      dashAttr = ` stroke-dasharray="${modulesTheme.dash.join(" ")}"`;
+    }
+    parts.push(
+      `<rect x="${fmt(-pad)}" y="${fmt(-pad)}" width="${fmt(pixelWidth + 2 * pad)}" height="${fmt(pixelHeight + 2 * pad)}" fill="none" stroke="${borderColour}" stroke-width="${w}"${dashAttr}/>`,
+    );
+    // Label, if requested.
+    const labelPos = modulesTheme["label-position"];
+    if (labelPos !== undefined && labelPos !== null) {
+      const labelWeight = modulesTheme["label-weight"]
+        ?? parentTheme.typography.weight.label;
+      const labelSize = parentTheme.typography.size.frame;
+      const labelY = -pad - 4;
+      let labelX: number;
+      let anchor: string;
+      if (labelPos === "top-left") {
+        labelX = -pad;
+        anchor = "start";
+      } else if (labelPos === "top-right") {
+        labelX = pixelWidth + pad;
+        anchor = "end";
+      } else {
+        labelX = pixelWidth / 2;
+        anchor = "middle";
+      }
+      parts.push(
+        `<text x="${fmt(labelX)}" y="${fmt(labelY)}" text-anchor="${anchor}" font-size="${labelSize}" font-weight="${labelWeight}" fill="${resolveColour(parentTheme, "ink-secondary")}">${escapeText(imported.alias)}</text>`,
+      );
+    }
+  }
+
+  // Internal edges (polylines) first so they sit behind boxes.
+  for (let i = 0; i < body.polylines.polylines.length; i++) {
+    const poly = body.polylines.polylines[i]!;
+    const edge = subModel.edges[poly.edgeIndex];
+    if (!edge) continue;
+    const overrides = resolveTags(
+      subTheme,
+      edge.tags,
+      `edge '${edge.from} -> ${edge.to}' (module ${imported.alias})`,
+    );
+    parts.push(renderEdge(edge, poly, subTheme, overrides, []));
+  }
+
+  // Internal nodes. Recurse into nested modules — Cut 5 supports
+  // module-of-modules because `placeModules` already handled them
+  // recursively and they have their own body on `imported.body`.
+  const nodeOrder = subModel.nodes
+    .map((n, i) => {
+      const cellZ = body.placement.cells.get(n.id)?.z ?? 0;
+      const renderZ = n.shape === "highway" ? cellZ : 0;
+      return { n, i, renderZ };
+    })
+    .sort((a, b) => a.renderZ - b.renderZ || a.i - b.i);
+  for (const { n, renderZ } of nodeOrder) {
+    const b = subBoxes.get(n.id);
+    if (!b) continue;
+    if (n.shape === "module") {
+      const nestedImport = subModel.imports.find((m) => m.alias === n.id);
+      if (nestedImport !== undefined && nestedImport.body !== undefined) {
+        parts.push(renderModuleBody(nestedImport, b, subTheme, opts, iconRegistry));
+      }
+      continue;
+    }
+    const overrides = resolveTags(subTheme, n.tags, `node '${n.id}' (module ${imported.alias})`);
+    parts.push(renderNode(n, b, subTheme, overrides, renderZ, iconRegistry, subFillResolver));
+  }
+
+  // Edge labels last, so they sit on top of the polylines they label.
+  for (let i = 0; i < body.polylines.polylines.length; i++) {
+    const poly = body.polylines.polylines[i]!;
+    const edge = subModel.edges[poly.edgeIndex];
+    if (!edge || !edge.label) continue;
+    parts.push(renderEdgeLabel(edge, poly, subTheme));
+  }
+
+  parts.push(`</g>`);
+  return parts.join("");
+}
+
 function nodeShape(
   shape: ShapeName,
   b: BoxBounds,
@@ -1822,6 +1998,12 @@ function nodeShape(
       // Highways render nothing; renderNode returns "" before calling
       // nodeShape for them. Returning "" here is defensive in case a
       // future caller invokes nodeShape directly on a highway.
+      return "";
+    case "module":
+      // Modules emit their own <g> structure in renderModuleBody; the
+      // node-shape dispatch never reaches this case in practice because
+      // the main render loop intercepts shape: module before calling
+      // renderNode → nodeShape. Defensive empty.
       return "";
   }
 }

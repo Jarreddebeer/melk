@@ -25,6 +25,7 @@ import { applyTextFit } from "./layout/text-fit.js";
 import { reserveCorridors } from "./layout/corridors.js";
 import { packTracks } from "./layout/tracks.js";
 import { buildPolylines } from "./layout/polyline.js";
+import { placeModules } from "./layout/module-place.js";
 import { renderSVG } from "./render/svg.js";
 import {
   BUILTIN_THEME_NAMES,
@@ -152,7 +153,7 @@ function main(): void {
     return;
   }
 
-  const model = bind(ast);
+  const model = bind(ast, { importerPath: filePath });
 
   if (command === "bind") {
     process.stdout.write(JSON.stringify(model, null, 2) + "\n");
@@ -180,10 +181,22 @@ function main(): void {
     applyTitleFlag(argv, "subtitle", model);
     applyTitleFlag(argv, "caption", model);
 
+    // DESIGN-PHASE5-MODULES.md §3.1, §3.2 — per-module placement runs
+    // first so the parent placer knows each module's cell footprint
+    // before it starts placing.
+    placeModules(model, (imported) =>
+      resolveTheme(undefined, imported.model.themeName, dirname(filePath)),
+    );
+
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
     const reservation = reserveCorridors(model, placement);
     const packing = packTracks(model, placement, reservation);
+    // DESIGN-PHASE5-MODULES.md §4.1 — buildPolylines now lands directly
+    // on internal node pixel positions for edges with `fromInternal` /
+    // `toInternal`, so no separate endpoint-translation post-pass is
+    // needed. The corridor trunk routes around the actual endpoints,
+    // giving a clean L-bend inside the module body.
     const polylines = buildPolylines(model, placement, reservation, packing);
     const noNetwork = argv.includes("--no-network");
     const svg = renderSVG(model, placement, reservation, polylines, theme, {

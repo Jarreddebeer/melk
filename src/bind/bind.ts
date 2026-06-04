@@ -39,9 +39,12 @@ import type {
   EdgeDecl,
   EdgesetDecl,
   FanOutDecl,
+  ImportDecl,
+  ImportOverride,
   IntersectDecl,
   LegendPosition,
   NodeDecl,
+  NodeRef,
   NodesetDecl,
   PathDecl,
   PipelineDecl,
@@ -51,6 +54,10 @@ import type {
   SourceSpan,
   ViaRef,
 } from "../parser/ast.js";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
+import { tokenize } from "../parser/lexer.js";
+import { parse } from "../parser/parser.js";
 import type {
   AnchorRef,
   Branch,
@@ -58,6 +65,7 @@ import type {
   Edgeset,
   FanOut,
   HighwayMembership,
+  ImportedModule,
   Model,
   ModelEdge,
   ModelNode,
@@ -73,6 +81,46 @@ export class BindError extends Error {
       ? `${message} at line ${span.start.line}, col ${span.start.col}`
       : message);
   }
+}
+
+/**
+ * Resolves an `import "<rel>"` reference at bind time
+ * (DESIGN-PHASE5-MODULES.md §1.2, §1.3). Given the path as written in the
+ * source (`pathSpec`) and the importing file's absolute path
+ * (`importerPath` — `undefined` for the in-memory root caller), the loader
+ * returns the resolved absolute path of the imported file and its source
+ * text. Throws if the file doesn't exist.
+ *
+ * The default loader uses Node's `fs` + `path`; tests can substitute an
+ * in-memory map. The CLI calls `bind(program, { importerPath, loader })`.
+ */
+export interface ModuleLoader {
+  load(pathSpec: string, importerPath: string | undefined): {
+    resolvedPath: string;
+    source: string;
+  };
+}
+
+export interface BindOptions {
+  /**
+   * Absolute path of the file being bound, used as the base for resolving
+   * relative `import` directives and for cycle detection. Undefined when
+   * bind is called on in-memory source with no associated path (e.g. unit
+   * tests of non-import behaviour).
+   */
+  importerPath?: string;
+  /**
+   * Loader for `import` directives. Required when the source contains any
+   * `import` directive AND no in-memory module table covers them. Tests
+   * pass a stub; the CLI passes a `fs`-backed default.
+   */
+  loader?: ModuleLoader;
+  /**
+   * Internal: stack of absolute paths currently being loaded, used for
+   * cycle detection. Populated by recursive bind calls; callers don't
+   * supply this directly. Public so the recursive call can build on it.
+   */
+  importStack?: string[];
 }
 
 interface BindCtx {
@@ -121,6 +169,18 @@ interface BindCtx {
    */
   iconPacks: { alias: string; source: string }[];
   /**
+   * Imported modules in declaration order
+   * (DESIGN-PHASE5-MODULES.md §1). Aliases must be unique within an
+   * importing file; duplicates raise E_MODULE_ALIAS_DUPLICATE.
+   */
+  imports: ImportedModule[];
+  /** Alias → imported module, for O(1) resolution of qualified refs. */
+  moduleAliases: Map<string, ImportedModule>;
+  /** Bind-time options propagated for recursive import resolution. */
+  importerPath?: string;
+  loader?: ModuleLoader;
+  importStack: string[];
+  /**
    * Pending `avoid:` references stashed during the first pass. Resolved
    * after every edge and primitive is in place (so that primitive names,
    * edgeset names, and edge refs all have something to resolve against).
@@ -142,7 +202,7 @@ interface BindCtx {
   }[];
 }
 
-export function bind(program: Program): Model {
+export function bind(program: Program, options: BindOptions = {}): Model {
   const ctx: BindCtx = {
     nodes: new Map(),
     autoDeclared: new Set(),
@@ -161,9 +221,23 @@ export function bind(program: Program): Model {
     crossingsBudget: 0,
     legendOn: false,
     iconPacks: [],
+    imports: [],
+    moduleAliases: new Map(),
+    importerPath: options.importerPath,
+    loader: options.loader,
+    importStack: options.importStack ?? [],
     pendingAvoids: [],
     pendingVias: [],
   };
+
+  // Resolve imports first (DESIGN-PHASE5-MODULES.md §3.2). The module
+  // alias table must be populated before any qualified ref (`mod.foo`)
+  // gets bound, so we walk imports up-front.
+  for (const stmt of program.statements) {
+    if (stmt.kind === "import") {
+      bindImport(stmt, ctx);
+    }
+  }
 
   // First pass: project everything except `path` and `edgeset`
   // annotations and `avoid:` references. Both need the full edge set in
@@ -220,6 +294,9 @@ export function bind(program: Program): Model {
         break;
       case "icons":
         bindIconsDirective(stmt, ctx);
+        break;
+      case "import":
+        // Already processed in the pre-pass above.
         break;
       case "pipeline":
         bindPipeline(stmt, ctx);
@@ -322,6 +399,7 @@ export function bind(program: Program): Model {
     ...(ctx.subtitle !== undefined ? { subtitle: ctx.subtitle } : {}),
     ...(ctx.caption !== undefined ? { caption: ctx.caption } : {}),
     iconPacks: ctx.iconPacks,
+    imports: ctx.imports,
     nodes: [...ctx.nodes.values()],
     edges: ctx.edges,
     pipelines: [...ctx.pipelines.values()],
@@ -341,6 +419,16 @@ export function bind(program: Program): Model {
 
 function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   if (ctx.nodes.has(decl.name) && !ctx.autoDeclared.has(decl.name)) {
+    // If the existing node is a synthetic module-shape node, the
+    // collision is between an import alias and a parent-level node
+    // declaration — report it as such so the user can rename one.
+    if (ctx.moduleAliases.has(decl.name)) {
+      throw new BindError(
+        `E_MODULE_ALIAS_COLLIDES_WITH_NODE: node '${decl.name}' shares a name with ` +
+          `the import alias on the same line. Rename one.`,
+        decl.span,
+      );
+    }
     throw new BindError(
       `duplicate node declaration: '${decl.name}'`,
       decl.span,
@@ -444,8 +532,8 @@ function bindEdge(
   source: ModelEdge["source"],
   isBack: boolean,
 ): void {
-  ensureNode(decl.from.node, ctx);
-  ensureNode(decl.to.node, ctx);
+  const fromRes = resolveNodeRefId(decl.from, ctx);
+  const toRes = resolveNodeRefId(decl.to, ctx);
   let label: string | undefined;
   let pivot: "source" | "target" | undefined;
   let avoidItems: AvoidRef[] | undefined;
@@ -532,10 +620,12 @@ function bindEdge(
     );
   }
   const edge: ModelEdge = {
-    from: decl.from.node,
-    to: decl.to.node,
+    from: fromRes.id,
+    to: toRes.id,
     source,
   };
+  if (fromRes.internal !== undefined) edge.fromInternal = fromRes.internal;
+  if (toRes.internal !== undefined) edge.toInternal = toRes.internal;
   if (decl.from.port !== undefined) edge.fromPort = decl.from.port;
   if (decl.to.port !== undefined) edge.toPort = decl.to.port;
   if (label !== undefined) edge.label = label;
@@ -564,14 +654,16 @@ function bindEdge(
 
 function bindBackBlock(decl: BackBlockDecl, ctx: BindCtx): void {
   for (const e of decl.edges) {
-    ensureNode(e.from.node, ctx);
-    ensureNode(e.to.node, ctx);
+    const fromRes = resolveNodeRefId(e.from, ctx);
+    const toRes = resolveNodeRefId(e.to, ctx);
     const edge: ModelEdge = {
-      from: e.from.node,
-      to: e.to.node,
+      from: fromRes.id,
+      to: toRes.id,
       source: "back-block",
       isBackEdge: true,
     };
+    if (fromRes.internal !== undefined) edge.fromInternal = fromRes.internal;
+    if (toRes.internal !== undefined) edge.toInternal = toRes.internal;
     if (e.from.port !== undefined) edge.fromPort = e.from.port;
     if (e.to.port !== undefined) edge.toPort = e.to.port;
     ctx.edges.push(edge);
@@ -1254,6 +1346,48 @@ function ensureNode(id: string, ctx: BindCtx): void {
   ctx.autoDeclared.add(id);
 }
 
+/**
+ * Resolve a possibly-qualified node ref (DESIGN-PHASE5-MODULES.md §2)
+ * to the parent-level node id used by the placer and the internal name
+ * (if any) used by the parent edge router. For a plain ref `foo`, this
+ * is `{ id: "foo", internal: undefined }` and `foo` is auto-declared if
+ * unknown. For a qualified ref `mod.foo`, this is
+ * `{ id: "mod", internal: "foo" }` — the parent-level id is the
+ * synthetic module node injected at bind time, and the internal name
+ * lets Cut 4 translate to the actual internal node's pixel position.
+ *
+ * Errors raised:
+ *   - E_MODULE_ALIAS_UNKNOWN — `mod` not in import alias table
+ *   - E_MODULE_NODE_UNKNOWN  — `foo` not declared in the imported module
+ */
+function resolveNodeRefId(
+  ref: NodeRef,
+  ctx: BindCtx,
+): { id: string; internal: string | undefined } {
+  if (ref.module === undefined) {
+    ensureNode(ref.node, ctx);
+    return { id: ref.node, internal: undefined };
+  }
+  const imported = ctx.moduleAliases.get(ref.module);
+  if (imported === undefined) {
+    throw new BindError(
+      `E_MODULE_ALIAS_UNKNOWN: qualified reference '${ref.module}.${ref.node}' uses ` +
+        `module alias '${ref.module}' which is not imported. ` +
+        `Add \`import "<path>" as ${ref.module}\` at the top of the file.`,
+      ref.span,
+    );
+  }
+  const innerExists = imported.model.nodes.some((n) => n.id === ref.node);
+  if (!innerExists) {
+    throw new BindError(
+      `E_MODULE_NODE_UNKNOWN: module '${ref.module}' has no node '${ref.node}'. ` +
+        `Check the imported file at '${imported.resolvedPath}'.`,
+      ref.span,
+    );
+  }
+  return { id: ref.module, internal: ref.node };
+}
+
 function hasEdge(ctx: BindCtx, from: string, to: string): boolean {
   for (const e of ctx.edges) {
     if (e.from === from && e.to === to) return true;
@@ -1461,6 +1595,263 @@ function bindIconsDirective(
     );
   }
   ctx.iconPacks.push({ alias: stmt.alias, source: stmt.source });
+}
+
+/**
+ * Default `ModuleLoader` backed by Node's `fs` + `path`
+ * (DESIGN-PHASE5-MODULES.md §1.3). Resolves relative paths against the
+ * importer's directory and reads the file synchronously. Tests use a
+ * stub loader to avoid touching the filesystem.
+ */
+export function createFsLoader(): ModuleLoader {
+  return {
+    load(pathSpec, importerPath) {
+      const baseDir = importerPath !== undefined
+        ? dirname(importerPath)
+        : ".";
+      const resolved = isAbsolute(pathSpec)
+        ? pathSpec
+        : resolvePath(baseDir, pathSpec);
+      if (!existsSync(resolved)) {
+        throw new BindError(
+          `E_MODULE_FILE_NOT_FOUND: import path '${pathSpec}' did not resolve to an existing file ` +
+            `(looked at '${resolved}')`,
+        );
+      }
+      const source = readFileSync(resolved, "utf8");
+      return { resolvedPath: resolved, source };
+    },
+  };
+}
+
+/**
+ * Bind an `import` directive (DESIGN-PHASE5-MODULES.md §1, §3.2, §5).
+ * Recursively loads the imported file, applies any override directives
+ * from the import-site brace block, and registers the resulting
+ * sub-Model under the import alias. Detects import cycles using the
+ * shared import stack.
+ */
+function bindImport(stmt: ImportDecl, ctx: BindCtx): void {
+  if (ctx.moduleAliases.has(stmt.alias)) {
+    throw new BindError(
+      `E_MODULE_ALIAS_DUPLICATE: import alias '${stmt.alias}' is already registered. ` +
+        `Each \`import\` directive must use a unique alias.`,
+      stmt.span,
+    );
+  }
+  if (stmt.path.startsWith("http://") || stmt.path.startsWith("https://")) {
+    throw new BindError(
+      `E_MODULE_URL_UNSUPPORTED: \`import\` does not accept URLs at v1 ` +
+        `(DESIGN-PHASE5-MODULES.md §1.3). Use a local file path.`,
+      stmt.span,
+    );
+  }
+  const loader = ctx.loader ?? createFsLoader();
+  let resolvedPath: string;
+  let source: string;
+  try {
+    const loaded = loader.load(stmt.path, ctx.importerPath);
+    resolvedPath = loaded.resolvedPath;
+    source = loaded.source;
+  } catch (e) {
+    if (e instanceof BindError) {
+      // Attach the directive's span if the loader didn't.
+      if (e.span === undefined) {
+        throw new BindError(e.message, stmt.span);
+      }
+      throw e;
+    }
+    throw new BindError(
+      `E_MODULE_FILE_NOT_FOUND: failed to load import '${stmt.path}': ${(e as Error).message}`,
+      stmt.span,
+    );
+  }
+  // Cycle detection (DESIGN-PHASE5-MODULES.md §5.2). The stack carries
+  // resolved absolute paths so two different relative paths resolving to
+  // the same file are correctly detected.
+  if (ctx.importStack.includes(resolvedPath)) {
+    const chain = [...ctx.importStack, resolvedPath]
+      .map((p) => `  ${p}`)
+      .join("\n");
+    throw new BindError(
+      `E_MODULE_CYCLE: import cycle detected:\n${chain}`,
+      stmt.span,
+    );
+  }
+  // Apply import-site overrides by injecting synthetic directive
+  // statements at the front of the sub-program's statement list. The
+  // module's own declarations come after, so on directives where
+  // "last wins" semantics hold (theme, layout, legend, title, subtitle,
+  // caption), the *module's* value would win over the override. To make
+  // the override win, we inject the synthetic directives at the END
+  // instead (DESIGN-PHASE5-MODULES.md §1.1: import-site overrides win).
+  // Parse + bind the sub-module, decorating any error with the import
+  // chain so the user can see WHICH module the error came from and the
+  // sequence of `import` directives that led there
+  // (DESIGN-PHASE5-MODULES.md §12.3). The original error code is
+  // preserved at the head of the message so test matchers and CLI
+  // post-processors can still detect specific errors.
+  let subModel: Model;
+  try {
+    const subProgram = parse(tokenize(source));
+    applyImportOverrides(subProgram, stmt.overrides);
+    subModel = bind(subProgram, {
+      importerPath: resolvedPath,
+      loader,
+      importStack: [...ctx.importStack, resolvedPath],
+    });
+  } catch (e) {
+    // Re-throw E_MODULE_CYCLE / E_MODULE_FILE_NOT_FOUND unchanged —
+    // those already include their own chain context, and double-
+    // decorating would produce unreadable nested chains.
+    if (e instanceof BindError && /E_MODULE_(CYCLE|FILE_NOT_FOUND)/.test(e.message)) {
+      throw e;
+    }
+    // Already-decorated errors (e.g. an error in a 3-deep import that
+    // bubbled up through 2 bindImport catch blocks) keep their original
+    // decoration. Identify them by the "imported module chain" marker.
+    if (e instanceof BindError && e.message.includes("imported module chain:")) {
+      throw e;
+    }
+    if (e instanceof BindError || (e instanceof Error && e.name === "ParseError")) {
+      // Build the chain from outermost (entry file) to innermost
+      // (failing module). ctx.importerPath is the file currently being
+      // bound; ctx.importStack is the chain of already-recursing
+      // imports above it; resolvedPath is the new sub-module that
+      // failed. Concat in that order.
+      const fullChain: string[] = [];
+      if (ctx.importerPath !== undefined) fullChain.push(ctx.importerPath);
+      for (const p of ctx.importStack) {
+        if (p !== ctx.importerPath) fullChain.push(p);
+      }
+      fullChain.push(resolvedPath);
+      // Reverse so the innermost (failing) file is first, then walk
+      // outward to the entry file. Each line names the file; the
+      // first line is the actual error site, subsequent lines show
+      // "imported by <next-outer>".
+      const reversed = [...fullChain].reverse();
+      const chain = reversed
+        .map((p, i) => {
+          if (i === 0) return `  in ${p}`;
+          return `    imported by ${p}`;
+        })
+        .join("\n");
+      const decorated = `${e.message}\n  (imported module chain:\n${chain})`;
+      // Preserve the BindError type so callers can still instanceof-test it.
+      throw new BindError(decorated, stmt.span);
+    }
+    throw e;
+  }
+  // DESIGN-PHASE5-MODULES.md §7 + §8 — when a file is loaded as a
+  // module, its legend / title / subtitle / caption directives are
+  // suppressed. The parent diagram owns its chrome; the module
+  // contributes only its body. Strip them now so downstream stages
+  // (renderer, legend tag-resolution) see a no-chrome sub-Model.
+  delete subModel.legend;
+  delete subModel.title;
+  delete subModel.subtitle;
+  delete subModel.caption;
+  const imported: ImportedModule = {
+    alias: stmt.alias,
+    resolvedPath,
+    model: subModel,
+  };
+  ctx.imports.push(imported);
+  ctx.moduleAliases.set(stmt.alias, imported);
+
+  // Inject a synthetic module-shape node into the parent's node table so
+  // the parent placer can lay the module out as an opaque cell
+  // (DESIGN-PHASE5-MODULES.md §3.1). The size is a 1x1 placeholder for
+  // now; the per-module placement pass (Cut 3, runs after bind) replaces
+  // it with the actual pixel-derived cell footprint. A parent-level
+  // collision with the alias is an error — the alias becomes a node id
+  // and a duplicate would silently override the synthetic node.
+  if (ctx.nodes.has(stmt.alias) && !ctx.autoDeclared.has(stmt.alias)) {
+    throw new BindError(
+      `E_MODULE_ALIAS_COLLIDES_WITH_NODE: import alias '${stmt.alias}' collides with ` +
+        `a parent-level node of the same name. Rename one.`,
+      stmt.span,
+    );
+  }
+  // If a forward edge auto-declared a node with the alias name before
+  // the import, upgrade it to the module shape.
+  ctx.nodes.set(stmt.alias, {
+    id: stmt.alias,
+    label: stmt.alias,
+    shape: "module",
+    size: { width: 1, height: 1 },
+  });
+  ctx.autoDeclared.delete(stmt.alias);
+}
+
+/**
+ * Append synthetic directive statements to `program.statements` so that
+ * import-site overrides take precedence over the module's own
+ * directives. The set of override keys is intentionally narrow at v1
+ * (DESIGN-PHASE5-MODULES.md §9.1): theme, layout, legend, title,
+ * subtitle, caption. Unknown keys raise E_MODULE_OVERRIDE_UNKNOWN with
+ * the offending key's span.
+ *
+ * The synthetic statements share the same AST shapes as the directives
+ * authors would write inline, so downstream bind logic does not need to
+ * distinguish them.
+ */
+function applyImportOverrides(
+  program: Program,
+  overrides: ImportOverride[],
+): void {
+  for (const ov of overrides) {
+    switch (ov.key) {
+      case "theme":
+        program.statements.push({
+          kind: "theme",
+          value: ov.value,
+          span: ov.span,
+        });
+        break;
+      case "layout":
+        if (ov.kind !== "ident" || (ov.value !== "lr" && ov.value !== "tb")) {
+          throw new BindError(
+            `E_MODULE_OVERRIDE_BAD_VALUE: layout override must be 'lr' or 'tb', got '${ov.value}'`,
+            ov.span,
+          );
+        }
+        program.statements.push({
+          kind: "layout",
+          mode: ov.value,
+          span: ov.span,
+        });
+        break;
+      case "legend":
+        program.statements.push({
+          kind: "legend",
+          on: ov.value === "on",
+          span: ov.span,
+        });
+        break;
+      case "title":
+      case "subtitle":
+      case "caption":
+        if (ov.kind !== "string") {
+          throw new BindError(
+            `E_MODULE_OVERRIDE_BAD_VALUE: ${ov.key} override must be a quoted string, got identifier '${ov.value}'`,
+            ov.span,
+          );
+        }
+        program.statements.push({
+          kind: ov.key,
+          value: ov.value,
+          span: ov.span,
+        });
+        break;
+      default:
+        throw new BindError(
+          `E_MODULE_OVERRIDE_UNKNOWN: unknown import override '${ov.key}'. ` +
+            `Allowed keys: theme, layout, legend, title, subtitle, caption.`,
+          ov.span,
+        );
+    }
+  }
 }
 
 /**

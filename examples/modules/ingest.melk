@@ -1,0 +1,20 @@
+# Ingest plane: parse, validate, enrich, fan out to consumers.
+#
+# Public surface (parent-addressable as `ingest.<name>`):
+#   - inlet:  receives upstream requests
+#   - parsed: validated payload bound for compute
+#   - audit:  side-channel for the observability plane
+
+layout: lr
+
+pipeline main: inlet -> parse -> validate -> enrich -> parsed
+
+# Side-channel: validate emits an audit record. A branch puts `audit`
+# off the spine (perpendicular to the main flow) so it doesn't collide
+# with the next spine member.
+branch audit-out: validate -> audit
+
+parse    { shape: rect, label: "Parse" }
+validate { shape: rect, label: "Validate" }
+enrich   { shape: rect, label: "Enrich" }
+audit    { shape: rect, label: "Audit event" }

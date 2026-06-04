@@ -1,0 +1,17 @@
+# Compute plane: a scheduler fans work out to a pool of workers,
+# each writing back to a shared result aggregator.
+#
+# Public surface (parent-addressable as `compute.<name>`):
+#   - dispatch: receives parsed work units
+#   - results:  emits aggregated results onward
+
+layout: lr
+
+scheduler  { shape: rect, size: 1x2, label: "Scheduler" }
+aggregator { shape: rect, size: 1x2, label: "Aggregator" }
+
+fan-out work_split: scheduler -> [worker_a, worker_b, worker_c]
+bus     work_join:  [worker_a, worker_b, worker_c] -> aggregator
+
+dispatch -> scheduler
+aggregator -> results

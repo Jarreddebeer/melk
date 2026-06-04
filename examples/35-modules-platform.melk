@@ -1,0 +1,48 @@
+# Phase 5 module imports — composing a five-plane platform from five
+# smaller .melk files.
+#
+# Each plane is a self-contained sub-diagram in `examples/modules/`.
+# Render each on its own to see what it looks like in isolation; this
+# parent treats each one as an opaque cell and wires them together
+# at the platform-overview level.
+#
+# Two edge styles are demonstrated:
+#
+#   1. **Module-to-module edges** along the data spine
+#      (`edge -> ingest`, `ingest -> compute`, ...). These land on
+#      each module's outer cell face, giving a clean "data flows from
+#      one plane to the next" read.
+#
+#   2. **Qualified cross-module edges** for the observability taps
+#      (`ingest.audit -> observability.signals`, etc.). The
+#      `module_alias.internal_node_name` form lets a parent-level
+#      edge land on the actual internal node's pixel position,
+#      passing through the module's outer frame (§4.2). Useful when
+#      the destination internal node is the signal of interest, not
+#      the module as a whole.
+
+layout: lr
+theme: "./themes/document-light-with-frames.json"
+title: "Platform overview"
+subtitle: "Edge · Ingest · Compute · Storage · Observability"
+
+import "./modules/edge.melk"          as edge
+import "./modules/ingest.melk"        as ingest
+import "./modules/compute.melk"       as compute
+import "./modules/storage.melk"       as storage
+import "./modules/observability.melk" as observability
+
+# Data plane spine: client request flows left-to-right across all
+# four planes. A pipeline anchors the row so the placer keeps every
+# module in the same horizontal lane.
+pipeline data_plane: client -> edge -> ingest -> compute -> storage -> consumer
+
+# Observability plane sits BELOW the data spine. The branch anchors
+# observability one row down from ingest; this implies a structural
+# `ingest -> observability` edge (face-to-face, the "audit" channel
+# from ingest's perspective). The other two signal sources reach down
+# via qualified refs, landing on the actual `aggregator` and
+# `replica` internal nodes inside compute and storage.
+branch obs-branch:right: ingest -> observability
+compute.aggregator -> observability.signals
+storage.replica    -> observability.signals

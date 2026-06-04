@@ -130,6 +130,12 @@ export function applyTextFit(
 
   for (const node of model.nodes) {
     if (node.shape === "highway") continue;
+    // Modules don't render their own label via the text-fit path
+    // (DESIGN-PHASE5-MODULES.md §3.1) — their footprint is the
+    // pre-placed sub-model's pixel extent, set by the per-module
+    // placement pass. Growing them to fit the alias would only inflate
+    // the cell unnecessarily.
+    if (node.shape === "module") continue;
     const label = node.label;
     if (label.length === 0) continue;
     const cell = placement.cells.get(node.id);

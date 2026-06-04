@@ -41,6 +41,8 @@ import type {
   CaptionDirective,
   IconsDirective,
   IconRef,
+  ImportDecl,
+  ImportOverride,
   EdgesetDecl,
   FanOutDecl,
   LayoutDecl,
@@ -120,6 +122,11 @@ class Parser {
       // Keyword: `icons: <alias> from "<source>"` (DESIGN-PHASE5-ICONS §1.1)
       if (tok.value === "icons" && next.kind === "colon") {
         return this.iconsDirective();
+      }
+      // Keyword: `import "<path>" as <alias> [{ overrides }]`
+      // (DESIGN-PHASE5-MODULES.md §1.1)
+      if (tok.value === "import" && next.kind === "string") {
+        return this.importDecl();
       }
       // Keyword: `pipeline <name>: ...`
       if (tok.value === "pipeline" && next.kind === "ident") {
@@ -278,6 +285,69 @@ class Parser {
       alias: aliasTok.value,
       source: sourceTok.value,
       span: { start: start.span.start, end: sourceTok.span.end },
+    };
+  }
+
+  private importDecl(): ImportDecl {
+    const start = this.expect("ident"); // 'import'
+    const pathTok = this.expect("string");
+    // Reject empty path explicitly — relative resolution of "" picks up
+    // the importing file's directory itself, which is never useful.
+    if (pathTok.value.length === 0) {
+      throw new ParseError(
+        "E_MODULE_PATH_EMPTY: import path must not be an empty string",
+        pathTok.span,
+      );
+    }
+    const asTok = this.expect("ident");
+    if (asTok.value !== "as") {
+      throw new ParseError(
+        `import directive expects \`as\` after path, got '${asTok.value}'`,
+        asTok.span,
+      );
+    }
+    const aliasTok = this.expect("ident");
+    let end = aliasTok.span;
+    const overrides: ImportOverride[] = [];
+    if (this.peek().kind === "lbrace") {
+      this.advance();
+      this.skipNewlines();
+      while (this.peek().kind !== "rbrace" && !this.isAtEnd()) {
+        const keyTok = this.expect("ident");
+        this.expect("colon");
+        const valueTok = this.peek();
+        if (valueTok.kind === "ident") {
+          this.advance();
+          overrides.push({
+            kind: "ident",
+            key: keyTok.value,
+            value: valueTok.value,
+            span: { start: keyTok.span.start, end: valueTok.span.end },
+          });
+        } else if (valueTok.kind === "string") {
+          this.advance();
+          overrides.push({
+            kind: "string",
+            key: keyTok.value,
+            value: valueTok.value,
+            span: { start: keyTok.span.start, end: valueTok.span.end },
+          });
+        } else {
+          throw new ParseError(
+            `import override value must be an identifier or quoted string, got ${valueTok.kind}`,
+            valueTok.span,
+          );
+        }
+        this.skipSeparators();
+      }
+      end = this.expect("rbrace").span;
+    }
+    return {
+      kind: "import",
+      path: pathTok.value,
+      alias: aliasTok.value,
+      overrides,
+      span: { start: start.span.start, end: end.end },
     };
   }
 
@@ -734,14 +804,19 @@ class Parser {
   private nodeRef(): NodeRef {
     const name = this.expect("ident");
     let node = name.value;
+    let module: string | undefined;
     let port: string | undefined;
     let endSpan = name.span;
 
+    // `module.name` — a qualified reference into an imported module
+    // (DESIGN-PHASE5-MODULES.md §2). The first identifier becomes the
+    // module alias; the second is the node name local to that module.
     if (this.peek().kind === "dot" && this.peekAhead(1).kind === "ident") {
       this.advance();
-      const portTok = this.expect("ident");
-      node = `${name.value}.${portTok.value}`;
-      endSpan = portTok.span;
+      const innerTok = this.expect("ident");
+      module = name.value;
+      node = innerTok.value;
+      endSpan = innerTok.span;
     }
 
     if (this.peek().kind === "colon" && this.peekAhead(1).kind === "ident") {
@@ -754,6 +829,7 @@ class Parser {
       node,
       span: { start: name.span.start, end: endSpan.end },
     };
+    if (module !== undefined) ref.module = module;
     if (port !== undefined) ref.port = port;
     return ref;
   }

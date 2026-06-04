@@ -1,0 +1,17 @@
+# Module imports with framing (DESIGN-PHASE5-MODULES.md §6).
+#
+# Same content as 33-modules-basic.melk, but rendered under a theme
+# whose `modules` block opts into a labelled, dashed frame around each
+# imported module's body. The frame is purely visual chrome — layout
+# is identical between the two renders.
+
+layout: lr
+theme: "./themes/document-light-with-frames.json"
+title: "End-to-end request flow (framed)"
+
+import "./modules/payments.melk" as payments
+import "./modules/notifier.melk" as notifier
+
+frontend -> payments.api
+payments.gateway -> notifier.receive
+notifier.deliver -> customer

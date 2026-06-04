@@ -219,6 +219,40 @@ export function reserveCorridors(
       edgeFwd = tgtLocalFwd;
     }
     const sides = assignSides(edgeFwd);
+    // DESIGN-PHASE5-MODULES.md §4.6 — for edges with a qualified module
+    // endpoint, override the corresponding side so the trace exits/
+    // enters the module on the face that's both (a) pointing toward
+    // the other endpoint and (b) closest to the internal node's
+    // position within the module. Without this override the corridor
+    // tie-break picks a side that's "correct" for the synthetic cell's
+    // center but produces a long detour inside the module when the
+    // internal node is far from that face.
+    if (edge.fromInternal !== undefined) {
+      const fromMod = model.imports.find((m) => m.alias === edge.from);
+      const port = fromMod?.ports?.get(edge.fromInternal);
+      if (fromMod !== undefined && port !== undefined &&
+          fromMod.pixelWidth !== undefined && fromMod.pixelHeight !== undefined) {
+        sides.sourceSide = pickModuleFaceForInternal(
+          port.localX, port.localY,
+          fromMod.pixelWidth, fromMod.pixelHeight,
+          tgt.row - src.row, tgt.col - src.col,
+        );
+      }
+    }
+    if (edge.toInternal !== undefined) {
+      const toMod = model.imports.find((m) => m.alias === edge.to);
+      const port = toMod?.ports?.get(edge.toInternal);
+      if (toMod !== undefined && port !== undefined &&
+          toMod.pixelWidth !== undefined && toMod.pixelHeight !== undefined) {
+        // For the target side, the "direction" is from the OTHER
+        // endpoint toward the module — flip the cell delta sign.
+        sides.targetSide = pickModuleFaceForInternal(
+          port.localX, port.localY,
+          toMod.pixelWidth, toMod.pixelHeight,
+          src.row - tgt.row, src.col - tgt.col,
+        );
+      }
+    }
     // §11.10: author can override either or both endpoint faces.
     if (edge.exitSide !== undefined) sides.sourceSide = edge.exitSide;
     if (edge.entrySide !== undefined) sides.targetSide = edge.entrySide;
@@ -477,6 +511,42 @@ function forwardOfEdge(src: Cell, tgt: Cell, srcLocalFwd: Direction): Direction 
     return dCol > 0 ? "E" : "W";
   }
   return dRow > 0 ? "S" : "N";
+}
+
+/**
+ * DESIGN-PHASE5-MODULES.md §4.6 — pick the face of a module-shape
+ * synthetic cell that's best for a polyline emerging from (or arriving
+ * at) a specific internal node.
+ *
+ * Score per face: perpendicular distance from the internal node's
+ * position to that face. A large directional bonus (-DIR_BONUS) is
+ * subtracted when the face matches the cell-delta direction toward the
+ * other endpoint, so direction-correct faces win over "closer but
+ * wrong direction". Within a tied direction, the closer face wins.
+ *
+ * Inputs are in the module's local pixel coordinate system; cell
+ * deltas are in parent grid units.
+ */
+function pickModuleFaceForInternal(
+  localX: number,
+  localY: number,
+  moduleW: number,
+  moduleH: number,
+  dRow: number,
+  dCol: number,
+): Side {
+  const DIR_BONUS = 1_000_000; // large enough to dominate distance
+  const scoreN = localY - (dRow < 0 ? DIR_BONUS : 0);
+  const scoreS = (moduleH - localY) - (dRow > 0 ? DIR_BONUS : 0);
+  const scoreE = (moduleW - localX) - (dCol > 0 ? DIR_BONUS : 0);
+  const scoreW = localX - (dCol < 0 ? DIR_BONUS : 0);
+  // Pick the minimum.
+  let best: Side = "E";
+  let bestScore = scoreE;
+  if (scoreW < bestScore) { best = "W"; bestScore = scoreW; }
+  if (scoreN < bestScore) { best = "N"; bestScore = scoreN; }
+  if (scoreS < bestScore) { best = "S"; bestScore = scoreS; }
+  return best;
 }
 
 // --- 1. side assignment ---------------------------------------------------

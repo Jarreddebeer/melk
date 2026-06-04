@@ -1,0 +1,13 @@
+# Edge plane: client traffic terminates here. CDN → WAF → gateway.
+#
+# Public surface (parent-addressable as `edge.<name>`):
+#   - ingress: where client requests arrive
+#   - egress:  forwarded to the next plane
+
+layout: lr
+
+pipeline edge_chain: ingress -> cdn -> waf -> gateway -> egress
+
+cdn     { shape: rect, label: "CDN" }
+waf     { shape: rect, label: "WAF" }
+gateway { shape: rect, label: "API gateway" }

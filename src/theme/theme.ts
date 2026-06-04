@@ -260,12 +260,41 @@ export interface TagRule {
   "icon-color"?: string;
 }
 
+/**
+ * Module frame theme block (DESIGN-PHASE5-MODULES.md §6). When present,
+ * the renderer draws a rect around each imported module's body. All
+ * fields are optional; absent fields fall back to "no frame".
+ */
+export interface ThemeModules {
+  /** Stroke colour for the frame (token name or hex). Absent → no border. */
+  border?: string;
+  /** Stroke width in px. Default 1.0. */
+  "border-width"?: number;
+  /** Dash array; `null` or absent = solid. */
+  dash?: number[] | null;
+  /** Padding pixels inside the frame around the module's body. Default 0. */
+  padding?: number;
+  /**
+   * Where the module's alias label is rendered. Absent or `null` = no
+   * label. Other values position the label on the corresponding side of
+   * the frame's outer edge.
+   */
+  "label-position"?: "top-left" | "top-center" | "top-right" | null;
+  /** Label font weight. Default = theme's typography.weight.label. */
+  "label-weight"?: number;
+}
+
 export interface Theme {
   name: string;
   tokens: ThemeTokens;
   typography: ThemeTypography;
   strokes: ThemeStrokes;
   tags: Record<string, TagRule>;
+  /**
+   * Optional module-frame theming (DESIGN-PHASE5-MODULES.md §6). Absent
+   * means no frame is drawn around imported modules.
+   */
+  modules?: ThemeModules;
 }
 
 // --- errors ---------------------------------------------------------------
@@ -616,8 +645,98 @@ export function validateTheme(raw: unknown, source: string): Theme {
   const typography = validateTypography(raw["typography"], source);
   const strokes = validateStrokes(raw["strokes"], source);
   const tags = validateTags(raw["tags"], source);
+  const modules = validateModules(raw["modules"], source);
 
-  return { name, tokens, typography, strokes, tags };
+  const out: Theme = { name, tokens, typography, strokes, tags };
+  if (modules !== undefined) out.modules = modules;
+  return out;
+}
+
+/**
+ * Validate the optional `modules` theme block
+ * (DESIGN-PHASE5-MODULES.md §6.2). Absent → return undefined (no
+ * frame). Present → strict-key validation; unknown keys raise
+ * E_THEME_UNKNOWN_MODULES_KEY.
+ */
+function validateModules(raw: unknown, source: string): ThemeModules | undefined {
+  if (raw === undefined) return undefined;
+  if (!isObject(raw)) {
+    throw new ThemeError(
+      `E_THEME_BAD_MODULES: theme ${source} 'modules' must be an object`,
+    );
+  }
+  const allowed = new Set([
+    "border",
+    "border-width",
+    "dash",
+    "padding",
+    "label-position",
+    "label-weight",
+  ]);
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) {
+      throw new ThemeError(
+        `E_THEME_UNKNOWN_MODULES_KEY: theme ${source} 'modules' has unknown key '${key}'. ` +
+          `Allowed: ${[...allowed].join(", ")}.`,
+      );
+    }
+  }
+  const out: ThemeModules = {};
+  if (raw["border"] !== undefined) {
+    if (typeof raw["border"] !== "string") {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.border' must be a string`,
+      );
+    }
+    out.border = raw["border"];
+  }
+  if (raw["border-width"] !== undefined) {
+    if (typeof raw["border-width"] !== "number") {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.border-width' must be a number`,
+      );
+    }
+    out["border-width"] = raw["border-width"];
+  }
+  if (raw["dash"] !== undefined) {
+    if (raw["dash"] === null) {
+      out.dash = null;
+    } else if (
+      Array.isArray(raw["dash"]) && raw["dash"].every((v) => typeof v === "number")
+    ) {
+      out.dash = raw["dash"].slice();
+    } else {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.dash' must be null or an array of numbers`,
+      );
+    }
+  }
+  if (raw["padding"] !== undefined) {
+    if (typeof raw["padding"] !== "number" || raw["padding"] < 0) {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.padding' must be a non-negative number`,
+      );
+    }
+    out.padding = raw["padding"];
+  }
+  if (raw["label-position"] !== undefined) {
+    const v = raw["label-position"];
+    if (v !== null && v !== "top-left" && v !== "top-center" && v !== "top-right") {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.label-position' must be one of null, "top-left", "top-center", "top-right"`,
+      );
+    }
+    out["label-position"] = v as ThemeModules["label-position"];
+  }
+  if (raw["label-weight"] !== undefined) {
+    if (typeof raw["label-weight"] !== "number") {
+      throw new ThemeError(
+        `E_THEME_BAD_MODULES: theme ${source} 'modules.label-weight' must be a number`,
+      );
+    }
+    out["label-weight"] = raw["label-weight"];
+  }
+  return out;
 }
 
 function validateTokens(raw: unknown, source: string): ThemeTokens {

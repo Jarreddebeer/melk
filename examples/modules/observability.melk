@@ -1,0 +1,22 @@
+# Observability plane: a collector ingests signals from the rest of
+# the system, fans out to dashboards, alerting, and a long-term
+# archive.
+#
+# Public surface (parent-addressable as `observability.<name>`):
+#   - signals: receives metrics/logs/traces from other planes
+#
+# Laid out top-to-bottom so `signals` lands on the NORTH face — handy
+# when this module sits BELOW the data plane in a parent diagram and
+# receives taps from above.
+
+layout: tb
+
+collector { shape: rect, size: 2x1, label: "Collector" }
+
+signals -> collector
+
+fan-out fanout: collector -> [dashboards, alerting, archive]
+
+dashboards { shape: rect, label: "Dashboards" }
+alerting   { shape: rect, label: "Alerting" }
+archive    { shape: cylinder, label: "Archive" }

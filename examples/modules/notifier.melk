@@ -1,0 +1,6 @@
+# A notification subsystem. Same pattern as payments.melk — a small
+# internal pipeline addressable via qualified refs from the parent.
+
+layout: lr
+
+pipeline route: receive -> dispatch -> deliver

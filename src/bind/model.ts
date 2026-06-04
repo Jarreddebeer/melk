@@ -138,6 +138,20 @@ export type EdgeSource =
 export interface ModelEdge {
   from: string;
   to: string;
+  /**
+   * When the source ref was a qualified module ref (`mod.foo`), `from`
+   * carries the module alias (`"mod"` — the id of the synthetic module
+   * node injected into the parent's node table) and `fromInternal`
+   * carries the original internal name (`"foo"`). The parent edge
+   * router (Cut 4) uses `fromInternal` to translate to the internal
+   * node's pixel coordinates within the module's local frame.
+   *
+   * Plain (unqualified) source refs leave `fromInternal` undefined.
+   * (DESIGN-PHASE5-MODULES.md §2, §3.1)
+   */
+  fromInternal?: string;
+  /** Mirror of `fromInternal` for the target side of the edge. */
+  toInternal?: string;
   /** Set for back-edges (declared with `>-` or inside a `back:` block). */
   isBackEdge?: boolean;
   fromPort?: string;
@@ -423,6 +437,15 @@ export interface Model {
    * renderer's icon registry indexes by alias.
    */
   iconPacks: IconPackRef[];
+  /**
+   * Imported modules in declaration order (DESIGN-PHASE5-MODULES.md §1).
+   * Each entry carries the alias used at the import site, the resolved
+   * absolute path of the imported file, the imported file's bound
+   * sub-Model, and (populated by the placer in Cut 3) a port table mapping
+   * referenced internal node ids to their position in the module's local
+   * coordinate space.
+   */
+  imports: ImportedModule[];
   nodes: ModelNode[];
   edges: ModelEdge[];
   pipelines: Pipeline[];
@@ -451,6 +474,95 @@ export interface Model {
 export interface IconPackRef {
   alias: string;
   source: string;
+}
+
+/**
+ * An imported module (DESIGN-PHASE5-MODULES.md §1). The imported file is
+ * loaded, parsed, and bound recursively under any overrides supplied at
+ * the import site; the resulting sub-Model is stored here for the placer
+ * to consume.
+ *
+ * Cut 2 populates `alias`, `resolvedPath`, and `model`. The per-module
+ * placement pass (Cut 3) populates `pixelWidth`, `pixelHeight`, `ports`,
+ * and `body` (the placed-and-routed internals, kept around so the
+ * renderer can emit them under the module's resolved theme without
+ * re-running the layout pipeline).
+ */
+export interface ImportedModule {
+  /** The alias used at the import site (the `as <alias>` token). */
+  alias: string;
+  /** Resolved absolute path of the imported file on disk. */
+  resolvedPath: string;
+  /** The bound sub-Model of the imported file, after override application. */
+  model: Model;
+  /**
+   * The module's pixel-space footprint, populated by the per-module
+   * placement pass (`placeModules` in src/layout/module-place.ts).
+   * The footprint origin is (0, 0) local to the module; the parent
+   * placer positions the synthetic node and the renderer translates by
+   * the synthetic node's parent-frame position at emit time.
+   */
+  pixelWidth?: number;
+  pixelHeight?: number;
+  /**
+   * Port table: maps a referenced internal node id (as seen in the
+   * parent edge's `fromInternal` / `toInternal`) to its position in the
+   * module's local pixel coordinate system. Populated by the per-module
+   * placement pass.
+   */
+  ports?: Map<string, ModulePort>;
+  /**
+   * Face ports — inferred entry/exit positions for face-to-face module
+   * edges (no qualified ref on the corresponding endpoint). For each
+   * face N/S/E/W, the ordered list of every visible internal node's
+   * matching face midpoint, sorted by position along the face axis.
+   *
+   * Single edge: slot 0 → first candidate (closest to the natural
+   * starting end of the face — top for W/E, left for N/S).
+   *
+   * Multiple edges arriving at the same face: the slot allocator
+   * orders them spatially by opposite-endpoint position; the polyline
+   * builder uses each slot index to pick a different candidate, so
+   * the edges spread across distinct internal nodes' face midpoints.
+   * Overflow (more edges than candidates) cycles through with modulo.
+   *
+   * Empty face: the polyline builder falls back to the synthetic
+   * cell's face slot pixel (current default behaviour for a module
+   * with no visible internals on that side).
+   */
+  facePorts?: {
+    N: { localX: number; localY: number }[];
+    S: { localX: number; localY: number }[];
+    E: { localX: number; localY: number }[];
+    W: { localX: number; localY: number }[];
+  };
+  /**
+   * The fully laid-out + routed sub-model body (Cut 3 populates; Cut 5
+   * renders). Carries enough information for the renderer to emit the
+   * module's internal SVG without re-running the layout pipeline. The
+   * type is `unknown` here to avoid a cyclic dep on layout types from
+   * model.ts; the renderer casts to `ModulePlacedBody` from
+   * `src/layout/module-place.ts`.
+   */
+  body?: unknown;
+}
+
+/**
+ * A module port — the connection point for an external edge entering or
+ * leaving the module (DESIGN-PHASE5-MODULES.md §3.1, §4.3). The
+ * coordinates are in the module's local pixel space; Cut 4 translates
+ * them by the synthetic node's parent-frame position before handing them
+ * to the edge router.
+ *
+ * `faceSide` is the side of the module's bounding box closest to the
+ * referenced internal node — the parent edge router uses it as a hint
+ * for the polyline's arrival direction.
+ */
+export interface ModulePort {
+  internalNodeId: string;
+  localX: number;
+  localY: number;
+  faceSide: "N" | "S" | "E" | "W";
 }
 
 /**

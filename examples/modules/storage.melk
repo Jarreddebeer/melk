@@ -1,0 +1,16 @@
+# Storage plane: writes land in the primary store, with a replica
+# kept downstream. Reads come back out as a side-branch off the
+# primary store.
+#
+# Public surface (parent-addressable as `storage.<name>`):
+#   - writes:  receives committed results
+#   - reads:   serves read requests back to consumers
+#   - replica: secondary, available for analytics/observability
+
+layout: lr
+
+primary { shape: cylinder, size: 2x1, label: "Primary store" }
+replica { shape: cylinder, size: 2x1, label: "Replica" }
+
+pipeline main: writes -> primary -> replica
+branch reads-out:right: primary -> reads
