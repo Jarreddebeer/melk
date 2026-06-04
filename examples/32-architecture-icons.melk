@@ -1,0 +1,49 @@
+layout: lr
+title: "Web Service Reference Architecture"
+subtitle: "Demonstrates the melk-architecture starter icon pack"
+caption: "32 architectural icons covering actors, compute, storage, messaging, networking, clients, ops, structural"
+theme: "./themes/document-light-with-gradients.json"
+
+# Registers the bundled icon pack at examples/icons/melk-architecture/
+# (DESIGN-PHASE5-ICONS.md §1.1). Each icon used below is referenced as
+# `arch/<category>/<name>` matching the directory layout.
+
+icons: arch from "./icons/melk-architecture/"
+
+# A typical web service flow: user → CDN → API gateway → service →
+# database, with side-paths to auth, cache, monitoring, and an audit log.
+
+# Actor on the left edge.
+user      { shape: icon(arch/actors/user),                   label: "Customer" }
+
+# Front-of-stack: CDN, gateway, service. `border: true` wraps these
+# in a rounded outline so they read as primary system boundaries.
+cdn       { shape: icon(arch/networking/cloud),  border: true, label: "CDN", tags: [external] }
+gateway   { shape: icon(arch/networking/router),  border: true, label: "API gateway" }
+api       { shape: icon(arch/compute/server),     border: true, label: "API server", tags: [critical] }
+
+# Backing storage (bordered to match).
+store     { shape: icon(arch/storage/database),   border: true, label: "Store" }
+
+# Main flow as a left-to-right pipeline.
+pipeline main: user -> cdn -> gateway -> api -> store
+
+# Auth (off-spine, above the API) — tagged `critical` so its icon
+# re-tints to the theme's status-error colour. The `icon-color`
+# property on the tag rule drives the wrapping `<g>`'s `color`
+# attribute, so any element using `currentColor` re-paints.
+auth      { shape: icon(arch/ops/key),                       label: "Auth",       tags: [critical] }
+branch auth-branch: api -> auth
+
+# Monitoring (off-spine, below the API) — `future` tag re-tints the
+# icon to status-warn (amber/orange).
+metrics   { shape: icon(arch/ops/activity),                  label: "Metrics",    tags: [future] }
+branch metrics-branch:right: api -> metrics
+
+# Audit log fed by an event stream off the store — events tinted
+# `deprecated` (muted grey) to signal a legacy path.
+events    { shape: icon(arch/messaging/zap),                 label: "Events",     tags: [deprecated] }
+# Three-colour showcase: green border, purple gradient background, amber icon lines.
+audit     { shape: icon(arch/storage/archive),    border: true, label: "Audit log", tags: [showcase] }
+branch event-branch:right: store -> events
+pipeline event-pipe: events -> audit

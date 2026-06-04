@@ -57,6 +57,7 @@ const COLOUR_VALUED_TAG_PROPS = new Set([
   "border",
   "text",
   "trace",
+  "icon-color",
 ]);
 
 /** Tag-rule properties that accept a number value (pixels). */
@@ -70,7 +71,19 @@ const NUMBER_VALUED_TAG_PROPS = new Set([
 /** Tag-rule property that accepts an array-of-numbers or null. */
 const DASH_VALUED_TAG_PROPS = new Set(["dash"]);
 
-/** The full set of legal tag-rule property names (DESIGN-PHASE5 §1.5 + legend §1.1, §1.2). */
+/**
+ * Tag-rule colour-valued properties that ALSO accept a `linear ...`
+ * gradient string. These are the properties that drive an area or
+ * stroke paint (fill, border, icon-color); text/trace are kept solid
+ * because gradients on body text and trace lines rarely read well.
+ */
+const GRADIENT_ELIGIBLE_TAG_PROPS = new Set([
+  "fill",
+  "border",
+  "icon-color",
+]);
+
+/** The full set of legal tag-rule property names (DESIGN-PHASE5 §1.5 + legend §1.1, §1.2 + icon-color addendum). */
 export const TAG_PROPERTY_NAMES = [
   "fill",
   "border",
@@ -83,6 +96,7 @@ export const TAG_PROPERTY_NAMES = [
   "opacity",
   "legend",
   "swatch",
+  "icon-color",
 ] as const;
 
 export type TagPropertyName = (typeof TAG_PROPERTY_NAMES)[number];
@@ -162,6 +176,17 @@ export type ArrowHeadShape = "filled-triangle" | "none";
  */
 export type IconStyle = "filled" | "outlined";
 
+/**
+ * Whether the renderer draws a rounded border around icon-as-body and
+ * circle nodes — the shapes whose label sits OUTSIDE the glyph. `off`
+ * (default) keeps the glyph+label group floating without an outline.
+ * `on` wraps the entire node footprint in a rect matching the regular
+ * `shape: rect` outline (border-strong, theme.strokes.outline width,
+ * 2px corner radius). Per-node `border: true|false` overrides this
+ * theme default.
+ */
+export type IconBorder = "on" | "off";
+
 export interface ThemeStrokes {
   outline: number;
   trace: number;
@@ -183,6 +208,12 @@ export interface ThemeStrokes {
    * when absent so existing themes round-trip unchanged.
    */
   "icon-style"?: IconStyle;
+  /**
+   * Whether icon-as-body and circle nodes get a wrapped border — see
+   * IconBorder. Optional; defaults to "off" when absent so existing
+   * themes round-trip unchanged.
+   */
+  "icon-border"?: IconBorder;
 }
 
 /**
@@ -218,6 +249,15 @@ export interface TagRule {
    * the rule's other properties via classifyTagRuleSwatch.
    */
   swatch?: "box" | "line";
+  /**
+   * Tag-driven colour for icon-as-body and badge icons (DESIGN-PHASE5
+   * icon-color addendum). Drives the wrapping `<g>`'s `color` attribute,
+   * which propagates to any element using `currentColor` — so monochrome
+   * icons re-paint with this colour for either outlined OR filled
+   * styles. Multi-colour brand icons (literal `fill="#hex"`) ignore it.
+   * Value is a token name or hex literal, same as other colour props.
+   */
+  "icon-color"?: string;
 }
 
 export interface Theme {
@@ -305,17 +345,20 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
         border: "status-warn",
         "border-width": 1.5,
         dash: [4, 3],
+        "icon-color": "status-warn",
         legend: "Future state",
       },
       critical: {
         border: "status-error",
         "border-width": 1.5,
+        "icon-color": "status-error",
         legend: "Critical path",
       },
       deprecated: {
         trace: "ink-secondary",
         dash: [3, 3],
         opacity: 0.6,
+        "icon-color": "ink-secondary",
         legend: "Deprecated route",
       },
     },
@@ -367,17 +410,20 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
         border: "status-warn",
         "border-width": 1.5,
         dash: [4, 3],
+        "icon-color": "status-warn",
         legend: "Future state",
       },
       critical: {
         border: "status-error",
         "border-width": 1.5,
+        "icon-color": "status-error",
         legend: "Critical path",
       },
       deprecated: {
         trace: "ink-secondary",
         dash: [3, 3],
         opacity: 0.6,
+        "icon-color": "ink-secondary",
         legend: "Deprecated route",
       },
     },
@@ -426,17 +472,20 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
         border: "status-warn",
         "border-width": 1.5,
         dash: [4, 3],
+        "icon-color": "status-warn",
         legend: "Future state",
       },
       critical: {
         border: "status-error",
         "border-width": 1.5,
+        "icon-color": "status-error",
         legend: "Critical path",
       },
       deprecated: {
         trace: "ink-secondary",
         dash: [3, 3],
         opacity: 0.6,
+        "icon-color": "ink-secondary",
         legend: "Deprecated route",
       },
     },
@@ -485,17 +534,20 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
         border: "status-warn",
         "border-width": 1.5,
         dash: [4, 3],
+        "icon-color": "status-warn",
         legend: "Future state",
       },
       critical: {
         border: "status-error",
         "border-width": 1.5,
+        "icon-color": "status-error",
         legend: "Critical path",
       },
       deprecated: {
         trace: "ink-secondary",
         dash: [3, 3],
         opacity: 0.6,
+        "icon-color": "ink-secondary",
         legend: "Deprecated route",
       },
     },
@@ -693,6 +745,16 @@ function validateStrokes(raw: unknown, source: string): ThemeStrokes {
     }
     iconStyle = raw["icon-style"];
   }
+  // Optional `strokes.icon-border` — defaults to "off" if absent.
+  let iconBorder: IconBorder | undefined;
+  if (raw["icon-border"] !== undefined) {
+    if (raw["icon-border"] !== "on" && raw["icon-border"] !== "off") {
+      throw new ThemeError(
+        `E_THEME_BAD_VALUE: theme ${source} 'strokes.icon-border' must be 'on' or 'off', got '${String(raw["icon-border"])}'`,
+      );
+    }
+    iconBorder = raw["icon-border"];
+  }
   return {
     outline,
     trace,
@@ -704,6 +766,7 @@ function validateStrokes(raw: unknown, source: string): ThemeStrokes {
     dash: { frame: dashFrame, "back-edge": dashBack },
     arrow: { scale: arrowScale, "head-shape": headShapeRaw },
     ...(iconStyle !== undefined ? { "icon-style": iconStyle } : {}),
+    ...(iconBorder !== undefined ? { "icon-border": iconBorder } : {}),
   };
 }
 
@@ -738,12 +801,42 @@ function validateTagRule(
       );
     }
     if (COLOUR_VALUED_TAG_PROPS.has(prop)) {
-      if (typeof value !== "string" || !isColourValue(value)) {
+      // Properties in GRADIENT_ELIGIBLE_TAG_PROPS additionally accept
+      // CSS-like linear gradient strings:
+      //   "linear <angle>deg, <colour>, <colour>[, ...]"
+      // where each colour is a token name or hex literal. Other colour-
+      // valued props (text, trace) stay strict single-colour —
+      // gradients on body text or trace lines rarely read well.
+      if (typeof value !== "string") {
         throw new ThemeError(
           `E_THEME_BAD_COLOUR: theme ${source} tag '${tagName}.${prop}' must be a token name or hex colour, got '${String(value)}'`,
         );
       }
-      (out as Record<string, unknown>)[prop] = value;
+      if (GRADIENT_ELIGIBLE_TAG_PROPS.has(prop) && isGradientString(value)) {
+        // Validate every gradient stop; fail loudly if a stop typo'd.
+        const stops = parseGradientStops(value);
+        if (stops === undefined) {
+          throw new ThemeError(
+            `E_THEME_BAD_GRADIENT: theme ${source} tag '${tagName}.${prop}' is not a valid gradient. ` +
+              `Expected 'linear <angle>deg, <colour>, <colour>[, ...]'.`,
+          );
+        }
+        for (let i = 0; i < stops.colours.length; i++) {
+          const c = stops.colours[i]!;
+          if (!isColourValue(c)) {
+            throw new ThemeError(
+              `E_THEME_BAD_COLOUR: theme ${source} tag '${tagName}.${prop}' gradient stop ${i} is not a token name or hex colour, got '${c}'`,
+            );
+          }
+        }
+        (out as Record<string, unknown>)[prop] = value;
+      } else if (!isColourValue(value)) {
+        throw new ThemeError(
+          `E_THEME_BAD_COLOUR: theme ${source} tag '${tagName}.${prop}' must be a token name or hex colour, got '${String(value)}'`,
+        );
+      } else {
+        (out as Record<string, unknown>)[prop] = value;
+      }
     } else if (NUMBER_VALUED_TAG_PROPS.has(prop)) {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new ThemeError(
@@ -901,6 +994,48 @@ function isColourLiteral(v: string): boolean {
 /** Colour values in tag rules may be a token name OR a hex literal. */
 function isColourValue(v: string): boolean {
   return isColourLiteral(v) || COLOUR_TOKEN_SET.has(v);
+}
+
+/**
+ * Detect a linear-gradient fill string (DESIGN-PHASE5 gradient
+ * addendum). Format: `linear <angle>deg, <colour>, <colour>[, ...]`
+ * — only the `linear` prefix matters here; full validation lives in
+ * parseGradientStops.
+ */
+export function isGradientString(v: string): boolean {
+  return /^\s*linear\b/i.test(v);
+}
+
+export interface GradientSpec {
+  /** Rotation in degrees, CSS convention (0deg = bottom-to-top). */
+  angle: number;
+  /** Colour stops (token names or hex literals) in declaration order. */
+  colours: string[];
+}
+
+/**
+ * Parse a gradient string into its angle + colour stops. Returns
+ * undefined when the structure doesn't match the expected grammar.
+ * Whitespace around commas and after the angle is tolerated.
+ *
+ * Grammar:
+ *   "linear" <angle>"deg" "," <colour> ("," <colour>)+
+ *
+ * Two or more stops are required; one stop is degenerate (use a
+ * solid colour). Stops without explicit positions are spaced
+ * evenly across 0%–100% at render time.
+ */
+export function parseGradientStops(v: string): GradientSpec | undefined {
+  const m = /^\s*linear\s+(-?\d+(?:\.\d+)?)\s*deg\s*,\s*(.+)$/i.exec(v);
+  if (!m) return undefined;
+  const angle = Number(m[1]);
+  if (!Number.isFinite(angle)) return undefined;
+  const stops = m[2]!
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (stops.length < 2) return undefined;
+  return { angle, colours: stops };
 }
 
 function requireString(

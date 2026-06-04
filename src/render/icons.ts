@@ -284,7 +284,10 @@ export function resetIconWarnings(): void {
  * Render an icon-as-body node (shape: icon(...)). The icon scales to
  * fit the cell, with the box's full pixel bounds as the target. Label
  * placement (below the icon, circle convention) is the caller's
- * responsibility.
+ * responsibility. The optional `tint` overrides the default
+ * theme.tokens["ink-primary"] colour applied via SVG's currentColor
+ * cascade — see DESIGN-PHASE5-ICONS §2.5 for how tags re-tint
+ * monochrome icons via their `text` property.
  */
 export function renderIconBody(
   loaded: LoadedIcon,
@@ -293,8 +296,9 @@ export function renderIconBody(
   width: number,
   height: number,
   theme: Theme,
+  tint?: string,
 ): string {
-  return wrapIconSVG(loaded, x, y, width, height, theme);
+  return wrapIconSVG(loaded, x, y, width, height, theme, tint);
 }
 
 /**
@@ -316,6 +320,7 @@ export function renderIconBadge(
   position: "inline" | "corner",
   label: { centreX: number; centreY: number; capHeight: number } | undefined,
   theme: Theme,
+  tint?: string,
 ): string {
   if (position === "corner") {
     const size = Math.min(24, Math.min(boxWidth, boxHeight) * 0.3);
@@ -327,6 +332,7 @@ export function renderIconBadge(
       size,
       size,
       theme,
+      tint,
     );
   }
   // Inline: vertically centre against the label baseline. Width sized
@@ -341,6 +347,7 @@ export function renderIconBadge(
       size,
       size,
       theme,
+      tint,
     );
   }
   const size = label.capHeight;
@@ -349,7 +356,7 @@ export function renderIconBadge(
   // label's baseline.
   const x = label.centreX - size - 4;
   const y = label.centreY - size / 2;
-  return wrapIconSVG(loaded, x, y, size, size, theme);
+  return wrapIconSVG(loaded, x, y, size, size, theme, tint);
 }
 
 function wrapIconSVG(
@@ -359,6 +366,7 @@ function wrapIconSVG(
   targetW: number,
   targetH: number,
   theme: Theme,
+  tintOverride?: string,
 ): string {
   // Scale to fit the target box while preserving aspect.
   const sx = targetW / loaded.width;
@@ -367,7 +375,7 @@ function wrapIconSVG(
   // Centre the scaled icon within the target box.
   const dx = x + (targetW - loaded.width * s) / 2;
   const dy = y + (targetH - loaded.height * s) / 2;
-  const tint = theme.tokens["ink-primary"];
+  const tint = tintOverride ?? theme.tokens["ink-primary"];
   // `currentColor` cascades from the wrapping <g>'s `color` attribute;
   // monochrome icons that use `fill="currentColor"` pick it up.
   // Multi-colour icons keep their literal colours.
@@ -378,15 +386,32 @@ function wrapIconSVG(
   // or no explicit fill at all). Icons that hardcode fill="#hex" on
   // inner elements stay filled — consistent with the "brand icons keep
   // their literal colours" rule.
+  //
+  // Gradient tints (DESIGN-PHASE5 gradient stroke addendum) are
+  // url(#id) references. CSS `color: url(...)` isn't a valid value, so
+  // `currentColor` won't propagate the gradient via the cascade.
+  // Workaround: textually substitute `currentColor` → url(#id) in the
+  // icon's inner SVG, so every fill/stroke that referenced
+  // currentColor now references the gradient directly.
+  const isGradientTint = tint.startsWith("url(");
+  const innerSVG = isGradientTint
+    ? loaded.innerSVG.replace(/currentColor/g, tint)
+    : loaded.innerSVG;
+  const wrapperStroke = isGradientTint ? tint : "currentColor";
   const iconStyle = theme.strokes["icon-style"] ?? "filled";
   const styleAttrs =
     iconStyle === "outlined"
-      ? ` fill="none" stroke="currentColor" stroke-width="${fmt(theme.strokes.outline / s)}" stroke-linejoin="round" stroke-linecap="round"`
+      ? ` fill="none" stroke="${wrapperStroke}" stroke-width="${fmt(theme.strokes.outline / s)}" stroke-linejoin="round" stroke-linecap="round"`
       : "";
+  // For solid tints, set `color=` on the wrapper so currentColor
+  // cascades work. For gradient tints, `color=` is meaningless (CSS
+  // color can't be a paint URL) so omit it to avoid confusion in the
+  // rendered SVG.
+  const colorAttr = isGradientTint ? "" : ` color="${escapeAttr(tint)}"`;
   return (
-    `<g data-icon="1" data-icon-style="${iconStyle}" color="${escapeAttr(tint)}"${styleAttrs} ` +
+    `<g data-icon="1" data-icon-style="${iconStyle}"${colorAttr}${styleAttrs} ` +
     `transform="translate(${fmt(dx)} ${fmt(dy)}) scale(${fmt(s)})">` +
-    loaded.innerSVG +
+    innerSVG +
     `</g>`
   );
 }

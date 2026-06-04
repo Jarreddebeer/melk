@@ -357,6 +357,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   let iconPosition: "inline" | "corner" | undefined;
   let iconPositionSeen = false;
   let iconSeen = false;
+  let border: boolean | undefined;
   let orientSpan: { line: number; col: number; offset: number } | undefined;
   let renderSpan: { line: number; col: number; offset: number } | undefined;
   for (const prop of decl.properties) {
@@ -375,6 +376,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       (t) => (tags = t),
       (i) => (icon = i),
       (p) => (iconPosition = p),
+      (bv) => (border = bv),
     );
   }
   // DESIGN-PHASE5-ICONS §3.2 — both shape: icon(...) and icon: on the
@@ -431,6 +433,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   if (tags !== undefined && tags.length > 0) node.tags = tags;
   if (icon !== undefined) node.icon = icon;
   if (iconPosition !== undefined) node.iconPosition = iconPosition;
+  if (border !== undefined) node.border = border;
   ctx.nodes.set(decl.name, node);
   ctx.autoDeclared.delete(decl.name);
 }
@@ -1269,6 +1272,7 @@ function applyNodeProperty(
   setTags: (t: string[]) => void,
   setIcon: (i: { alias: string; name: string }) => void,
   setIconPosition: (p: "inline" | "corner") => void,
+  setBorder: (b: boolean) => void,
 ): void {
   switch (prop.key) {
     case "shape":
@@ -1319,6 +1323,26 @@ function applyNodeProperty(
         );
       }
       setIconPosition(prop.value.value);
+      break;
+    case "border":
+      // Boolean-by-content match: `true` enables, `false` disables.
+      // Only meaningful on shape: icon(...) and shape: circle nodes —
+      // those whose label sits outside the glyph. Other shapes already
+      // draw a border via nodeShape; the attr is silently no-op there
+      // (kept to allow uniform authoring without per-shape gymnastics).
+      if (prop.value.kind !== "ident") {
+        throw new BindError(
+          "E_INVALID_BORDER_VALUE: border must be `true` or `false`",
+          prop.value.span,
+        );
+      }
+      if (prop.value.value !== "true" && prop.value.value !== "false") {
+        throw new BindError(
+          `E_INVALID_BORDER_VALUE: unknown border value: '${prop.value.value}'. Expected \`true\` or \`false\`.`,
+          prop.value.span,
+        );
+      }
+      setBorder(prop.value.value === "true");
       break;
     case "size":
       if (prop.value.kind === "ident") {

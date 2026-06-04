@@ -371,6 +371,7 @@ describe("validateTheme — tag rules", () => {
         opacity: 0.8,
         legend: "All properties",
         swatch: "box",
+        "icon-color": "ink-primary",
       },
     };
     const t = validateTheme(raw, "test");
@@ -379,6 +380,75 @@ describe("validateTheme — tag rules", () => {
     for (const prop of TAG_PROPERTY_NAMES) {
       expect(rule).toHaveProperty(prop);
     }
+  });
+});
+
+describe("gradient parsing (fill addendum)", () => {
+  it("accepts a two-stop linear gradient with explicit angle", () => {
+    const raw = validRaw();
+    raw["tags"] = { hot: { fill: "linear 45deg, status-warn, status-error" } };
+    const t = validateTheme(raw, "test");
+    expect(t.tags["hot"]?.fill).toBe("linear 45deg, status-warn, status-error");
+  });
+
+  it("accepts a three-stop gradient (mixed tokens + hex)", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      tri: { fill: "linear 90deg, #ffffff, ink-secondary, #000000" },
+    };
+    expect(() => validateTheme(raw, "test")).not.toThrow();
+  });
+
+  it("rejects a gradient with no angle", () => {
+    const raw = validRaw();
+    raw["tags"] = { bad: { fill: "linear status-warn, status-error" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_GRADIENT/);
+  });
+
+  it("rejects a gradient with only one stop", () => {
+    const raw = validRaw();
+    raw["tags"] = { lonely: { fill: "linear 45deg, status-warn" } };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_GRADIENT/);
+  });
+
+  it("rejects a gradient with an invalid stop colour", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      typo: { fill: "linear 45deg, status-warn, not-a-token" },
+    };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_COLOUR.*not-a-token/);
+  });
+
+  it("border accepts gradients (fill + border + icon-color are gradient-eligible)", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      gradient_border: { border: "linear 45deg, status-warn, status-error" },
+    };
+    expect(() => validateTheme(raw, "test")).not.toThrow();
+  });
+
+  it("icon-color accepts gradients", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      gradient_icon: { "icon-color": "linear 90deg, status-info, status-ok" },
+    };
+    expect(() => validateTheme(raw, "test")).not.toThrow();
+  });
+
+  it("text rejects gradients (gradient-ineligible colour prop)", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      gradient_text: { text: "linear 45deg, status-warn, status-error" },
+    };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_COLOUR/);
+  });
+
+  it("trace rejects gradients (gradient-ineligible colour prop)", () => {
+    const raw = validRaw();
+    raw["tags"] = {
+      gradient_trace: { trace: "linear 45deg, status-warn, status-error" },
+    };
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_COLOUR/);
   });
 });
 
@@ -678,6 +748,107 @@ describe("end-to-end: theme swap + tag overrides change SVG output", () => {
     expect(out).toContain('stroke="#64748b"');
     expect(out).toContain('stroke-dasharray="3 3"');
     expect(out).toContain('opacity="0.6"');
+  });
+});
+
+describe("end-to-end: gradient fill rendering", () => {
+  function renderWith(src: string, themeOverride: (raw: Record<string, unknown>) => void) {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    themeOverride(raw);
+    const theme = validateTheme(raw, "<test>");
+    const m = bind(parse(tokenize(src)));
+    const p = place(m);
+    const r = reserveCorridors(m, p);
+    const t = packTracks(m, p, r);
+    const polys = buildPolylines(m, p, r, t);
+    return renderSVG(m, p, r, polys, theme);
+  }
+
+  it("rect with gradient fill emits a <linearGradient> def + url() fill", () => {
+    const out = renderWith(
+      "a { shape: rect, tags: [hot], label: \"hot\" }\na -> b",
+      (raw) => {
+        raw.tags["hot"] = {
+          fill: "linear 90deg, status-warn, status-error",
+        };
+      },
+    );
+    expect(out).toContain("<linearGradient");
+    expect(out).toContain('id="tag-gradient-0"');
+    expect(out).toMatch(/<rect[^>]+fill="url\(#tag-gradient-0\)"/);
+    // Both stops are present at the resolved hex.
+    expect(out).toContain('stop-color="#d97706"'); // status-warn
+    expect(out).toContain('stop-color="#dc2626"'); // status-error
+  });
+
+  it("identical gradients on multiple nodes share a single def", () => {
+    const out = renderWith(
+      [
+        "a { shape: rect, tags: [hot], label: \"a\" }",
+        "b { shape: rect, tags: [hot], label: \"b\" }",
+        "a -> b",
+      ].join("\n"),
+      (raw) => {
+        raw.tags["hot"] = { fill: "linear 45deg, status-warn, status-error" };
+      },
+    );
+    // One gradient def, two url() references.
+    expect((out.match(/<linearGradient/g) || []).length).toBe(1);
+    expect((out.match(/fill="url\(#tag-gradient-0\)"/g) || []).length).toBe(2);
+  });
+
+  it("icon node with gradient fill paints a background rect behind the glyph", () => {
+    // No icon pack registered → placeholder, but the fill rect should
+    // still emit (it's drawn behind whatever the icon-as-body
+    // produces, which is the placeholder here).
+    const out = renderWith(
+      [
+        'icons: arch from "./does-not-exist/"',
+        'srv { shape: icon(arch/server), tags: [card], label: "API" }',
+        "srv -> b",
+      ].join("\n"),
+      (raw) => {
+        raw.tags["card"] = { fill: "linear 135deg, surface, surface-sunken" };
+      },
+    );
+    // Background rect with gradient url, drawn over the cell footprint.
+    expect(out).toMatch(/<rect[^>]+fill="url\(#tag-gradient-0\)"/);
+  });
+
+  it("circle with gradient fill resolves through the same path", () => {
+    const out = renderWith(
+      "c { shape: circle, tags: [glow], label: \"event\" }\nc -> b",
+      (raw) => {
+        raw.tags["glow"] = { fill: "linear 0deg, status-info, ink-primary" };
+      },
+    );
+    expect(out).toContain("<linearGradient");
+    expect(out).toMatch(/<circle[^>]+fill="url\(/);
+  });
+
+  it("rect with gradient border renders stroke as url()", () => {
+    const out = renderWith(
+      "a { shape: rect, tags: [edge], label: \"a\" }\na -> b",
+      (raw) => {
+        raw.tags["edge"] = { border: "linear 90deg, status-warn, status-error" };
+      },
+    );
+    expect(out).toContain("<linearGradient");
+    expect(out).toMatch(/<rect[^>]+stroke="url\(/);
+  });
+
+  it("rect with gradient border + gradient fill emits two distinct defs", () => {
+    const out = renderWith(
+      "a { shape: rect, tags: [both], label: \"a\" }\na -> b",
+      (raw) => {
+        raw.tags["both"] = {
+          border: "linear 90deg, status-warn, status-error",
+          fill: "linear 45deg, surface, surface-sunken",
+        };
+      },
+    );
+    expect((out.match(/<linearGradient/g) || []).length).toBe(2);
   });
 });
 

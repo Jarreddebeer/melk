@@ -448,6 +448,254 @@ describe("end-to-end render with icons", () => {
   });
 });
 
+describe("icon node border (theme-default + per-node override)", () => {
+  const fixtureDir = resolve(__dirname, "fixtures", "icons");
+
+  function renderWith(src: string, theme = loadTheme("document-light")): string {
+    const m = bind(parse(tokenize(src)));
+    const p = place(m);
+    const r = reserveCorridors(m, p);
+    const t = packTracks(m, p, r);
+    const polys = buildPolylines(m, p, r, t);
+    return renderSVG(m, p, r, polys, theme, {
+      meltFileDir: fixtureDir,
+      allowNetwork: false,
+    });
+  }
+
+  it("default theme draws no border around icon-as-body nodes", () => {
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), label: \"API\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src);
+    // The icon node group should not contain a wrapping <rect> outside
+    // the icon glyph.
+    const match = out.match(/<g data-id="srv">[\s\S]*?<\/g>/);
+    expect(match).toBeTruthy();
+    // The icon's inner SVG <rect>s belong to the glyph, not a border;
+    // we filter by looking for a rect with stroke=border-strong, which
+    // is what the border path emits.
+    const theme = loadTheme("document-light");
+    expect(match![0]).not.toContain(`stroke="${theme.tokens["border-strong"]}" stroke-width="${theme.strokes.outline}"/>`);
+  });
+
+  it("per-node border: true draws a wrapping rect", () => {
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), border: true, label: \"API\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src);
+    const theme = loadTheme("document-light");
+    expect(out).toContain(
+      `stroke="${theme.tokens["border-strong"]}" stroke-width="${theme.strokes.outline}"`,
+    );
+  });
+
+  it("per-node border: false hides the border even when theme defaults to on", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.strokes["icon-border"] = "on";
+    const theme = validateTheme(raw, "<test>");
+
+    const enabled = renderWith(
+      [
+        'icons: basic from "./basic/"',
+        "srv { shape: icon(basic/server), label: \"API\" }",
+        "srv -> b",
+      ].join("\n"),
+      theme,
+    );
+    expect(enabled).toContain(
+      `stroke="${theme.tokens["border-strong"]}" stroke-width="${theme.strokes.outline}"`,
+    );
+
+    const overridden = renderWith(
+      [
+        'icons: basic from "./basic/"',
+        "srv { shape: icon(basic/server), border: false, label: \"API\" }",
+        "srv -> b",
+      ].join("\n"),
+      theme,
+    );
+    // The border-strong stroke should be absent on the icon node group.
+    const srvGroup = overridden.match(/<g data-id="srv">[\s\S]*?<\/g>/)![0];
+    expect(srvGroup).not.toContain(
+      `stroke="${theme.tokens["border-strong"]}" stroke-width="${theme.strokes.outline}"/>`,
+    );
+  });
+
+  it("theme strokes.icon-border: on draws borders on all icon-as-body nodes", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.strokes["icon-border"] = "on";
+    const theme = validateTheme(raw, "<test>");
+
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), label: \"A\" }",
+      "db  { shape: icon(basic/database), label: \"B\" }",
+      "srv -> db",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    const matches =
+      out.match(
+        new RegExp(
+          `stroke="${theme.tokens["border-strong"].replace(/[#]/g, "\\#")}" stroke-width="${theme.strokes.outline}"`,
+          "g",
+        ),
+      ) || [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("rejects bogus border value", () => {
+    expect(() =>
+      bind(parse(tokenize('a { shape: circle, border: maybe }'))),
+    ).toThrow(/E_INVALID_BORDER_VALUE/);
+  });
+
+  it("theme rejects bogus icon-border value", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.strokes["icon-border"] = "yes";
+    expect(() => validateTheme(raw, "<test>")).toThrow(
+      /E_THEME_BAD_VALUE.*icon-border/,
+    );
+  });
+});
+
+describe("tag-rule icon-color (re-tint via theme tag)", () => {
+  const fixtureDir = resolve(__dirname, "fixtures", "icons");
+
+  function renderWith(src: string, theme = loadTheme("document-light")): string {
+    const m = bind(parse(tokenize(src)));
+    const p = place(m);
+    const r = reserveCorridors(m, p);
+    const t = packTracks(m, p, r);
+    const polys = buildPolylines(m, p, r, t);
+    return renderSVG(m, p, r, polys, theme, {
+      meltFileDir: fixtureDir,
+      allowNetwork: false,
+    });
+  }
+
+  it("untagged icon uses theme.tokens.ink-primary as the tint", () => {
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), label: \"API\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src);
+    const theme = loadTheme("document-light");
+    // The icon group's `color` attribute carries the resolved tint.
+    expect(out).toContain(`color="${theme.tokens["ink-primary"]}"`);
+  });
+
+  it("`critical` tag re-tints monochrome icon to status-error", () => {
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), tags: [critical], label: \"API\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src);
+    const theme = loadTheme("document-light");
+    // The icon's <g> uses the tag's icon-color (status-error → red).
+    const srvGroup = out.match(/<g data-id="srv">[\s\S]*?<\/g>/)![0];
+    expect(srvGroup).toContain(`color="${theme.tokens["status-error"]}"`);
+  });
+
+  it("custom tag with hex literal icon-color works", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["highlight"] = { "icon-color": "#ff00ff", legend: "Highlight" };
+    const theme = validateTheme(raw, "<test>");
+
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), tags: [highlight], label: \"API\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    const srvGroup = out.match(/<g data-id="srv">[\s\S]*?<\/g>/)![0];
+    expect(srvGroup).toContain(`color="#ff00ff"`);
+  });
+
+  it("badge form re-tints via icon-color too", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["badge-tint"] = { "icon-color": "status-warn", legend: "Badge tint" };
+    const theme = validateTheme(raw, "<test>");
+
+    const src = [
+      'icons: basic from "./basic/"',
+      "svc { shape: rect, icon: basic/server, tags: [badge-tint], label: \"S\" }",
+      "svc -> b",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    const svcGroup = out.match(/<g data-id="svc">[\s\S]*?<\/g>/)![0];
+    expect(svcGroup).toContain(`color="${theme.tokens["status-warn"]}"`);
+  });
+
+  it("later tag wins on icon-color (composition order)", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["tint-a"] = { "icon-color": "status-warn", legend: "A" };
+    raw.tags["tint-b"] = { "icon-color": "status-error", legend: "B" };
+    const theme = validateTheme(raw, "<test>");
+
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), tags: [tint-a, tint-b], label: \"X\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    const srvGroup = out.match(/<g data-id="srv">[\s\S]*?<\/g>/)![0];
+    // tint-b (later) wins.
+    expect(srvGroup).toContain(`color="${theme.tokens["status-error"]}"`);
+    expect(srvGroup).not.toContain(`color="${theme.tokens["status-warn"]}"`);
+  });
+
+  it("rejects an icon-color value that isn't a colour", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["bad"] = { "icon-color": "not-a-colour", legend: "Bad" };
+    expect(() => validateTheme(raw, "<test>")).toThrow(
+      /E_THEME_BAD_COLOUR.*icon-color/,
+    );
+  });
+
+  it("icon-color gradient substitutes currentColor → url() in icon inner SVG", () => {
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["grad"] = {
+      "icon-color": "linear 90deg, status-warn, status-error",
+      legend: "Gradient icon",
+    };
+    const theme = validateTheme(raw, "<test>");
+    const src = [
+      'icons: basic from "./basic/"',
+      "srv { shape: icon(basic/server), tags: [grad], label: \"A\" }",
+      "srv -> b",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    // A <linearGradient> def should be present, and the icon's <g>
+    // should use stroke="url(...)" (outlined style) rather than
+    // stroke="currentColor". The wrapper's color= attr is dropped for
+    // gradient tints since CSS color can't hold a paint URL.
+    expect(out).toContain("<linearGradient");
+    const srvGroup = out.match(/<g data-id="srv">[\s\S]*?<\/g>\s*<text/)![0];
+    expect(srvGroup).toMatch(/stroke="url\(#tag-gradient-\d+\)"/);
+    // currentColor in the icon's INNER content has been substituted
+    // (Lucide server.svg uses fill="currentColor" on the root — we
+    // strip the root but children may use it via inheritance; the
+    // substitution covers any explicit references).
+    const innerGroup = srvGroup.match(/<g data-icon="1"[\s\S]*?<\/g>/)![0];
+    expect(innerGroup).not.toContain("currentColor");
+  });
+});
+
 describe("Model.iconPacks lifecycle", () => {
   it("absence yields empty iconPacks array", () => {
     const m = model("a -> b");

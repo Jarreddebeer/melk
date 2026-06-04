@@ -66,15 +66,51 @@ describe("text-fit — long labels grow the cell", () => {
   });
 });
 
+describe("text-fit — icon-as-body grows cell to contain label", () => {
+  it("an icon node grows its cell footprint to contain icon + label-below", () => {
+    // shape: icon(...) shares the label-below convention with circles
+    // (DESIGN-PHASE5-ICONS §2.3). Text-fit grows the cell vertically so
+    // the label sits inside the node's footprint instead of spilling
+    // into the next row's traces.
+    const { model } = run(
+      [
+        'icons: aws from "./icons/aws/"',
+        "srv { shape: icon(aws/server), label: \"API server\" }",
+        "srv -> b",
+      ].join("\n"),
+    );
+    const srv = model.nodes.find((n) => n.id === "srv")!;
+    expect(srv.iconArea).toEqual({ width: 1, height: 1 });
+    expect(srv.size.height).toBeGreaterThan(1);
+  });
+
+  it("icon node width grows for wider labels", () => {
+    const { model } = run(
+      [
+        'icons: aws from "./icons/aws/"',
+        "srv { shape: icon(aws/server), label: \"Very Long Service Name\" }",
+        "srv -> b",
+      ].join("\n"),
+    );
+    const srv = model.nodes.find((n) => n.id === "srv")!;
+    expect(srv.size.width).toBeGreaterThan(1);
+  });
+});
+
 describe("text-fit — circles stay 1x1 (label renders below)", () => {
-  it("a circle node is NOT grown for long labels", () => {
-    // Circles render their label outside the shape (BPMN/flowchart
-    // convention for sources/sinks/events) so the shape stays at its
-    // declared size regardless of label length.
-    const { model } = run("client { shape: circle }\na -> client");
+  it("a circle node grows its cell footprint to contain icon + label-below", () => {
+    // Circles render their label OUTSIDE the glyph (BPMN/flowchart
+    // convention for sources/sinks/events). To keep the label visually
+    // inside the node's footprint (so traces don't cut through it), the
+    // text-fit pass grows the cell vertically by one row to make room.
+    // `iconArea` records the original glyph footprint so the renderer
+    // can draw the circle at the top and centre the label in the
+    // bottom portion.
+    const { model } = run('client { shape: circle, label: "Client App" }\na -> client');
     const client = model.nodes.find((n) => n.id === "client")!;
-    expect(client.size.width).toBe(1);
-    expect(client.size.height).toBe(1);
+    expect(client.iconArea).toEqual({ width: 1, height: 1 });
+    // Height grew to fit the label-below band.
+    expect(client.size.height).toBeGreaterThan(1);
   });
 });
 

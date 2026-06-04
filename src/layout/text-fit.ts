@@ -135,11 +135,53 @@ export function applyTextFit(
     const cell = placement.cells.get(node.id);
     if (!cell) continue;
 
-    // Circle: don't grow for text. Circles render their label OUTSIDE
-    // the shape (below it) — see svg.ts renderNode. The convention
-    // matches BPMN/flowchart usage where circles are sources/sinks/events:
-    // small markers with adjacent labels, not boxes-with-text-inside.
-    if (node.shape === "circle") continue;
+    // Circles and icon-as-body nodes render their label BELOW the
+    // shape. To keep the label visually inside the node's footprint
+    // (so traces don't cut through it), grow the node's height to
+    // include the label area + padding, and grow its width to fit the
+    // wider of the icon glyph (≥ declared size) and the label text.
+    // The renderer scales the icon glyph to the TOP portion of the
+    // taller box and centres the label in the BOTTOM portion.
+    if (node.shape === "circle" || node.shape === "icon") {
+      // Grow the cell wide enough to contain the label's text width
+      // (centred below the glyph), and tall enough that the icon/glyph
+      // sits in the upper portion and the label sits in the lower
+      // portion — both inside the node's logical footprint.
+      const labelWidthPx = estimateLabelWidth(label, fontSize);
+      const labelBlockPx = labelWidthPx + 2 * TEXT_PAD_X;
+      const labelBlockUnits = Math.ceil(labelBlockPx / CELL_PX);
+      const newWidth = Math.max(node.size.width, labelBlockUnits);
+
+      // Idempotence requires tracking which "logical" icon area sits in
+      // the upper portion of the node. We store it on the node so the
+      // renderer can later draw the icon at the original size, not
+      // stretched into the now-taller box.
+      if (node.iconArea === undefined) {
+        node.iconArea = { width: node.size.width, height: node.size.height };
+      }
+      // Vertical extra: icon-to-label gap (fontSize * 0.9 + 4, matching
+      // the renderer's labelY offset) + the label's visible height
+      // (approximated as estimateLabelHeight = fontSize * 1.2). No
+      // extra TEXT_PAD_Y on top/bottom — the renderer vertically
+      // centres the glyph+label group inside this height, so any
+      // headroom emerges from the natural ascender / descender gap
+      // rather than dedicated padding. Fractional cell units flow
+      // through the pixel layout pipeline without needing a ceil() —
+      // node.size.height and rowUnits[r] can be non-integer.
+      const labelExtraPx = fontSize * 0.9 + 4 + estimateLabelHeight(fontSize);
+      const labelExtraUnits = labelExtraPx / CELL_PX;
+      const newHeight = Math.max(
+        node.size.height,
+        node.iconArea.height + labelExtraUnits,
+      );
+
+      if (newWidth !== node.size.width || newHeight !== node.size.height) {
+        node.size = { width: newWidth, height: newHeight };
+      }
+      if (newWidth > colUnits[cell.col]!) colUnits[cell.col] = newWidth;
+      if (newHeight > rowUnits[cell.row]!) rowUnits[cell.row] = newHeight;
+      continue;
+    }
 
     const neededWidthPx = neededBoxWidthPx(label, fontSize, node.shape);
     const neededWidthUnits = Math.ceil(neededWidthPx / CELL_PX);

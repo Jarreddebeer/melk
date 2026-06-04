@@ -33,7 +33,12 @@ import type { Reservation } from "../layout/corridors.js";
 import { CELL_PX } from "../layout/corridors.js";
 import type { Point, Polyline, Polylines } from "../layout/polyline.js";
 import type { TagRule, Theme } from "../theme/theme.js";
-import { resolveColour, resolveTags } from "../theme/theme.js";
+import {
+  isGradientString,
+  parseGradientStops,
+  resolveColour,
+  resolveTags,
+} from "../theme/theme.js";
 import { buildLegend, renderLegend, type LegendLayout } from "./legend.js";
 import {
   buildFooter,
@@ -213,6 +218,25 @@ export function renderSVG(
   const gradientDefs: string[] = [];
   const intersectionsByPoly = detectBendIntersections(clippedPolys, model, theme, gradientDefs);
 
+  // Tag-rule gradient paints (DESIGN-PHASE5 gradient addendum). The
+  // resolver handles either fills, borders, or icon colours — any
+  // `linear ...` value emits a <linearGradient> def and returns a
+  // url(...) reference; solid colours pass through resolveColour.
+  // Shared definitions get a stable id so identical paints reuse the
+  // same def.
+  //
+  // The defs are emitted into `gradientDefs` (which feeds renderDefs
+  // before the diagram body). To make sure every gradient referenced
+  // in the body is also defined, we pre-walk the nodes here so the
+  // resolver has a chance to register its def before renderDefs runs.
+  const fillResolver = createFillResolver(theme, gradientDefs);
+  for (const n of model.nodes) {
+    const o = resolveTags(theme, n.tags, `node '${n.id}'`);
+    if (o.fill !== undefined) fillResolver(o.fill);
+    if (o.border !== undefined) fillResolver(o.border);
+    if (o["icon-color"] !== undefined) fillResolver(o["icon-color"]);
+  }
+
   const parts: string[] = [];
   parts.push(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fmt(W)} ${fmt(H)}" width="${fmt(W)}" height="${fmt(H)}" font-family="${escapeAttr(theme.typography.face)}" font-size="${theme.typography.size.body}" font-weight="${theme.typography.weight.label}">`,
@@ -325,7 +349,7 @@ export function renderSVG(
     const b = boxes.get(n.id);
     if (!b) continue;
     const overrides = resolveTags(theme, n.tags, `node '${n.id}'`);
-    parts.push(renderNode(n, b, theme, overrides, renderZ, iconRegistry));
+    parts.push(renderNode(n, b, theme, overrides, renderZ, iconRegistry, fillResolver));
   }
 
   for (let i = 0; i < polylines.polylines.length; i++) {
@@ -465,6 +489,71 @@ function boxBounds(
 }
 
 // --- pieces ---------------------------------------------------------------
+
+/**
+ * Returns a function that resolves a tag-rule `fill` value (solid
+ * colour or `linear ...` gradient) into the corresponding SVG paint
+ * value:
+ *   - Solid colour → resolved hex.
+ *   - Gradient → `url(#gradient-N)`, with the matching
+ *     <linearGradient> emitted into `defs` exactly once per unique
+ *     gradient string.
+ *
+ * Caching is by raw fill string, so identical gradient declarations on
+ * different nodes share a single def (smaller SVG, predictable diffs).
+ *
+ * The angle convention follows CSS: 0deg = bottom-to-top, 90deg =
+ * left-to-right. SVG's coordinate system is y-down, so we rotate
+ * accordingly when computing the gradient vector.
+ */
+function createFillResolver(
+  theme: Theme,
+  defs: string[],
+): (value: string) => string {
+  const cache = new Map<string, string>();
+  let nextId = 0;
+  return (value: string): string => {
+    if (!isGradientString(value)) {
+      return resolveColour(theme, value);
+    }
+    const cached = cache.get(value);
+    if (cached !== undefined) return cached;
+    const spec = parseGradientStops(value);
+    if (spec === undefined) {
+      // Validator should have rejected this — defensive fallback.
+      return resolveColour(theme, theme.tokens["surface-raised"]);
+    }
+    const id = `tag-gradient-${nextId++}`;
+    // CSS angle → SVG gradient vector. CSS: 0deg = upward; 90deg =
+    // rightward. SVG (y-down): rotate the vector clockwise by `angle`
+    // starting from "up" (0,-1) so 0deg points up, 90deg right.
+    const rad = (spec.angle * Math.PI) / 180;
+    const dx = Math.sin(rad);
+    const dy = -Math.cos(rad);
+    // Project the vector onto the unit-square gradient box (CSS
+    // gradient lines extend through opposite corners). We use the
+    // gradient box [(0,0)-(1,1)] in objectBoundingBox units so the
+    // gradient scales with the shape automatically.
+    const x1 = 0.5 - dx / 2;
+    const y1 = 0.5 - dy / 2;
+    const x2 = 0.5 + dx / 2;
+    const y2 = 0.5 + dy / 2;
+    const stops = spec.colours
+      .map((c, i) => {
+        const offset = spec.colours.length === 1
+          ? 0
+          : (i / (spec.colours.length - 1)) * 100;
+        return `    <stop offset="${fmt(offset)}%" stop-color="${resolveColour(theme, c)}"/>`;
+      })
+      .join("\n");
+    defs.push(
+      `  <linearGradient id="${id}" gradientUnits="objectBoundingBox" x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}">\n${stops}\n  </linearGradient>`,
+    );
+    const url = `url(#${id})`;
+    cache.set(value, url);
+    return url;
+  };
+}
 
 function renderDefs(theme: Theme, extraDefs: string[]): string {
   // Arrow marker (skipped if the theme opts out of arrowheads).
@@ -1462,6 +1551,7 @@ function renderNode(
   overrides: TagRule,
   z: number = 0,
   iconRegistry?: IconRegistry,
+  resolveFill?: (value: string) => string,
 ): string {
   // §11.13: nodes at z < 0 (underground) render faded to imply depth.
   // The fade amount scales with depth: z=-1 → 0.45 opacity, z=-2 → 0.30,
@@ -1490,14 +1580,90 @@ function renderNode(
   const textWeight = overrides["text-weight"];
   const textWeightAttr = textWeight !== undefined ? ` font-weight="${textWeight}"` : "";
 
+  // For shapes that render the label OUTSIDE the glyph (icon, circle),
+  // the text-fit pass has grown the cell to contain BOTH the glyph and
+  // the label-below. `n.iconArea` records the original (pre-grow) cell
+  // size the glyph should occupy. The glyph + label group is then
+  // vertically centred inside the grown cell so top and bottom padding
+  // are symmetric — arrows entering from above and leaving from below
+  // have matching breathing room. Falling back to the full box bounds
+  // keeps the math right when text-fit wasn't applied.
+  let iconBounds: BoxBounds = b;
+  if (n.iconArea) {
+    const iconH = n.iconArea.height * CELL_PX;
+    // labelGap = icon-bottom → label baseline. Matches the labelY
+    // offset below (kept in sync — see the icon/circle render
+    // branches further down).
+    const labelGap = theme.typography.size.body * 0.9 + 4;
+    // Visible descender extends ~0.2em below the baseline. The
+    // label's ascender height is absorbed into labelGap (the
+    // baseline-relative offset includes room for the cap-height),
+    // so the group's *visible* bottom edge is just baseline + descender.
+    const descender = theme.typography.size.body * 0.2;
+    const groupH = iconH + labelGap + descender;
+    const topInset = Math.max(0, (b.height - groupH) / 2);
+    iconBounds = {
+      x: b.x,
+      y: b.y + topInset,
+      width: b.width,
+      height: iconH,
+    };
+  }
+
+  // Optional border + background around icon-as-body / circle nodes
+  // (DESIGN-PHASE5 border + gradient addenda). Per-node
+  // `border: true|false` overrides the theme's `strokes.icon-border`
+  // default. The rect wraps the full grown cell (b) so it contains
+  // both the glyph and the label.
+  //
+  // Tag overrides apply the same way they would on a regular shape:
+  //   - `border` → stroke colour (or gradient via resolveFill)
+  //   - `border-width` → stroke width
+  //   - `fill` → background fill (solid colour or `linear ...` gradient)
+  //
+  // When `fill` is set with no border, the rect still draws so the
+  // background can show; we just omit the stroke. The 2px corner
+  // radius matches `shape: rect`.
+  const paintHere = resolveFill ?? ((v: string) => resolveColour(theme, v));
+  const themeBorderDefault = theme.strokes["icon-border"] === "on";
+  const drawIconBorder = n.border ?? themeBorderDefault;
+  const iconBorderStroke = overrides.border !== undefined
+    ? paintHere(overrides.border)
+    : theme.tokens["border-strong"];
+  const iconBorderWidth = overrides["border-width"] ?? theme.strokes.outline;
+  let iconBorderDashAttr = "";
+  if (overrides.dash !== undefined && overrides.dash !== null) {
+    iconBorderDashAttr = ` stroke-dasharray="${overrides.dash.join(" ")}"`;
+  }
+  const iconBgFill = overrides.fill !== undefined && resolveFill
+    ? resolveFill(overrides.fill)
+    : undefined;
+  let iconBorderRect = "";
+  if (drawIconBorder) {
+    const fillAttr = iconBgFill ?? "none";
+    iconBorderRect = `  <rect x="${fmt(b.x)}" y="${fmt(b.y)}" width="${fmt(b.width)}" height="${fmt(b.height)}" rx="2" ry="2" fill="${fillAttr}" stroke="${iconBorderStroke}" stroke-width="${iconBorderWidth}"${iconBorderDashAttr}/>`;
+  } else if (iconBgFill !== undefined) {
+    // No border but fill set — draw a stroke-less background rect.
+    iconBorderRect = `  <rect x="${fmt(b.x)}" y="${fmt(b.y)}" width="${fmt(b.width)}" height="${fmt(b.height)}" rx="2" ry="2" fill="${iconBgFill}"/>`;
+  }
+
   // DESIGN-PHASE5-ICONS §2 — icon as the node body. Renders the icon
-  // (or placeholder) at box bounds; label sits below the icon, mirroring
-  // the circle convention.
+  // (or placeholder) at iconBounds; label sits below it within the
+  // node's footprint. Tag-driven re-tint: `icon-color` is the
+  // explicit tag-rule property for monochrome icons. Drives the
+  // wrapping `<g>`'s `color` attribute so any element using
+  // `currentColor` re-paints (works for both outlined and filled
+  // styles — see DESIGN-PHASE5 icon-color addendum). Multi-colour
+  // brand icons (literal `fill="#hex"`) ignore the override.
   if (n.shape === "icon") {
-    const iconBlock = renderIconAsBody(n, b, theme, iconRegistry);
-    const labelY = b.y + b.height + theme.typography.size.body * 0.9 + 4;
+    const iconTint = overrides["icon-color"] !== undefined
+      ? paintHere(overrides["icon-color"])
+      : undefined;
+    const iconBlock = renderIconAsBody(n, iconBounds, theme, iconRegistry, iconTint);
+    const labelY = iconBounds.y + iconBounds.height + theme.typography.size.body * 0.9 + 4;
     return [
       groupOpen,
+      ...(iconBorderRect ? [iconBorderRect] : []),
       `  ${iconBlock}`,
       `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
       `</g>`,
@@ -1509,24 +1675,30 @@ function renderNode(
   // adjacent text). The renderer reserves vertical room in
   // canvasBounds so the label doesn't clip.
   if (n.shape === "circle") {
-    const labelY = b.y + b.height + theme.typography.size.body * 0.9 + 4;
+    const labelY = iconBounds.y + iconBounds.height + theme.typography.size.body * 0.9 + 4;
     return [
       groupOpen,
-      `  ${nodeShape(n.shape, b, theme, overrides)}`,
+      ...(iconBorderRect ? [iconBorderRect] : []),
+      `  ${nodeShape(n.shape, iconBounds, theme, overrides, resolveFill)}`,
       `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
       `</g>`,
     ].join("\n");
   }
 
   // DESIGN-PHASE5-ICONS §3 — badge form. If `icon:` set on a non-icon
-  // shape, draw the badge between shape and label.
+  // shape, draw the badge between shape and label. Same tint rule as
+  // the body form: tag-rule `icon-color` drives the badge's
+  // monochrome tint.
+  const badgeTint = overrides["icon-color"] !== undefined
+    ? paintHere(overrides["icon-color"])
+    : undefined;
   const badge = n.icon
-    ? renderIconAsBadge(n, b, theme, iconRegistry)
+    ? renderIconAsBadge(n, b, theme, iconRegistry, badgeTint)
     : "";
 
   return [
     groupOpen,
-    `  ${nodeShape(n.shape, b, theme, overrides)}`,
+    `  ${nodeShape(n.shape, b, theme, overrides, resolveFill)}`,
     ...(badge ? [`  ${badge}`] : []),
     `  <text x="${fmt(cx)}" y="${fmt(cy)}" text-anchor="middle" dominant-baseline="central" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
     `</g>`,
@@ -1542,6 +1714,7 @@ function renderIconAsBody(
   b: BoxBounds,
   theme: Theme,
   iconRegistry: IconRegistry | undefined,
+  tint?: string,
 ): string {
   if (!n.icon || !iconRegistry) {
     return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
@@ -1550,7 +1723,7 @@ function renderIconAsBody(
   if (!loaded) {
     return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
   }
-  return renderIconBody(loaded, b.x, b.y, b.width, b.height, theme);
+  return renderIconBody(loaded, b.x, b.y, b.width, b.height, theme, tint);
 }
 
 /**
@@ -1562,6 +1735,7 @@ function renderIconAsBadge(
   b: BoxBounds,
   theme: Theme,
   iconRegistry: IconRegistry | undefined,
+  tint?: string,
 ): string {
   if (!n.icon || !iconRegistry) return "";
   const loaded = loadIcon(iconRegistry, n.icon);
@@ -1581,7 +1755,7 @@ function renderIconAsBadge(
       theme,
     );
   }
-  return renderIconBadge(loaded, b.x, b.y, b.width, b.height, position, undefined, theme);
+  return renderIconBadge(loaded, b.x, b.y, b.width, b.height, position, undefined, theme, tint);
 }
 
 function nodeShape(
@@ -1589,12 +1763,17 @@ function nodeShape(
   b: BoxBounds,
   theme: Theme,
   overrides: TagRule,
+  resolvePaint?: (value: string) => string,
 ): string {
+  // `resolvePaint` handles either fills or strokes: solid colours
+  // round-trip via resolveColour; gradient strings register a
+  // <linearGradient> def and return a url(...) reference.
+  const paint = resolvePaint ?? ((v) => resolveColour(theme, v));
   const fill = overrides.fill !== undefined
-    ? resolveColour(theme, overrides.fill)
+    ? paint(overrides.fill)
     : theme.tokens["surface-raised"];
   const stroke = overrides.border !== undefined
-    ? resolveColour(theme, overrides.border)
+    ? paint(overrides.border)
     : theme.tokens["border-strong"];
   const sw = overrides["border-width"] ?? theme.strokes.outline;
   // Border-dash: `null` clears any dash (always solid); `array` sets a

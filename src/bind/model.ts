@@ -87,6 +87,28 @@ export interface ModelNode {
    * `shape !== "icon"`. Defaults to "inline" at render time.
    */
   iconPosition?: "inline" | "corner";
+  /**
+   * For shapes that render the label OUTSIDE the glyph (circle, icon),
+   * the text-fit pass grows `size` to contain both the glyph AND the
+   * label-below. This records the original (pre-grow) cell footprint
+   * that the glyph itself should occupy at render time. The renderer
+   * uses it to draw the icon at the top of the now-taller cell, with
+   * the label centred in the bottom portion.
+   *
+   * Undefined for nodes whose label fits inside the shape (rect,
+   * roundrect, diamond, cylinder).
+   */
+  iconArea?: { width: number; height: number };
+  /**
+   * Author-controlled wrapped border (DESIGN-PHASE5-ICONS addendum).
+   * Only meaningful on `shape: icon(...)` and `shape: circle` nodes —
+   * the shapes whose label sits outside the glyph. When `true`, the
+   * renderer draws a rect matching the regular `shape: rect` outline
+   * around the entire node footprint (glyph + label). When `false`,
+   * no border is drawn. When undefined, the renderer falls back to
+   * the theme's `strokes.icon-border` setting (default "off").
+   */
+  border?: boolean;
 }
 
 /**
