@@ -1,4 +1,7 @@
 layout: lr
+title: "Ingest Spine"
+subtitle: "future state highlighted; alerts critical-tagged"
+caption: "Source: examples/04-spine.melk"
 legend: on
 
 # Horizontal spine with two side-branches off the middle nodes.

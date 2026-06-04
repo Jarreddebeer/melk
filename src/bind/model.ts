@@ -366,6 +366,23 @@ export interface Model {
    * with `on: true` when an enabling directive was seen.
    */
   legend?: LegendConfig;
+  /**
+   * Diagram header title (DESIGN-PHASE5-TITLES §1.1). Renders above the
+   * canvas in the header strip. Undefined when no `title:` directive
+   * was given. Single-line, non-empty (parser enforces).
+   */
+  title?: string;
+  /**
+   * Diagram header subtitle (DESIGN-PHASE5-TITLES §1.1). Renders below
+   * the title in the same header strip. Independent of `title` — a
+   * subtitle without a title is legal.
+   */
+  subtitle?: string;
+  /**
+   * Diagram footer caption (DESIGN-PHASE5-TITLES §1.1). Renders in a
+   * separate strip below the diagram body. Independent of title/subtitle.
+   */
+  caption?: string;
   nodes: ModelNode[];
   edges: ModelEdge[];
   pipelines: Pipeline[];

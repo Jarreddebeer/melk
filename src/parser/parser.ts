@@ -36,6 +36,9 @@ import type {
   LegendDirective,
   LegendPosition,
   LegendPositionDirective,
+  TitleDirective,
+  SubtitleDirective,
+  CaptionDirective,
   EdgesetDecl,
   FanOutDecl,
   LayoutDecl,
@@ -99,6 +102,18 @@ class Parser {
       // Keyword: `legend-position: bottom|right|top|left` (DESIGN-PHASE5-LEGEND §2.2)
       if (tok.value === "legend-position" && next.kind === "colon") {
         return this.legendPositionDirective();
+      }
+      // Keyword: `title: "..."` (DESIGN-PHASE5-TITLES §1.1)
+      if (tok.value === "title" && next.kind === "colon") {
+        return this.titleDirective();
+      }
+      // Keyword: `subtitle: "..."` (DESIGN-PHASE5-TITLES §1.1)
+      if (tok.value === "subtitle" && next.kind === "colon") {
+        return this.subtitleDirective();
+      }
+      // Keyword: `caption: "..."` (DESIGN-PHASE5-TITLES §1.1)
+      if (tok.value === "caption" && next.kind === "colon") {
+        return this.captionDirective();
       }
       // Keyword: `pipeline <name>: ...`
       if (tok.value === "pipeline" && next.kind === "ident") {
@@ -214,6 +229,70 @@ class Parser {
       on: tok.value === "on",
       span: { start: start.span.start, end: tok.span.end },
     };
+  }
+
+  private titleDirective(): TitleDirective {
+    const start = this.expect("ident"); // 'title'
+    this.expect("colon");
+    const tok = this.expectQuotedTextValue("title");
+    return {
+      kind: "title",
+      value: tok.value,
+      span: { start: start.span.start, end: tok.span.end },
+    };
+  }
+
+  private subtitleDirective(): SubtitleDirective {
+    const start = this.expect("ident"); // 'subtitle'
+    this.expect("colon");
+    const tok = this.expectQuotedTextValue("subtitle");
+    return {
+      kind: "subtitle",
+      value: tok.value,
+      span: { start: start.span.start, end: tok.span.end },
+    };
+  }
+
+  private captionDirective(): CaptionDirective {
+    const start = this.expect("ident"); // 'caption'
+    this.expect("colon");
+    const tok = this.expectQuotedTextValue("caption");
+    return {
+      kind: "caption",
+      value: tok.value,
+      span: { start: start.span.start, end: tok.span.end },
+    };
+  }
+
+  /**
+   * Shared parsing rule for title / subtitle / caption directives
+   * (DESIGN-PHASE5-TITLES §1.2, §1.4). Value must be a quoted string;
+   * empty strings raise E_TITLE_EMPTY; embedded newlines raise
+   * E_TITLE_MULTILINE.
+   */
+  private expectQuotedTextValue(directive: string): { value: string; span: SourceSpan } {
+    const tok = this.peek();
+    if (tok.kind !== "string") {
+      throw new ParseError(
+        `${directive} value must be a quoted string, got ${tok.kind}`,
+        tok.span,
+      );
+    }
+    this.advance();
+    if (tok.value.length === 0) {
+      throw new ParseError(
+        `E_TITLE_EMPTY: ${directive} value must not be empty. ` +
+          `Remove the directive entirely to disable it.`,
+        tok.span,
+      );
+    }
+    if (tok.value.includes("\n") || tok.value.includes("\r")) {
+      throw new ParseError(
+        `E_TITLE_MULTILINE: ${directive} value must be single-line (no newlines)`,
+        tok.span,
+      );
+    }
+    return { value: tok.value, span: tok.span };
   }
 
   private legendPositionDirective(): LegendPositionDirective {

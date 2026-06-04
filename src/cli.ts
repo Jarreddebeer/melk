@@ -32,6 +32,7 @@ import {
   loadTheme,
   type Theme,
 } from "./theme/theme.js";
+import type { Model } from "./bind/model.js";
 
 function usage(): never {
   process.stderr.write("usage: melk <command> <file.melk> [options]\n");
@@ -39,9 +40,12 @@ function usage(): never {
   process.stderr.write("  parse                 print the parsed AST as JSON\n");
   process.stderr.write("  bind                  print the bound Model as JSON\n");
   process.stderr.write("  render [-o OUT.svg] [--theme=NAME] [--legend=VALUE]\n");
+  process.stderr.write("         [--title=STR] [--subtitle=STR] [--caption=STR]\n");
   process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
   process.stderr.write("                        built-in themes: " + BUILTIN_THEME_NAMES.join(", ") + "\n");
   process.stderr.write("                        --legend values: on, off, or a position (bottom|right|top|left)\n");
+  process.stderr.write("                        --title / --subtitle / --caption override in-source values;\n");
+  process.stderr.write("                          empty string (e.g. --title=\"\") disables\n");
   process.exit(1);
 }
 
@@ -95,6 +99,33 @@ function resolveTheme(
   return loadTheme(DEFAULT_THEME_NAME);
 }
 
+/**
+ * DESIGN-PHASE5-TITLES §5.4. CLI override for one of the three text
+ * directives. Empty-string value disables (deletes the field on the
+ * model); any other non-undefined value sets the field. Multiline
+ * strings are rejected loudly — same E_TITLE_MULTILINE code that the
+ * parser uses, so the failure mode is consistent across surfaces.
+ */
+function applyTitleFlag(
+  argv: string[],
+  field: "title" | "subtitle" | "caption",
+  model: Model,
+): void {
+  const cliValue = findFlag(argv, field);
+  if (cliValue === undefined) return;
+  if (cliValue === "") {
+    delete model[field];
+    return;
+  }
+  if (cliValue.includes("\n") || cliValue.includes("\r")) {
+    process.stderr.write(
+      `E_TITLE_MULTILINE: --${field} value must be single-line (no newlines)\n`,
+    );
+    process.exit(1);
+  }
+  model[field] = cliValue;
+}
+
 function findFlag(argv: string[], name: string): string | undefined {
   const prefix = `--${name}=`;
   for (const a of argv) {
@@ -137,6 +168,16 @@ function main(): void {
     } else {
       delete model.legend;
     }
+
+    // DESIGN-PHASE5-TITLES §5.4 — CLI overrides for title/subtitle/caption.
+    // Each flag overrides the in-source directive. An empty string
+    // disables the corresponding strip (delete the field). The
+    // multiline/empty-source rule from the parser doesn't apply here:
+    // the parser enforces it on .melk source, but the CLI is the
+    // explicit "delete this" channel.
+    applyTitleFlag(argv, "title", model);
+    applyTitleFlag(argv, "subtitle", model);
+    applyTitleFlag(argv, "caption", model);
 
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);

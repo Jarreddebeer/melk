@@ -35,6 +35,12 @@ import type { Point, Polyline, Polylines } from "../layout/polyline.js";
 import type { TagRule, Theme } from "../theme/theme.js";
 import { resolveColour, resolveTags } from "../theme/theme.js";
 import { buildLegend, renderLegend, type LegendLayout } from "./legend.js";
+import {
+  buildFooter,
+  buildHeader,
+  renderTitleStrip,
+  type TitleStripLayout,
+} from "./titles.js";
 
 // --- pixel and bounds layout ---------------------------------------------
 
@@ -119,6 +125,33 @@ export function renderSVG(
         W += legendLayout.width;
         break;
     }
+  }
+
+  // DESIGN-PHASE5-TITLES §3.4 — header strip (title + subtitle) above
+  // everything else; footer strip (caption) below everything else.
+  // The header pushes the diagram body AND the legend down; the footer
+  // is appended at the bottom of the canvas.
+  const headerLayout: TitleStripLayout | undefined = buildHeader(model, theme);
+  const footerLayout: TitleStripLayout | undefined = buildFooter(model, theme);
+  if (headerLayout) {
+    ty += headerLayout.height;
+    legendOriginY += headerLayout.height;
+    H += headerLayout.height;
+  }
+  let footerOriginY = 0;
+  if (footerLayout) {
+    footerOriginY = H;
+    H += footerLayout.height;
+  }
+  // DESIGN-PHASE5-TITLES §3.3 — widen the canvas if title text overflows.
+  // The diagram body stays at its left-aligned position; the extra width
+  // is added to the right.
+  const requiredWidth = Math.max(
+    headerLayout?.minWidth ?? 0,
+    footerLayout?.minWidth ?? 0,
+  );
+  if (requiredWidth > W) {
+    W = requiredWidth;
   }
 
   // Build a node-id → shape map for the diamond endpoint clip pass.
@@ -268,6 +301,12 @@ export function renderSVG(
   parts.push(`</g>`);
   if (legendLayout) {
     parts.push(renderLegend(legendLayout, legendOriginX, legendOriginY, theme));
+  }
+  if (headerLayout) {
+    parts.push(renderTitleStrip(headerLayout, 0, 0, theme));
+  }
+  if (footerLayout) {
+    parts.push(renderTitleStrip(footerLayout, 0, footerOriginY, theme));
   }
   parts.push(`</svg>`);
   return parts.join("\n");

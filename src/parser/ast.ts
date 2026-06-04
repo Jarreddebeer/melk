@@ -208,6 +208,43 @@ export interface LegendPositionDirective {
 }
 
 /**
+ * Top-level title directive (DESIGN-PHASE5-TITLES.md §1.1).
+ *
+ *     title: "Order Service Architecture"
+ *
+ * Value must be a quoted string. Embedded newlines and the empty string
+ * are rejected at parse time (E_TITLE_MULTILINE / E_TITLE_EMPTY).
+ * Multiple `title:` directives are last-wins.
+ */
+export interface TitleDirective {
+  kind: "title";
+  value: string;
+  span: SourceSpan;
+}
+
+/**
+ * Top-level subtitle directive (DESIGN-PHASE5-TITLES.md §1.1).
+ * Renders as a smaller second row in the header strip below the title.
+ * Same single-line rule as `title:`.
+ */
+export interface SubtitleDirective {
+  kind: "subtitle";
+  value: string;
+  span: SourceSpan;
+}
+
+/**
+ * Top-level caption directive (DESIGN-PHASE5-TITLES.md §1.1).
+ * Renders in the footer strip below the diagram. Same single-line rule
+ * as `title:`.
+ */
+export interface CaptionDirective {
+  kind: "caption";
+  value: string;
+  span: SourceSpan;
+}
+
+/**
  * A linear flow declaration. Members occupy consecutive grid cells along
  * the flow axis at the same row.
  *
@@ -401,6 +438,9 @@ export type Statement =
   | ThemeDirective
   | LegendDirective
   | LegendPositionDirective
+  | TitleDirective
+  | SubtitleDirective
+  | CaptionDirective
   | PipelineDecl
   | BusDecl
   | FanOutDecl

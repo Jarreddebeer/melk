@@ -132,10 +132,20 @@ export interface ThemeTypography {
     body: number;
     edge: number;
     frame: number;
+    /** Header title text (DESIGN-PHASE5-TITLES.md §2). */
+    title: number;
+    /** Header subtitle text. */
+    subtitle: number;
+    /** Footer caption text. */
+    caption: number;
   };
   weight: {
     label: number;
     heading: number;
+    /** Title font weight (DESIGN-PHASE5-TITLES.md §2). */
+    title: number;
+    /** Subtitle font weight. */
+    subtitle: number;
   };
 }
 
@@ -256,8 +266,8 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
       "face-mono": "JetBrains Mono, Consolas, Monaco, monospace",
       // Smaller defaults than v1; the new 40px CELL_PX gives more room
       // but readable labels at scale don't need to shout.
-      size: { body: 10, edge: 9, frame: 9 },
-      weight: { label: 500, heading: 600 },
+      size: { body: 10, edge: 9, frame: 9, title: 20, subtitle: 13, caption: 9 },
+      weight: { label: 500, heading: 600, title: 700, subtitle: 500 },
     },
     strokes: {
       // Thinner strokes for a premium feel. Box outline and trace match
@@ -320,8 +330,8 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
     typography: {
       face: "Inter, -apple-system, Segoe UI, Roboto, sans-serif",
       "face-mono": "JetBrains Mono, Consolas, Monaco, monospace",
-      size: { body: 10, edge: 9, frame: 9 },
-      weight: { label: 500, heading: 600 },
+      size: { body: 10, edge: 9, frame: 9, title: 20, subtitle: 13, caption: 9 },
+      weight: { label: 500, heading: 600, title: 700, subtitle: 500 },
     },
     strokes: {
       outline: 1.0,
@@ -378,8 +388,8 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
     typography: {
       face: "IBM Plex Sans, Inter, sans-serif",
       "face-mono": "IBM Plex Mono, Consolas, monospace",
-      size: { body: 10, edge: 9, frame: 9 },
-      weight: { label: 500, heading: 600 },
+      size: { body: 10, edge: 9, frame: 9, title: 18, subtitle: 13, caption: 9 },
+      weight: { label: 500, heading: 600, title: 600, subtitle: 500 },
     },
     strokes: {
       outline: 1.0,
@@ -436,8 +446,8 @@ const BUILTIN_THEMES_RAW: Record<string, unknown> = {
     typography: {
       face: "IBM Plex Sans, Inter, sans-serif",
       "face-mono": "IBM Plex Mono, Consolas, monospace",
-      size: { body: 10, edge: 9, frame: 9 },
-      weight: { label: 500, heading: 600 },
+      size: { body: 10, edge: 9, frame: 9, title: 18, subtitle: 13, caption: 9 },
+      weight: { label: 500, heading: 600, title: 600, subtitle: 500 },
     },
     strokes: {
       outline: 1.0,
@@ -604,17 +614,22 @@ function validateTypography(raw: unknown, source: string): ThemeTypography {
   const body = requirePositiveNumber(size, "body", source, "typography.size.");
   const edge = requirePositiveNumber(size, "edge", source, "typography.size.");
   const frame = requirePositiveNumber(size, "frame", source, "typography.size.");
+  const title = requirePositiveNumber(size, "title", source, "typography.size.");
+  const subtitle = requirePositiveNumber(size, "subtitle", source, "typography.size.");
+  const caption = requirePositiveNumber(size, "caption", source, "typography.size.");
   const weight = raw["weight"];
   if (!isObject(weight)) {
     throw new ThemeError(`E_THEME_MISSING_FIELD: theme ${source} is missing 'typography.weight'`);
   }
   const label = requireIntInRange(weight, "label", 100, 900, source, "typography.weight.");
   const heading = requireIntInRange(weight, "heading", 100, 900, source, "typography.weight.");
+  const titleWeight = requireIntInRange(weight, "title", 100, 900, source, "typography.weight.");
+  const subtitleWeight = requireIntInRange(weight, "subtitle", 100, 900, source, "typography.weight.");
   return {
     face,
     "face-mono": faceMono,
-    size: { body, edge, frame },
-    weight: { label, heading },
+    size: { body, edge, frame, title, subtitle, caption },
+    weight: { label, heading, title: titleWeight, subtitle: subtitleWeight },
   };
 }
 

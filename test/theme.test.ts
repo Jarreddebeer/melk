@@ -53,8 +53,8 @@ function validRaw(): Record<string, unknown> {
     typography: {
       face: "Inter",
       "face-mono": "JetBrains Mono",
-      size: { body: 13, edge: 11, frame: 11 },
-      weight: { label: 500, heading: 600 },
+      size: { body: 13, edge: 11, frame: 11, title: 20, subtitle: 13, caption: 9 },
+      weight: { label: 500, heading: 600, title: 700, subtitle: 500 },
     },
     strokes: {
       outline: 1.5,
@@ -252,6 +252,51 @@ describe("validateTheme — typography", () => {
     ((raw["typography"] as Record<string, unknown>)["size"] as Record<string, unknown>)["body"] =
       -1;
     expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_NUMBER.*body/);
+  });
+
+  it("requires title size slot (DESIGN-PHASE5-TITLES §2.1)", () => {
+    const raw = validRaw();
+    delete ((raw["typography"] as Record<string, unknown>)["size"] as Record<string, unknown>)[
+      "title"
+    ];
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_NUMBER.*title/);
+  });
+
+  it("requires subtitle and caption size slots", () => {
+    const raw = validRaw();
+    delete ((raw["typography"] as Record<string, unknown>)["size"] as Record<string, unknown>)[
+      "subtitle"
+    ];
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_NUMBER.*subtitle/);
+    const raw2 = validRaw();
+    delete ((raw2["typography"] as Record<string, unknown>)["size"] as Record<string, unknown>)[
+      "caption"
+    ];
+    expect(() => validateTheme(raw2, "test")).toThrow(/E_THEME_BAD_NUMBER.*caption/);
+  });
+
+  it("requires title and subtitle weight slots", () => {
+    const raw = validRaw();
+    delete ((raw["typography"] as Record<string, unknown>)["weight"] as Record<string, unknown>)[
+      "title"
+    ];
+    expect(() => validateTheme(raw, "test")).toThrow(/E_THEME_BAD_NUMBER.*title/);
+    const raw2 = validRaw();
+    delete ((raw2["typography"] as Record<string, unknown>)["weight"] as Record<string, unknown>)[
+      "subtitle"
+    ];
+    expect(() => validateTheme(raw2, "test")).toThrow(/E_THEME_BAD_NUMBER.*subtitle/);
+  });
+
+  it("built-in themes all carry the new title/subtitle/caption typography slots", () => {
+    for (const name of BUILTIN_THEME_NAMES) {
+      const t = loadTheme(name);
+      expect(t.typography.size.title).toBeGreaterThan(0);
+      expect(t.typography.size.subtitle).toBeGreaterThan(0);
+      expect(t.typography.size.caption).toBeGreaterThan(0);
+      expect(t.typography.weight.title).toBeGreaterThanOrEqual(100);
+      expect(t.typography.weight.subtitle).toBeGreaterThanOrEqual(100);
+    }
   });
 });
 

@@ -107,6 +107,12 @@ interface BindCtx {
   legendPosition?: LegendPosition;
   /** Span of the most recent `legend-position:` directive (for error reporting). */
   legendPositionSpan?: SourceSpan;
+  /** Latest `title:` directive value (last-wins). */
+  title?: string;
+  /** Latest `subtitle:` directive value (last-wins). */
+  subtitle?: string;
+  /** Latest `caption:` directive value (last-wins). */
+  caption?: string;
   /**
    * Pending `avoid:` references stashed during the first pass. Resolved
    * after every edge and primitive is in place (so that primitive names,
@@ -194,6 +200,15 @@ export function bind(program: Program): Model {
       case "legend-position":
         ctx.legendPosition = stmt.position;
         ctx.legendPositionSpan = stmt.span;
+        break;
+      case "title":
+        ctx.title = stmt.value;
+        break;
+      case "subtitle":
+        ctx.subtitle = stmt.value;
+        break;
+      case "caption":
+        ctx.caption = stmt.value;
         break;
       case "pipeline":
         bindPipeline(stmt, ctx);
@@ -286,6 +301,9 @@ export function bind(program: Program): Model {
     ...(ctx.legendOn
       ? { legend: { on: true, position: ctx.legendPosition ?? "bottom" } }
       : {}),
+    ...(ctx.title !== undefined ? { title: ctx.title } : {}),
+    ...(ctx.subtitle !== undefined ? { subtitle: ctx.subtitle } : {}),
+    ...(ctx.caption !== undefined ? { caption: ctx.caption } : {}),
     nodes: [...ctx.nodes.values()],
     edges: ctx.edges,
     pipelines: [...ctx.pipelines.values()],
