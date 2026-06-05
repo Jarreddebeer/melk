@@ -1,0 +1,50 @@
+layout: lr
+crossings: 8
+title: "Netflix-style microservices"
+subtitle: "Edge gateway → service mesh → independent services with shared discovery"
+caption: "Source: examples/43-netflix-microservices.melk"
+legend: on
+
+# A canonical Netflix OSS topology:
+#
+#   client -> Zuul (edge proxy)
+#          -> service mesh (Ribbon client-side LB)
+#          -> [catalog, user, recommendations, billing]
+#
+# Eureka sits one column past the services as a shared discovery
+# registry — every service registers with it. Drawn as a `bus`
+# anchoring eureka at the median row of the four services.
+#
+# The mesh is a `highway` because the four downstream services share
+# the same client-side load-balancing fabric (Ribbon). Hystrix is a
+# cross-cutting concern (circuit breaker, bulkhead) — it lives on
+# every service call, so it's modelled as a tag rather than its own
+# node. Services tagged `critical` are the ones whose failure
+# degrades the homepage.
+
+client    { shape: rect,      label: "client" }
+zuul      { shape: rect,      label: "Zuul\n(edge proxy)", size: 5x9 }
+mesh      { shape: highway }
+
+catalog   { shape: rect,      label: "catalog\nservice", tags: [critical] }
+user      { shape: rect,      label: "user\nservice", tags: [critical] }
+recs      { shape: rect,      label: "recs\nservice" }
+billing   { shape: rect,      label: "billing\nservice" }
+
+eureka    { shape: rect, label: "Eureka\n(registry)", size: 5x9 }
+
+# Edge ingress.
+client -> zuul
+
+# Service mesh: Zuul reaches each service via the highway. Ribbon
+# does client-side load balancing across instances — modelled as a
+# parallel bundle.
+zuul -> catalog { via: mesh }
+zuul -> user    { via: mesh }
+zuul -> recs    { via: mesh }
+zuul -> billing { via: mesh }
+
+# Eureka is the registry — every service registers and discovers
+# peers through it. The bus anchors eureka one column past the
+# service column at the median row.
+bus registry: [catalog, user, recs, billing] -> eureka

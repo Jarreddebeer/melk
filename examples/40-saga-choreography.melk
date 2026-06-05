@@ -1,0 +1,49 @@
+layout: lr
+crossings: 6
+title: "Saga choreography"
+subtitle: "Order fulfilment with compensating transactions"
+caption: "Source: examples/40-saga-choreography.melk"
+legend: on
+
+# A classic order-fulfilment saga, choreographed (no central
+# orchestrator — each service publishes events the next subscribes
+# to). The happy path runs left-to-right:
+#
+#   order -> payment -> inventory -> shipping -> delivered
+#
+# Each stage can fail. Because there's no orchestrator to rewind,
+# every downstream service that has already "committed" must publish
+# a compensating event back to its predecessor:
+#
+#   - shipping failed   -> refund (back to payment) AND release stock
+#                          (back to inventory)
+#   - inventory short   -> refund (back to payment)
+#   - payment declined  -> cancel (back to order)
+#
+# Compensation lines are `>-` back-edges so they route in the rear
+# corridor and don't tangle with the forward flow. Multiple back-edges
+# sharing a source (shipping fails -> refund + release) hold their
+# declaration order in the slot lanes.
+#
+# `cancelled` is the terminal failure; `delivered` is the terminal
+# success. `cancelled` is tagged `critical` so the failure terminal
+# stands out.
+
+order        { shape: rect,      label: "OrderService\n(OrderPlaced)" }
+payment      { shape: rect,      label: "PaymentService\n(PaymentAuthorised)", size: 29x7 }
+inventory    { shape: rect,      label: "InventoryService\n(StockReserved)" }
+shipping     { shape: rect,      label: "ShippingService\n(LabelPrinted)", size: 25x7 }
+delivered    { shape: rect, label: "OrderDelivered" }
+cancelled    { shape: rect, label: "OrderCancelled", tags: [critical] }
+
+pipeline happy_path: order -> payment -> inventory -> shipping -> delivered
+
+# Terminal failure off the order side once payment rejects.
+branch terminal-fail:right: order -> cancelled
+
+# Compensation back-edges. Each one undoes a previously committed step.
+# Declaration order pins the slots when one source has multiple back-edges.
+shipping  >- payment   { label: "refund" }
+shipping  >- inventory { label: "release stock" }
+inventory >- payment   { label: "refund" }
+payment   >- order     { label: "cancel" }

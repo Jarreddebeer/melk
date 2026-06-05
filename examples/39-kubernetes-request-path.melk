@@ -28,10 +28,10 @@ apiserver   { shape: rect,      label: "kube-\napiserver" }
 auth        { shape: diamond,   label: "authn\n+ RBAC" }
 kubelet     { shape: rect,      label: "kubelet" }
 runtime     { shape: rect,      label: "container\nruntime" }
-pod         { shape: roundrect, label: "pod" }
+pod         { shape: rect, label: "pod" }
 
 etcd        { shape: cylinder,  label: "etcd", tags: [critical] }
-scheduler   { shape: roundrect, label: "kube-\nscheduler" }
+scheduler   { shape: rect, label: "kube-\nscheduler" }
 
 # Control + data plane spine.
 pipeline request: kubectl -> apiserver -> auth -> kubelet -> runtime -> pod

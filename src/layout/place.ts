@@ -20,8 +20,16 @@
  * Row/col cell-unit sizes are initialised from the max node cell-size
  * landing in each row/col. Corridor reservation (Step 5) widens these.
  */
-import type { Branch, Bus, FanOut, HighwayMembership, Model, Pipeline } from "../bind/model.js";
-import { type Cell, type Direction, type FlowAxis, type Placement, PlacementError } from "./placement.js";
+import type { Branch, Bus, FanOut, HighwayMembership, Model, ModelNode, Pipeline } from "../bind/model.js";
+import {
+  type Cell,
+  type Direction,
+  type FlowAxis,
+  type Placement,
+  PlacementError,
+  extentOf,
+  footprintCells,
+} from "./placement.js";
 
 interface PlaceCtx {
   cells: Map<string, Cell>;
@@ -48,6 +56,8 @@ interface PlaceCtx {
    * components without overlapping earlier work.
    */
   nextFreeRow: number;
+  /** Node-id → ModelNode for size lookups during anchor and flow passes. */
+  nodeOf: Map<string, ModelNode>;
 }
 
 export function place(model: Model): Placement {
@@ -59,6 +69,7 @@ export function place(model: Model): Placement {
     flowAxis,
     defaultForward: flowAxis === "east" ? "E" : "S",
     nextFreeRow: 0,
+    nodeOf: new Map(model.nodes.map((n) => [n.id, n])),
   };
 
   // Anchors are applied in declaration order — not kind-precedence
@@ -86,6 +97,31 @@ export function place(model: Model): Placement {
   detectCollisions(model, ctx);
 
   return normalise(model, ctx);
+}
+
+/**
+ * Gap (in cell-units) inserted between every consecutive pair of
+ * stacked members in a bus, fan-out, or fan-in. Uniform regardless of
+ * member count or which construct is doing the placing — members that
+ * participate in two constructs (e.g. workers downstream of a fan-out
+ * and upstream of a bus) get the same spacing either way.
+ *
+ * For even n, the middle pair's gap is what shared straddles to land
+ * centered between the two middle members. Shared's declared height
+ * does not affect any spacing decisions.
+ *
+ * A future spacing setting in the theme/page will set this value (1-3
+ * cells).
+ */
+const MEMBER_GAP = 1;
+
+/** Forward / perp cell-extent of a node id given its local forward direction. */
+function extentFor(id: string, ctx: PlaceCtx): { forward: number; perp: number } {
+  const node = ctx.nodeOf.get(id);
+  const w = node?.size.width ?? 1;
+  const h = node?.size.height ?? 1;
+  const fwd = ctx.forward.get(id) ?? ctx.defaultForward;
+  return extentOf(w, h, fwd);
 }
 
 // --- direction helpers ----------------------------------------------------
@@ -201,9 +237,12 @@ function applyAnchor(
   }
 
   // Advance the "next free row" past anything this constraint placed.
+  // Multi-cell: count each node's full footprint height.
   for (let i = 0; i < members.length; i++) {
     const c = ctx.cells.get(members[i]!)!;
-    if (c.row + 1 > ctx.nextFreeRow) ctx.nextFreeRow = c.row + 1;
+    const node = ctx.nodeOf.get(members[i]!);
+    const h = Math.max(1, Math.ceil(node?.size.height ?? 1));
+    if (c.row + h > ctx.nextFreeRow) ctx.nextFreeRow = c.row + h;
   }
 }
 
@@ -221,64 +260,123 @@ function inheritForward(anchor: string, ctx: PlaceCtx): Direction {
 
 function anchorPipeline(p: Pipeline, ctx: PlaceCtx): void {
   // Pipeline members lie on consecutive cells along the local forward
-  // direction (DESIGN §2.2, §2.5). Forward is inherited from member[0]
-  // if that node was already placed; otherwise the page default.
+  // direction (DESIGN §2.2, §2.5). Multi-cell occupancy: each member's
+  // offset advances by the PREVIOUS member's forward extent, so a 5x9
+  // hub at members[0] and a 5x5 default at members[1] sit on adjacent
+  // cells, not overlapping. Forward is inherited from member[0] if
+  // already placed; otherwise the page default.
   const fwd = inheritForward(p.members[0]!, ctx);
   const s = step(fwd);
-  const offsets: Cell[] = p.members.map((_, i) => ({
-    row: s.row * i,
-    col: s.col * i,
-  }));
+  const offsets: Cell[] = [];
+  let accum = 0;
+  for (let i = 0; i < p.members.length; i++) {
+    offsets.push({ row: s.row * accum, col: s.col * accum });
+    accum += extentFor(p.members[i]!, ctx).forward;
+  }
   const forwards = p.members.map(() => fwd);
   applyAnchor(p.members, offsets, forwards, ctx, `pipeline '${p.name}'`);
 }
 
 function anchorBus(b: Bus, ctx: PlaceCtx): void {
-  // Bus geometry, isometric (DESIGN §2.5): producers stack one cell apart
-  // on the axis perpendicular to forward (a `:left`-rotated step); the
-  // shared consumer sits one cell forward at the median producer's perp
-  // offset. The bus's forward is inherited from `shared`.
+  // Bus geometry, isometric (DESIGN §2.5): producers stack along the
+  // perpendicular axis with a uniform `MEMBER_GAP` between each
+  // consecutive pair. Shared sits one max-producer-forward step
+  // forward at the anchor perp (geometric centre of the producer
+  // block). The bus's forward is inherited from `shared`.
   const fwd = inheritForward(b.shared, ctx);
   const fStep = step(fwd);
   const pStep = step(left(fwd)); // perpendicular axis; -i*pStep stacks producers along it
   const n = b.producers.length;
-  const median = Math.floor((n - 1) / 2);
   const members = [...b.producers, b.shared];
   const offsets: Cell[] = [];
+
+  // perpOffsets[i] = perp offset of producer i from producer 0, with
+  // MEMBER_GAP inserted between every consecutive pair.
+  const perpOffsets: number[] = [];
+  let perpAccum = 0;
   for (let i = 0; i < n; i++) {
-    // Producer i sits at i*pStep from producer 0. Sign here is positive
-    // because `:left` of east is north, and producers were historically
-    // stacked north-to-south; flipping pStep sign keeps that convention
-    // — see lock entry in §11.6 "stacking direction is :left".
-    // Note: stacking sign chosen so producer 0 sits at the "top" relative
-    // to forward (clockwise from forward).
-    offsets.push({ row: -pStep.row * i, col: -pStep.col * i });
+    perpOffsets.push(perpAccum);
+    perpAccum += extentFor(b.producers[i]!, ctx).perp;
+    if (i < n - 1) perpAccum += MEMBER_GAP;
   }
-  // Shared: one step forward from producers, at the median producer's
-  // perp coord.
+  const anchorPerp = anchorPerpOf(b.producers, perpOffsets, b.shared, ctx);
+
+  for (let i = 0; i < n; i++) {
+    const po = perpOffsets[i]!;
+    offsets.push({ row: -pStep.row * po, col: -pStep.col * po });
+  }
+  // Shared: one max-producer-forward-extent step forward at the anchor.
+  let maxProducerFwd = 1;
+  for (const p of b.producers) {
+    const ext = extentFor(p, ctx).forward;
+    if (ext > maxProducerFwd) maxProducerFwd = ext;
+  }
   offsets.push({
-    row: fStep.row + -pStep.row * median,
-    col: fStep.col + -pStep.col * median,
+    row: fStep.row * maxProducerFwd + -pStep.row * anchorPerp,
+    col: fStep.col * maxProducerFwd + -pStep.col * anchorPerp,
   });
   const forwards = members.map(() => fwd);
   applyAnchor(members, offsets, forwards, ctx, `bus '${b.name}'`);
 }
 
+/**
+ * Anchor offset (in perp cell-units) for `shared` such that shared's
+ * geometric centre lands on the member block's geometric centre.
+ *
+ *   blockCentre = midpoint of (first member's leading edge,
+ *                              last member's trailing edge)
+ *   anchorPerp  = blockCentre - sharedPerp / 2   (shared's top row)
+ *
+ * Same expression for odd and even n — no parity branch. A non-integer
+ * result is snapped down by `Math.floor` so the cell map only sees
+ * whole cells; that introduces at most a half-cell asymmetry when
+ * block-height and shared-height have different parity.
+ */
+function anchorPerpOf(
+  memberIds: string[],
+  perpOffsets: number[],
+  sharedId: string,
+  ctx: PlaceCtx,
+): number {
+  const first = perpOffsets[0]!;
+  const lastIdx = memberIds.length - 1;
+  const last = perpOffsets[lastIdx]! + extentFor(memberIds[lastIdx]!, ctx).perp;
+  const blockCentre = (first + last) / 2;
+  const sharedPerp = extentFor(sharedId, ctx).perp;
+  return Math.floor(blockCentre - sharedPerp / 2);
+}
+
 function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
-  // Mirror of bus: shared at the origin, consumers one step forward at
-  // consecutive perpendicular offsets.
+  // Mirror of bus: shared at the origin, consumers one shared-forward-
+  // extent step forward at consecutive perpendicular offsets with a
+  // uniform `MEMBER_GAP` between each consecutive pair. Shared anchors
+  // at the geometric centre of the consumer block — same formula as
+  // bus, no parity branch.
   const fwd = inheritForward(f.shared, ctx);
   const fStep = step(fwd);
   const pStep = step(left(fwd));
   const n = f.consumers.length;
-  const median = Math.floor((n - 1) / 2);
   const members = [f.shared, ...f.consumers];
   const offsets: Cell[] = [];
-  offsets.push({ row: -pStep.row * median, col: -pStep.col * median });
+
+  const perpOffsets: number[] = [];
+  let perpAccum = 0;
   for (let i = 0; i < n; i++) {
+    perpOffsets.push(perpAccum);
+    perpAccum += extentFor(f.consumers[i]!, ctx).perp;
+    if (i < n - 1) perpAccum += MEMBER_GAP;
+  }
+  const anchorPerp = anchorPerpOf(f.consumers, perpOffsets, f.shared, ctx);
+
+  // Shared sits at -pStep * anchorPerp (perp-centered on consumers).
+  offsets.push({ row: -pStep.row * anchorPerp, col: -pStep.col * anchorPerp });
+  // Each consumer: one shared-forward-extent step forward at its perp.
+  const sharedFwdExtent = extentFor(f.shared, ctx).forward;
+  for (let i = 0; i < n; i++) {
+    const po = perpOffsets[i]!;
     offsets.push({
-      row: fStep.row + -pStep.row * i,
-      col: fStep.col + -pStep.col * i,
+      row: fStep.row * sharedFwdExtent + -pStep.row * po,
+      col: fStep.col * sharedFwdExtent + -pStep.col * po,
     });
   }
   const forwards = members.map(() => fwd);
@@ -286,17 +384,22 @@ function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
 }
 
 function anchorBranch(b: Branch, ctx: PlaceCtx): void {
-  // Direction change: anchor `member` one cell off `spine` on the
-  // 90°-rotated axis, with `member` carrying the rotated forward. Any
-  // downstream primitive rooted on `member` inherits that forward
-  // (§2.5, §6.4).
+  // Direction change: anchor `member` one (spine-perp-extent) step off
+  // `spine` on the 90°-rotated axis, with `member` carrying the rotated
+  // forward. Any downstream primitive rooted on `member` inherits that
+  // forward (§2.5, §6.4). Multi-cell: step by spine's extent in the
+  // branch direction so a 5x9 spine and a 5x5 branch member don't
+  // overlap.
   const parentFwd = inheritForward(b.spine, ctx);
   const side = b.side ?? "left";
   const branchFwd: Direction = side === "left" ? left(parentFwd) : right(parentFwd);
   const s = step(branchFwd);
+  // The branch direction is perpendicular to parentFwd, so we step by
+  // the spine's perp extent (its dim along the branch axis).
+  const spinePerp = extentFor(b.spine, ctx).perp;
   applyAnchor(
     [b.spine, b.member],
-    [{ row: 0, col: 0 }, { row: s.row, col: s.col }],
+    [{ row: 0, col: 0 }, { row: s.row * spinePerp, col: s.col * spinePerp }],
     [parentFwd, branchFwd],
     ctx,
     `branch '${b.name}'`,
@@ -352,27 +455,60 @@ function anchorHighwayVia(
   offsets.push({ row: 0, col: 0, z: hwyZ });
   forwards.push(fwd);
 
-  // Source-side: one cell BACK from the highway, stacked at consecutive
-  // perp offsets centered around the highway. The single gutter between
-  // source col and highway col carries the bundle's approach channels.
+  // Source-side: one (source-extent)-step BACK from the highway, stacked
+  // at consecutive perp offsets centered around the highway. Multi-cell
+  // occupancy: each source's perp offset is the cumulative perp extent
+  // of all earlier sources, centered on the median.
   const nSrc = m.sources.length;
-  const srcMedian = Math.floor((nSrc - 1) / 2);
+  const srcPerpOffsets: number[] = [];
+  {
+    let acc = 0;
+    for (let i = 0; i < nSrc; i++) {
+      srcPerpOffsets.push(acc);
+      acc += extentFor(m.sources[i]!, ctx).perp;
+    }
+  }
+  const srcMedianIdx = Math.floor((nSrc - 1) / 2);
+  const srcMedianPerp = srcPerpOffsets[srcMedianIdx] ?? 0;
+  // For the source's back-step: use the source's own forward extent so
+  // the trailing edge of source-col touches the leading edge of hwy-col.
+  // With uniform-size sources (the common case) this is just 1 source's
+  // forward extent.
+  let maxSrcFwd = 1;
+  for (const s of m.sources) {
+    const ext = extentFor(s, ctx).forward;
+    if (ext > maxSrcFwd) maxSrcFwd = ext;
+  }
   for (let i = 0; i < nSrc; i++) {
+    const po = srcPerpOffsets[i]! - srcMedianPerp;
     offsets.push({
-      row: -fStep.row + -pStep.row * (i - srcMedian),
-      col: -fStep.col + -pStep.col * (i - srcMedian),
+      row: -fStep.row * maxSrcFwd + -pStep.row * po,
+      col: -fStep.col * maxSrcFwd + -pStep.col * po,
       z: hwyZ,
     });
     forwards.push(fwd);
   }
 
-  // Target-side: one cell FORWARD from the highway (mirror).
+  // Target-side: one (highway-extent)-step FORWARD from the highway.
   const nTgt = m.targets.length;
-  const tgtMedian = Math.floor((nTgt - 1) / 2);
+  const tgtPerpOffsets: number[] = [];
+  {
+    let acc = 0;
+    for (let i = 0; i < nTgt; i++) {
+      tgtPerpOffsets.push(acc);
+      acc += extentFor(m.targets[i]!, ctx).perp;
+    }
+  }
+  const tgtMedianIdx = Math.floor((nTgt - 1) / 2);
+  const tgtMedianPerp = tgtPerpOffsets[tgtMedianIdx] ?? 0;
+  // Highway forward extent: how far targets must sit beyond the
+  // highway's anchor cell to be east of the highway's east face.
+  const hwyFwdExtent = extentFor(m.name, ctx).forward;
   for (let i = 0; i < nTgt; i++) {
+    const po = tgtPerpOffsets[i]! - tgtMedianPerp;
     offsets.push({
-      row: fStep.row + -pStep.row * (i - tgtMedian),
-      col: fStep.col + -pStep.col * (i - tgtMedian),
+      row: fStep.row * hwyFwdExtent + -pStep.row * po,
+      col: fStep.col * hwyFwdExtent + -pStep.col * po,
       z: hwyZ,
     });
     forwards.push(fwd);
@@ -418,15 +554,19 @@ function flowPass(model: Model, ctx: PlaceCtx): void {
       if (fromPlaced) {
         const a = ctx.cells.get(e.from)!;
         const fwd = ctx.forward.get(e.from) ?? ctx.defaultForward;
-        ctx.cells.set(e.to, stepForward(a, fwd));
+        // Step past `from`'s forward extent (multi-cell): the next free
+        // cell east of from is at from.col + from's width (lr layout).
+        const fromExt = extentFor(e.from, ctx).forward;
+        ctx.cells.set(e.to, stepForward(a, fwd, fromExt));
         ctx.placedBy.set(e.to, `edge ${e.from} -> ${e.to}`);
         if (!ctx.forward.has(e.to)) ctx.forward.set(e.to, fwd);
       } else {
-        // Reverse-flow: place `from` one cell *back* from `to`. Keeps
-        // the edge running in the flow direction.
+        // Reverse-flow: place `from` `to-extent` cells *back* from `to`
+        // so its trailing edge touches `to`'s leading edge.
         const b = ctx.cells.get(e.to)!;
         const fwd = ctx.forward.get(e.to) ?? ctx.defaultForward;
-        ctx.cells.set(e.from, stepBack(b, fwd));
+        const fromExt = extentFor(e.from, ctx).forward;
+        ctx.cells.set(e.from, stepBack(b, fwd, fromExt));
         ctx.placedBy.set(e.from, `edge ${e.from} -> ${e.to}`);
         if (!ctx.forward.has(e.from)) ctx.forward.set(e.from, fwd);
       }
@@ -442,20 +582,26 @@ function flowPass(model: Model, ctx: PlaceCtx): void {
  */
 function nextOrigin(ctx: PlaceCtx): Cell {
   // Re-derive from current placement in case the anchor pass pushed
-  // some nodes below the recorded nextFreeRow.
+  // some nodes below the recorded nextFreeRow. Multi-cell: use each
+  // node's FOOTPRINT bottom row, not just its anchor row.
   let maxRow = ctx.nextFreeRow - 1;
-  for (const c of ctx.cells.values()) if (c.row > maxRow) maxRow = c.row;
+  for (const [id, c] of ctx.cells) {
+    const node = ctx.nodeOf.get(id);
+    const h = Math.max(1, Math.ceil(node?.size.height ?? 1));
+    const bottom = c.row + h - 1;
+    if (bottom > maxRow) maxRow = bottom;
+  }
   return { row: maxRow + 1, col: 0 };
 }
 
-function stepForward(c: Cell, fwd: Direction): Cell {
+function stepForward(c: Cell, fwd: Direction, extent: number = 1): Cell {
   const s = step(fwd);
-  return { row: c.row + s.row, col: c.col + s.col };
+  return { row: c.row + s.row * extent, col: c.col + s.col * extent };
 }
 
-function stepBack(c: Cell, fwd: Direction): Cell {
+function stepBack(c: Cell, fwd: Direction, extent: number = 1): Cell {
   const s = step(fwd);
-  return { row: c.row - s.row, col: c.col - s.col };
+  return { row: c.row - s.row * extent, col: c.col - s.col * extent };
 }
 
 // --- orphan parking -------------------------------------------------------
@@ -474,14 +620,22 @@ function parkOrphans(model: Model, ctx: PlaceCtx): void {
   for (const n of model.nodes) {
     if (ctx.cells.has(n.id)) continue;
     // Re-derive nextFreeRow from the current placement to be sure we
-    // don't overlap anything the flow pass put down.
+    // don't overlap anything the flow pass put down. Multi-cell: use
+    // each existing node's full footprint bottom row.
     let maxRow = -1;
-    for (const c of ctx.cells.values()) if (c.row > maxRow) maxRow = c.row;
+    for (const [id, c] of ctx.cells) {
+      const placed = ctx.nodeOf.get(id);
+      const h = Math.max(1, Math.ceil(placed?.size.height ?? 1));
+      const bottom = c.row + h - 1;
+      if (bottom > maxRow) maxRow = bottom;
+    }
     if (maxRow + 1 > ctx.nextFreeRow) ctx.nextFreeRow = maxRow + 1;
     ctx.cells.set(n.id, { row: ctx.nextFreeRow, col: 0 });
     ctx.placedBy.set(n.id, "orphan parking");
     if (!ctx.forward.has(n.id)) ctx.forward.set(n.id, ctx.defaultForward);
-    ctx.nextFreeRow++;
+    // Advance past THIS node's own footprint.
+    const myH = Math.max(1, Math.ceil(n.size.height));
+    ctx.nextFreeRow += myH;
   }
 }
 
@@ -523,10 +677,18 @@ function applyIntersections(model: Model, ctx: PlaceCtx): void {
       // This is the obstacle set the dodge must avoid. Built per-iteration
       // so multi-highway intersections see each other's already-committed
       // members from previous iterations.
+      // Multi-cell: include every footprint cell, not just the anchor.
       const occupiedFiltered = new Set<string>();
       for (const [id, c] of ctx.cells) {
         if (toShift.has(id)) continue;
-        occupiedFiltered.add(`${c.row},${c.col}`);
+        const node = ctx.nodeOf.get(id);
+        const w = Math.max(1, Math.ceil(node?.size.width ?? 1));
+        const h = Math.max(1, Math.ceil(node?.size.height ?? 1));
+        for (let dr = 0; dr < h; dr++) {
+          for (let dc = 0; dc < w; dc++) {
+            occupiedFiltered.add(`${c.row + dr},${c.col + dc}`);
+          }
+        }
       }
 
       if (dRow === 0 && dCol === 0) continue;
@@ -559,17 +721,34 @@ function applyIntersections(model: Model, ctx: PlaceCtx): void {
         let row = t.row;
         let col = t.col;
         const z = t.z;
-        // Bump until the cell is free (relative to occupiedFiltered and
-        // already-bumped members of this same group). Cap at 20 to avoid
-        // infinite loops on a pathological topology.
+        const node = ctx.nodeOf.get(id);
+        const w = Math.max(1, Math.ceil(node?.size.width ?? 1));
+        const h = Math.max(1, Math.ceil(node?.size.height ?? 1));
+        // Bump until the ENTIRE FOOTPRINT is free.
         const otherIds = [...tentative.keys()].filter((k) => k !== id);
-        for (let step = 0; step < 20; step++) {
-          const key = `${row},${col}`;
-          const otherClaim = otherIds.some((oid) => {
-            const oc = tentative.get(oid)!;
-            return oc.row === row && oc.col === col;
-          });
-          if (!occupiedFiltered.has(key) && !otherClaim) break;
+        for (let step = 0; step < 40; step++) {
+          let collides = false;
+          for (let dr = 0; dr < h && !collides; dr++) {
+            for (let dc = 0; dc < w && !collides; dc++) {
+              const key = `${row + dr},${col + dc}`;
+              if (occupiedFiltered.has(key)) collides = true;
+              if (collides) break;
+              for (const oid of otherIds) {
+                const oc = tentative.get(oid)!;
+                const onode = ctx.nodeOf.get(oid);
+                const ow = Math.max(1, Math.ceil(onode?.size.width ?? 1));
+                const oh = Math.max(1, Math.ceil(onode?.size.height ?? 1));
+                if (
+                  row + dr >= oc.row && row + dr < oc.row + oh &&
+                  col + dc >= oc.col && col + dc < oc.col + ow
+                ) {
+                  collides = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!collides) break;
           row += bumpRow;
           col += bumpCol;
         }
@@ -605,6 +784,12 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
   // collide on (row, col) regardless of z: even an underground
   // highway's source/target boxes are physical surface boxes the
   // renderer draws, and two boxes can't occupy the same screen cell.
+  //
+  // Multi-cell occupancy: each node claims every cell in its size-
+  // derived footprint (anchor + ceil(width-1) east / ceil(height-1)
+  // south), not just the anchor. Two nodes whose footprints overlap on
+  // any cell collide.
+  const sizeOf = new Map(model.nodes.map((n) => [n.id, n.size]));
   const orientOf = (id: string): "horizontal" | "vertical" | null => {
     const node = model.nodes.find((n) => n.id === id);
     if (!node || node.shape !== "highway") return null;
@@ -619,32 +804,36 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
   };
   for (const [id, cell] of ctx.cells) {
     const z = cell.z ?? 0;
-    // Non-highway nodes always key on (row, col) — same cell collides
-    // even at different z. Highway nodes key on (row, col, z) so two
-    // perpendicular highways at different z can share an intersection.
-    const key = isHighway(id)
-      ? `${cell.row},${cell.col},${z}`
-      : `${cell.row},${cell.col}`;
-    const prev = occupied.get(key);
-    if (prev !== undefined) {
-      const oPrev = orientOf(prev);
-      const oCurr = orientOf(id);
-      if (oPrev !== null && oCurr !== null && oPrev !== oCurr) {
-        // Perpendicular highways at the same cell — allowed `+` case.
-        continue;
+    const sz = sizeOf.get(id) ?? { width: 1, height: 1 };
+    const cells = footprintCells(cell, sz.width, sz.height);
+    for (const fc of cells) {
+      // Non-highway nodes always key on (row, col) — same cell collides
+      // even at different z. Highway nodes key on (row, col, z) so two
+      // perpendicular highways at different z can share an intersection.
+      const key = isHighway(id)
+        ? `${fc.row},${fc.col},${z}`
+        : `${fc.row},${fc.col}`;
+      const prev = occupied.get(key);
+      if (prev !== undefined && prev !== id) {
+        const oPrev = orientOf(prev);
+        const oCurr = orientOf(id);
+        if (oPrev !== null && oCurr !== null && oPrev !== oCurr) {
+          // Perpendicular highways at the same cell — allowed `+` case.
+          continue;
+        }
+        throw new PlacementError(
+          `E_AMBIGUOUS_PLACEMENT: nodes '${prev}' and '${id}' both placed at ` +
+            `(row ${fc.row}, col ${fc.col}). ` +
+            `Add a structured-flow constraint to disambiguate, or split the source. ` +
+            `Hint: if '${id}' is a side-channel off a spine member, use ` +
+            `\`branch <name>:right: <spine> -> ${id}\` (or \`:left:\`) — a bare ` +
+            `edge to '${id}' makes the placer extend the spine and collide. ` +
+            `For multiple side-shoots off the same node, use \`fan-out\` instead of ` +
+            `several \`branch\`es with the same side.`,
+        );
       }
-      throw new PlacementError(
-        `E_AMBIGUOUS_PLACEMENT: nodes '${prev}' and '${id}' both placed at ` +
-          `(row ${cell.row}, col ${cell.col}). ` +
-          `Add a structured-flow constraint to disambiguate, or split the source. ` +
-          `Hint: if '${id}' is a side-channel off a spine member, use ` +
-          `\`branch <name>:right: <spine> -> ${id}\` (or \`:left:\`) — a bare ` +
-          `edge to '${id}' makes the placer extend the spine and collide. ` +
-          `For multiple side-shoots off the same node, use \`fan-out\` instead of ` +
-          `several \`branch\`es with the same side.`,
-      );
+      occupied.set(key, id);
     }
-    occupied.set(key, id);
   }
 }
 
@@ -656,15 +845,22 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
  * each row/col.
  */
 function normalise(model: Model, ctx: PlaceCtx): Placement {
+  // Compute grid extent from each node's FOOTPRINT, not just its anchor.
+  // A node at anchor (r, c) with size (w, h) occupies rows
+  // [r, r + ceil(h) - 1] and cols [c, c + ceil(w) - 1].
+  const sizeOf = new Map(model.nodes.map((n) => [n.id, n.size]));
   let minRow = Infinity;
   let minCol = Infinity;
   let maxRow = -Infinity;
   let maxCol = -Infinity;
-  for (const c of ctx.cells.values()) {
+  for (const [id, c] of ctx.cells) {
+    const sz = sizeOf.get(id) ?? { width: 1, height: 1 };
+    const hCells = Math.max(1, Math.ceil(sz.height));
+    const wCells = Math.max(1, Math.ceil(sz.width));
     if (c.row < minRow) minRow = c.row;
     if (c.col < minCol) minCol = c.col;
-    if (c.row > maxRow) maxRow = c.row;
-    if (c.col > maxCol) maxCol = c.col;
+    if (c.row + hCells - 1 > maxRow) maxRow = c.row + hCells - 1;
+    if (c.col + wCells - 1 > maxCol) maxCol = c.col + wCells - 1;
   }
   if (!Number.isFinite(minRow)) {
     // Empty model.
@@ -684,15 +880,12 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
   }
   const nRows = maxRow - minRow + 1;
   const nCols = maxCol - minCol + 1;
+  // Multi-cell occupancy: every row contributes a unit cell (= 1).
+  // Nodes' larger sizes are expressed by their footprints spanning
+  // multiple rows/cols, not by inflating the anchor row's unit count.
+  // Text-fit handles fractional last-row contributions separately.
   const rowUnits = new Array<number>(nRows).fill(1);
   const colUnits = new Array<number>(nCols).fill(1);
-  const sizeOf = new Map(model.nodes.map((n) => [n.id, n.size]));
-  for (const [id, c] of shifted) {
-    const sz = sizeOf.get(id);
-    if (!sz) continue;
-    if (sz.height > rowUnits[c.row]!) rowUnits[c.row] = sz.height;
-    if (sz.width > colUnits[c.col]!) colUnits[c.col] = sz.width;
-  }
   return {
     cells: shifted,
     rowUnits,

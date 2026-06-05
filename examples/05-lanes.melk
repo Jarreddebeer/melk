@@ -8,10 +8,11 @@ crossings: 10
 # inevitable with three stacked pipelines and cross-edges, hence the
 # explicit budget.
 
-transform  { shape: rect,     size: 2x1, label: "ETL" }
+api { shape: rect, size: 5x7 }
+transform  { shape: rect,     size: 9x5, label: "ETL" }
 auth       { shape: diamond }
 controller { shape: rect }
-ods        { shape: cylinder, size: 2x1, label: "ODS" }
+ods        { shape: cylinder, size: 9x5, label: "ODS" }
 client     { shape: circle }
 
 pipeline data:    ingest -> transform -> ods

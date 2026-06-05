@@ -11,6 +11,7 @@ crossings: 20
 # cluster between them automatically (sources west of ingress,
 # sinks east of egress).
 
+sink_y { shape: rect, size: 9x7 }
 ingress { shape: highway }
 egress  { shape: highway }
 

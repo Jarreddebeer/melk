@@ -11,7 +11,7 @@
 
 layout: tb
 
-collector { shape: rect, size: 2x1, label: "Collector" }
+collector { shape: rect, size: 9x5, label: "Collector" }
 
 signals -> collector
 

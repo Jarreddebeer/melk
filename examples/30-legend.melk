@@ -17,10 +17,10 @@ legend-position: right
 # captions for these tags).
 
 ingest    { shape: rect, label: "ingest" }
-transform { shape: rect, size: 2x1, label: "ETL" }
+transform { shape: rect, size: 9x5, label: "ETL" }
 publish   { shape: rect, label: "publish" }
-audit     { shape: roundrect, tags: [future] }
-alert     { shape: roundrect, label: "alert!", tags: [critical] }
+audit     { shape: rect, tags: [future] }
+alert     { shape: rect, label: "alert!", tags: [critical] }
 
 pipeline main: ingest -> transform -> publish
 

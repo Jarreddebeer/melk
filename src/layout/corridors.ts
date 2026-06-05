@@ -125,24 +125,34 @@ export class CorridorError extends Error {
  * them here means the renderer (Step 8) can read the same numbers.
  *
  * COMB_PITCH = 8 px (the global grid pitch from feedback-global-grid).
- * CELL_PX    = 32 px (DESIGN §1.1 default).
+ * CELL_PX    = 8 px — one grid cell IS one slot. Cell pitch equals slot
+ *              pitch by construction, so moving a node from row r to
+ *              row r+1 shifts it by exactly one slot position. Adjacent
+ *              boxes' slots align without any centering math.
  *
- * At defaults, the gutter between two cell-tall sides holds
- *   CELL_PX / COMB_PITCH - 1 = 3 traces
- * before pushing the rows apart (one tooth is reserved at each end as
- * margin so traces don't graze the boxes).
+ * Default node size is 5x5 (40×40 px). Odd dimensions matter: an odd-
+ * cell-tall face puts a single-trace centered slot at the middle cell's
+ * center (a clean cell-center coord), not between cells. Same for odd-
+ * cell-wide faces in the perpendicular direction.
  */
 export const COMB_PITCH = 8;
-export const CELL_PX = 32;
+export const CELL_PX = 8;
 
 /**
- * Traces per single cell-unit of gutter. With pitch 8 and cell 32, this
- * is 3 (the 4 slots fit but one is reserved as end margin). Changing
- * COMB_PITCH or CELL_PX rescales the whole router uniformly — no other
- * code needs editing.
+ * Traces per single cell-unit of gutter. With CELL_PX = COMB_PITCH = 8
+ * this is exactly 1 — each cell holds one slot, no margin reservation.
+ * A default 5x5 face therefore holds 5 traces. Hubs with more peers
+ * size up by adding cells along the face.
+ *
+ * Earlier (CELL_PX=16, COMB_PITCH=8) this was `floor(CELL_PX/COMB_PITCH)
+ * - 1 = 1` (reserve 1 slot/cell as margin). At CELL_PX=COMB_PITCH the
+ * margin reservation makes no sense — you'd get 0 traces. The formula
+ * `max(1, floor(CELL_PX/COMB_PITCH) - 1)` preserves both regimes: the
+ * margin still gets reserved when there's room, and CELL_PX=COMB_PITCH
+ * falls back to one trace per cell.
  */
 export const TRACES_PER_CELL_UNIT =
-  Math.floor(CELL_PX / COMB_PITCH) - 1;
+  Math.max(1, Math.floor(CELL_PX / COMB_PITCH) - 1);
 
 // --- entry point ----------------------------------------------------------
 
@@ -167,15 +177,18 @@ export function reserveCorridors(
   placement: Placement,
 ): Reservation {
   // Per-edge invariants reused by both passes: forward direction, sides,
-  // src/tgt cells, whether the edge is pickable (diagonal-cell forward).
+  // src/tgt cells + sizes (multi-cell footprint), pickable flag.
   type EdgeCtx = {
     src: Cell;
     tgt: Cell;
+    srcSize: { width: number; height: number };
+    tgtSize: { width: number; height: number };
     edgeFwd: Direction;
     sides: { sourceSide: Side; targetSide: Side };
     /** Diagonal-cell forward edge → can choose pivot. */
     pickable: boolean;
   };
+  const sizeOf = new Map(model.nodes.map((n) => [n.id, n.size]));
   const edgeCtxs: EdgeCtx[] = [];
   for (let i = 0; i < model.edges.length; i++) {
     const edge = model.edges[i]!;
@@ -269,7 +282,9 @@ export function reserveCorridors(
       srcKind === tgtKind &&
       src.row !== tgt.row &&
       src.col !== tgt.col;
-    edgeCtxs.push({ src, tgt, edgeFwd, sides, pickable });
+    const srcSize = sizeOf.get(edge.from) ?? { width: 1, height: 1 };
+    const tgtSize = sizeOf.get(edge.to) ?? { width: 1, height: 1 };
+    edgeCtxs.push({ src, tgt, srcSize, tgtSize, edgeFwd, sides, pickable });
   }
 
   // --- Pass A: provisional corridor sequences using pivot = "source".
@@ -281,6 +296,8 @@ export function reserveCorridors(
     corridorSequence(
       ctx.src,
       ctx.tgt,
+      ctx.srcSize,
+      ctx.tgtSize,
       ctx.sides.sourceSide,
       ctx.sides.targetSide,
       !!model.edges[i]!.isBackEdge,
@@ -304,6 +321,8 @@ export function reserveCorridors(
     return choosePivotByDemand(
       ctx.src,
       ctx.tgt,
+      ctx.srcSize,
+      ctx.tgtSize,
       ctx.sides.sourceSide,
       ctx.sides.targetSide,
       ctx.edgeFwd,
@@ -342,6 +361,8 @@ export function reserveCorridors(
         placement,
         ctx.src,
         ctx.tgt,
+        ctx.srcSize,
+        ctx.tgtSize,
         ctx.sides.sourceSide as Direction,
         ctx.sides.targetSide as Direction,
         blocked,
@@ -363,6 +384,8 @@ export function reserveCorridors(
       sequence: corridorSequence(
         ctx.src,
         ctx.tgt,
+        ctx.srcSize,
+        ctx.tgtSize,
         ctx.sides.sourceSide,
         ctx.sides.targetSide,
         !!edge.isBackEdge,
@@ -392,7 +415,7 @@ export function reserveCorridors(
 
   // 4. Demand counting + widening.
   const demand = countDemand(completeRoutes);
-  const gutters = widen(placement, demand);
+  const gutters = widen(model, placement, demand);
 
   return {
     routes: completeRoutes,
@@ -422,14 +445,16 @@ export function reserveCorridors(
 function choosePivotByDemand(
   src: Cell,
   tgt: Cell,
+  srcSize: { width: number; height: number },
+  tgtSize: { width: number; height: number },
   sourceSide: Side,
   targetSide: Side,
   edgeFwd: Direction,
   currentSeq: Corridor[],
   provisionalDemand: Map<string, number>,
 ): "source" | "target" {
-  const sourceSeq = corridorSequence(src, tgt, sourceSide, targetSide, false, edgeFwd, "source");
-  const targetSeq = corridorSequence(src, tgt, sourceSide, targetSide, false, edgeFwd, "target");
+  const sourceSeq = corridorSequence(src, tgt, srcSize, tgtSize, sourceSide, targetSide, false, edgeFwd, "source");
+  const targetSeq = corridorSequence(src, tgt, srcSize, tgtSize, sourceSide, targetSide, false, edgeFwd, "target");
   // currentSeq is always the source-pivot sequence (Pass A used "source"
   // for everyone). The edge's own +1 contribution lives on each corridor
   // in currentSeq. Subtract that when reading provisional demand.
@@ -596,6 +621,8 @@ function assignSides(
 function corridorSequence(
   src: Cell,
   tgt: Cell,
+  srcSize: { width: number; height: number },
+  tgtSize: { width: number; height: number },
   sourceSide: Side,
   targetSide: Side,
   isBackEdge: boolean,
@@ -603,18 +630,38 @@ function corridorSequence(
   pivot: "source" | "target" = "source",
 ): Corridor[] {
   if (isBackEdge) {
-    return backEdgeCorridorSequence(src, tgt, backEdgeFwd);
+    return backEdgeCorridorSequence(src, tgt, srcSize, tgtSize, backEdgeFwd);
   }
   const srcKind: "V" | "H" =
     sourceSide === "E" || sourceSide === "W" ? "V" : "H";
   const tgtKind: "V" | "H" =
     targetSide === "E" || targetSide === "W" ? "V" : "H";
-  const srcExitGI = gutterIndex(src, sourceSide);
-  const tgtEntryGI = gutterIndex(tgt, targetSide);
+  const srcExitGI = gutterIndex(src, sourceSide, srcSize.width, srcSize.height);
+  const tgtEntryGI = gutterIndex(tgt, targetSide, tgtSize.width, tgtSize.height);
+
+  // Footprint row/col ranges (inclusive). Multi-cell occupancy: a node's
+  // footprint can span multiple rows/cols, so "same row" and "same col"
+  // become "footprint rows overlap".
+  const srcW = Math.max(1, Math.ceil(srcSize.width));
+  const srcH = Math.max(1, Math.ceil(srcSize.height));
+  const tgtW = Math.max(1, Math.ceil(tgtSize.width));
+  const tgtH = Math.max(1, Math.ceil(tgtSize.height));
+  const srcRowMin = src.row, srcRowMax = src.row + srcH - 1;
+  const srcColMin = src.col, srcColMax = src.col + srcW - 1;
+  const tgtRowMin = tgt.row, tgtRowMax = tgt.row + tgtH - 1;
+  const tgtColMin = tgt.col, tgtColMax = tgt.col + tgtW - 1;
+  const rowsOverlap = !(srcRowMax < tgtRowMin || tgtRowMax < srcRowMin);
+  const colsOverlap = !(srcColMax < tgtColMin || tgtColMax < srcColMin);
 
   if (srcKind === "V" && tgtKind === "V") {
-    if (src.row === tgt.row) {
-      // Strip of V corridors between source and target along their shared row.
+    // Strip-of-V (no H pivot) requires both endpoints to anchor at the
+    // SAME row AND have the same height — otherwise their slot
+    // positions differ and the trace would have to chamfer mid-strip,
+    // producing the long-detour pathology under multi-cell footprints.
+    // When heights match and rows match, slot positions align; the
+    // strip is a clean horizontal walk.
+    const slotsAlign = src.row === tgt.row && srcH === tgtH;
+    if (slotsAlign) {
       const lo = Math.min(srcExitGI, tgtEntryGI);
       const hi = Math.max(srcExitGI, tgtEntryGI);
       const seq: Corridor[] = [];
@@ -624,12 +671,16 @@ function corridorSequence(
     if (srcExitGI === tgtEntryGI) {
       return [{ kind: "V", index: srcExitGI }];
     }
-    // V→H→V Z. Pivot row choice (§11.7):
-    //   - "source": gutter immediately on the target's side of the source.
-    //   - "target": gutter immediately on the source's side of the target.
+    // V→H→V Z. Pivot row choice (§11.7), now footprint-aware:
+    //   - "source": gutter immediately on the target's side of source's
+    //     footprint (just past srcRowMax if tgt is south, srcRowMin if
+    //     tgt is north).
+    //   - "target": gutter immediately on the source's side of target's
+    //     footprint.
+    const tgtIsSouth = tgtRowMin > srcRowMax;
     const pivotRow = pivot === "target"
-      ? (src.row > tgt.row ? tgt.row + 1 : tgt.row)
-      : (tgt.row > src.row ? src.row + 1 : src.row);
+      ? (tgtIsSouth ? tgtRowMin : tgtRowMax + 1)
+      : (tgtIsSouth ? srcRowMax + 1 : srcRowMin);
     return [
       { kind: "V", index: srcExitGI },
       { kind: "H", index: pivotRow },
@@ -637,7 +688,9 @@ function corridorSequence(
     ];
   }
   if (srcKind === "H" && tgtKind === "H") {
-    if (src.col === tgt.col) {
+    // Mirror of V→V: strip-of-H requires same anchor col and width.
+    const slotsAlignH = src.col === tgt.col && srcW === tgtW;
+    if (slotsAlignH) {
       const lo = Math.min(srcExitGI, tgtEntryGI);
       const hi = Math.max(srcExitGI, tgtEntryGI);
       const seq: Corridor[] = [];
@@ -647,28 +700,17 @@ function corridorSequence(
     if (srcExitGI === tgtEntryGI) {
       return [{ kind: "H", index: srcExitGI }];
     }
+    const tgtIsEast = tgtColMin > srcColMax;
     const pivotCol = pivot === "target"
-      ? (src.col > tgt.col ? tgt.col + 1 : tgt.col)
-      : (tgt.col > src.col ? src.col + 1 : src.col);
+      ? (tgtIsEast ? tgtColMin : tgtColMax + 1)
+      : (tgtIsEast ? srcColMax + 1 : srcColMin);
     return [
       { kind: "H", index: srcExitGI },
       { kind: "V", index: pivotCol },
       { kind: "H", index: tgtEntryGI },
     ];
   }
-  // V→H or H→V: single L. One V corridor (the source's exit gutter)
-  // meets one H corridor (the target's entry gutter) at their
-  // intersection. Sequence order is exit-corridor-first; the polyline
-  // emitter walks from the source exit slot up/down V to the H
-  // intersection, then along H to the target entry slot.
-  //
-  // §11.7's pivot: knob doesn't apply here cleanly: a true
-  // "corner-at-far-end" L would require the trace to walk along the
-  // source's own row/col gutter first, but the source exit slot sits
-  // at the FACE CENTER (not aligned with the row/col gutter), forcing
-  // a pre-bend before the trace can reach that gutter. The result is
-  // visually a 2-bend "S" shape, not a single-bend L. Avoiding that
-  // requires a slot-position override (a future Phase 4.5 knob).
+  // V→H or H→V: single L.
   if (srcKind === "V") {
     return [
       { kind: "V", index: srcExitGI },
@@ -692,10 +734,12 @@ function corridorSequence(
 function backEdgeCorridorSequence(
   src: Cell,
   tgt: Cell,
+  srcSize: { width: number; height: number },
+  tgtSize: { width: number; height: number },
   backEdgeFwd: Direction,
 ): Corridor[] {
-  const srcExitGI = gutterIndex(src, backEdgeFwd);
-  const tgtEntryGI = gutterIndex(tgt, opposite(backEdgeFwd));
+  const srcExitGI = gutterIndex(src, backEdgeFwd, srcSize.width, srcSize.height);
+  const tgtEntryGI = gutterIndex(tgt, opposite(backEdgeFwd), tgtSize.width, tgtSize.height);
   const fwdIsHoriz = backEdgeFwd === "E" || backEdgeFwd === "W";
   if (fwdIsHoriz) {
     const pivotRow = Math.min(src.row, tgt.row);
@@ -714,20 +758,26 @@ function backEdgeCorridorSequence(
 }
 
 /**
- * Index of the gutter corridor immediately outside cell on the given
+ * Index of the gutter corridor immediately outside a box on the given
  * side. Returns V indices for E/W sides, H indices for N/S sides.
  *
- *   West face of (r, c) → V(c)        (the gutter just west of col c)
- *   East face of (r, c) → V(c + 1)    (just east of col c)
- *   North face         → H(r)
- *   South face         → H(r + 1)
+ * Multi-cell occupancy: the gutter index for E/S faces depends on the
+ * box's footprint extent (size), not just its anchor cell. A node
+ * anchored at (r, c) with size (w, h) cells:
+ *
+ *   West  face → V(c)                — left edge of footprint
+ *   East  face → V(c + ceil(w))      — right edge of footprint
+ *   North face → H(r)
+ *   South face → H(r + ceil(h))
  */
-function gutterIndex(cell: Cell, side: Direction): number {
+function gutterIndex(cell: Cell, side: Direction, width: number, height: number): number {
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
   switch (side) {
     case "W": return cell.col;
-    case "E": return cell.col + 1;
+    case "E": return cell.col + w;
     case "N": return cell.row;
-    case "S": return cell.row + 1;
+    case "S": return cell.row + h;
   }
 }
 
@@ -771,9 +821,11 @@ function isHorizontalCell(model: Model, placement: Placement, cell: Cell): boole
  * sides the corridor is vertical; for N/S sides it's horizontal. The
  * return type is narrowed to exclude the diagonal `Corridor` variant —
  * the path search (§11.8) is Manhattan-only and never reaches D corridors.
+ *
+ * Multi-cell aware via `width`/`height`.
  */
-function gutterCorridor(cell: Cell, side: Direction): AxisCorridor {
-  const index = gutterIndex(cell, side);
+function gutterCorridor(cell: Cell, side: Direction, width: number, height: number): AxisCorridor {
+  const index = gutterIndex(cell, side, width, height);
   if (side === "E" || side === "W") return { kind: "V", index };
   return { kind: "H", index };
 }
@@ -840,12 +892,14 @@ function searchCorridorPath(
   placement: Placement,
   src: Cell,
   tgt: Cell,
+  srcSize: { width: number; height: number },
+  tgtSize: { width: number; height: number },
   srcExitDir: Direction,
   tgtEntryDir: Direction,
   blocked: Set<string>,
 ): Corridor[] | null {
-  const srcExitCorridor = gutterCorridor(src, srcExitDir);
-  const tgtEntryCorridor = gutterCorridor(tgt, tgtEntryDir);
+  const srcExitCorridor = gutterCorridor(src, srcExitDir, srcSize.width, srcSize.height);
+  const tgtEntryCorridor = gutterCorridor(tgt, tgtEntryDir, tgtSize.width, tgtSize.height);
 
   // Self-exemption: src-exit and tgt-entry are never blocked.
   const exempt = new Set<string>([
@@ -1374,11 +1428,80 @@ function countDemand(routes: Route[]): Map<string, number> {
  * back in. Step 6 / 8 will refine if the visual feels too sparse.
  */
 function widen(
+  model: Model,
   placement: Placement,
   demand: Map<string, number>,
 ): { rowGutterUnits: number[]; colGutterUnits: number[] } {
   const rowGutterUnits = new Array<number>(placement.rowUnits.length + 1).fill(0);
   const colGutterUnits = new Array<number>(placement.colUnits.length + 1).fill(0);
+
+  // Multi-cell occupancy + global pixel layout. A row gutter `g` sits
+  // globally across every column, so its width has to satisfy the
+  // largest demand from any column. We give it a 1 cell-unit floor
+  // ONLY when there exists a column where one node ends at row g-1 AND
+  // a DIFFERENT node starts at row g (a true node-to-node boundary at
+  // that column). Columns where a single node spans across, or where
+  // either row is empty, contribute no demand.
+  //
+  // A column where a tall node spans the boundary STILL sees the
+  // global gutter pixels — `boxBounds` and `slotPixel` stretch that
+  // node's visual height to absorb them, so the box still looks
+  // continuous.
+  const sizeOf = new Map(model.nodes.map((n) => [n.id, n.size]));
+  // Per-column-position maps: at column c, which rows does a node
+  // start at, and which rows does a node end at.
+  const startsAtRowInCol = new Map<number, Set<number>>(); // col -> row indices
+  const endsAtRowInCol = new Map<number, Set<number>>();
+  const startsAtColInRow = new Map<number, Set<number>>(); // row -> col indices
+  const endsAtColInRow = new Map<number, Set<number>>();
+  for (const [id, c] of placement.cells) {
+    const sz = sizeOf.get(id);
+    if (!sz) continue;
+    const w = Math.max(1, Math.ceil(sz.width));
+    const h = Math.max(1, Math.ceil(sz.height));
+    for (let dc = 0; dc < w; dc++) {
+      const col = c.col + dc;
+      if (!startsAtRowInCol.has(col)) startsAtRowInCol.set(col, new Set());
+      if (!endsAtRowInCol.has(col)) endsAtRowInCol.set(col, new Set());
+      startsAtRowInCol.get(col)!.add(c.row);
+      endsAtRowInCol.get(col)!.add(c.row + h - 1);
+    }
+    for (let dr = 0; dr < h; dr++) {
+      const row = c.row + dr;
+      if (!startsAtColInRow.has(row)) startsAtColInRow.set(row, new Set());
+      if (!endsAtColInRow.has(row)) endsAtColInRow.set(row, new Set());
+      startsAtColInRow.get(row)!.add(c.col);
+      endsAtColInRow.get(row)!.add(c.col + w - 1);
+    }
+  }
+
+  // For each row gutter g, scan columns: is there a column where
+  // (some node's bottom row == g-1) AND (some other node's top row == g)?
+  for (let g = 1; g < rowGutterUnits.length - 1; g++) {
+    let needed = false;
+    for (const [col, ends] of endsAtRowInCol) {
+      if (!ends.has(g - 1)) continue;
+      const starts = startsAtRowInCol.get(col);
+      if (starts && starts.has(g)) {
+        // Same node? Only if it had height 0 — impossible. So distinct.
+        needed = true;
+        break;
+      }
+    }
+    if (needed) rowGutterUnits[g] = 1;
+  }
+  for (let g = 1; g < colGutterUnits.length - 1; g++) {
+    let needed = false;
+    for (const [row, ends] of endsAtColInRow) {
+      if (!ends.has(g - 1)) continue;
+      const starts = startsAtColInRow.get(row);
+      if (starts && starts.has(g)) {
+        needed = true;
+        break;
+      }
+    }
+    if (needed) colGutterUnits[g] = 1;
+  }
 
   for (const [key, d] of demand) {
     const extra = Math.ceil(d / TRACES_PER_CELL_UNIT);

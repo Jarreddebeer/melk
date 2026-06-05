@@ -73,18 +73,53 @@ Both files live in the project root.
 - **Highways are `via:`-only.** A node with `shape: highway` is an
   invisible bundling channel. Never write `producer -> trunk` — write
   `producer -> sink { via: trunk }`. Error: `E_HIGHWAY_AS_ENDPOINT`.
+- **Hub nodes with 6+ peers need `size`.** A default `5x5` node has 5
+  trace slots per face (1 trace per cell-unit × 5 cell-units of side
+  length at default pitch). A `bus` collecting 6+ producers into one
+  sink, or a `fan-out` spraying 6+ targets, overflows the sink/source
+  face. Grow the hub on the perpendicular axis: `size: 5x7` in `lr`
+  layout (taller — more E/W slots), `size: 7x5` in `tb` (wider — more
+  N/S slots). Each extra cell-unit adds 1 slot. Highways and hub-rects
+  (any rect that's the shared of a bus or fan-out) auto-size and
+  parity-bump (the bind pass adds +1 cell to the breadth axis if the
+  declared dim disagrees with trace-count parity, so slots land on
+  cell centres). Plain non-hub nodes don't bump. Error:
+  `E_SIDE_OVERSUBSCRIBED`.
+- **Size every node with a label longer than 4 chars.** The placer
+  takes `size:` at face value — nothing grows a box to fit its
+  label. Use the table in SYNTAX.md §3.3 ("Picking `size:` from the
+  label"). Quick reference at 10pt body:
+
+  | Longest line | rect / roundrect | cylinder | diamond | circle |
+  |--------------|------------------|----------|---------|--------|
+  | 1–4 chars    | `5x5`            | `5x5`    | `5x5`   | `5x5`  |
+  | 5–6 chars    | `7x5`            | `7x5`    | `7x7`   | `7x7`  |
+  | 7–9 chars    | `9x5`            | `9x7`    | `9x9`   | `9x9`  |
+  | 10–12 chars  | `11x5`           | `11x7`   | `11x11` | `11x11`|
+  | 13–15 chars  | `13x5`           | `13x9`   | `13x13` | `13x13`|
+
+  Per extra line (`\n` in the label), add 2 cells of height.
+  All-caps or wide-char labels: bump up one row. Default `5x5` is
+  only right if the longest line is ≤4 chars.
 - **Module-qualified refs work as edge endpoints only.** `mod.foo` is
   legal in an edge (`a -> mod.foo`) but illegal in primitive members
   (`pipeline x: a -> mod.foo -> b` won't bind).
 - **Auto-declaration is a feature.** You don't need to declare every
   node before using it in a primitive. A node referenced by an edge or
-  primitive auto-declares as 1x1 `rect` if it never appears in an
+  primitive auto-declares as `5x5` `rect` if it never appears in an
   explicit declaration. Add attributes only where defaults aren't
   enough.
 - **Names are messages.** Every primitive takes a name
   (`pipeline ingest_flow: ...`). The name shows up in error messages
   and source-attribution in the rendered output. Use specific
   snake_case names, not `p1` / `b1` / etc.
+- **Default to `rect`. Don't reach for `roundrect` for variety.**
+  The corner radii of `rect` (2 px) and `roundrect` (8 px) are too
+  close to read as distinct categories at a glance — mixing them
+  looks like an inconsistency, not a signal. Use one or the other
+  uniformly. If the author genuinely wants both shapes in one
+  diagram, that's a stylistic choice and the meaning belongs in a
+  legend entry, not in the shape alone.
 
 ## Workflow
 

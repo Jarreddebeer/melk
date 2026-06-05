@@ -90,3 +90,48 @@ export class PlacementError extends Error {
     super(message);
   }
 }
+
+/**
+ * The cells a node occupies given its anchor cell + declared size. Anchor
+ * is always the top-left cell of the footprint. Fractional sizes round up
+ * — a `size: 2.5x3` node occupies a 3×3 cell footprint. The node's actual
+ * pixel rectangle is anchored at the top-left of the footprint and is
+ * `width * CELL_PX` × `height * CELL_PX`; if size is fractional the
+ * footprint may be slightly larger than the box itself (trailing 0..1
+ * cell of empty space east/south).
+ */
+export function footprintCells(
+  anchor: Cell,
+  width: number,
+  height: number,
+): Cell[] {
+  const wCells = Math.max(1, Math.ceil(width));
+  const hCells = Math.max(1, Math.ceil(height));
+  const out: Cell[] = [];
+  for (let dr = 0; dr < hCells; dr++) {
+    for (let dc = 0; dc < wCells; dc++) {
+      const c: Cell = { row: anchor.row + dr, col: anchor.col + dc };
+      if (anchor.z !== undefined) c.z = anchor.z;
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/**
+ * The forward / perpendicular cell-extent for a node oriented in
+ * `forward` direction. E/W make width the forward extent; N/S make
+ * height the forward extent. Used by the placer's flow pass to step a
+ * downstream node past the *trailing* edge of an upstream node instead
+ * of just past its anchor.
+ */
+export function extentOf(
+  width: number,
+  height: number,
+  forward: Direction,
+): { forward: number; perp: number } {
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
+  if (forward === "E" || forward === "W") return { forward: w, perp: h };
+  return { forward: h, perp: w };
+}

@@ -1,0 +1,43 @@
+layout: lr
+crossings: 6
+title: "Card authorisation"
+subtitle: "Merchant to issuer and back — four-party model with full return path"
+caption: "Source: examples/42-card-auth.melk"
+legend: on
+
+# A card-present authorisation in the four-party model:
+#
+#   1. Customer taps; the terminal sends an auth request to the
+#      merchant's acquirer.
+#   2. The acquirer routes the request to the card network (Visa,
+#      Mastercard) based on the BIN.
+#   3. The network forwards it to the issuing bank.
+#   4. The issuer checks balance, fraud, 3DS, and returns an
+#      approve/decline. The response retraces the same path back.
+#
+# Forward flow is the spine. The four `>-` lines are the entire
+# return path: issuer authorises, network forwards the response,
+# acquirer relays, terminal prints the receipt. Declaration order
+# pins the back-edge slots in the rear corridor.
+#
+# `issuer` is tagged `critical` because it's the only node that can
+# actually approve the transaction — everyone else just routes.
+
+terminal { shape: rect,      label: "POS\nterminal" }
+acquirer { shape: rect,      label: "acquirer\nbank" }
+network  { shape: diamond,   label: "card\nnetwork" }
+issuer   { shape: rect,      label: "issuer\nbank", tags: [critical] }
+receipt  { shape: rect, label: "approved\n(receipt)" }
+
+# Forward auth-request spine.
+pipeline auth_request: terminal -> acquirer -> network -> issuer
+
+# Approval terminal — sits below the terminal as the customer-facing
+# end state once the response has traced its way back.
+branch outcome:right: terminal -> receipt
+
+# Return path. Each hop unwinds one step of the forward spine. The
+# response carries the same correlation id at every stage.
+issuer   >- network  { label: "approved" }
+network  >- acquirer { label: "0110" }
+acquirer >- terminal { label: "print" }

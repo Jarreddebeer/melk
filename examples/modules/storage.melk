@@ -9,8 +9,8 @@
 
 layout: lr
 
-primary { shape: cylinder, size: 2x1, label: "Primary store" }
-replica { shape: cylinder, size: 2x1, label: "Replica" }
+primary { shape: cylinder, size: 9x5, label: "Primary store" }
+replica { shape: cylinder, size: 9x5, label: "Replica" }
 
 pipeline main: writes -> primary -> replica
 branch reads-out:right: primary -> reads

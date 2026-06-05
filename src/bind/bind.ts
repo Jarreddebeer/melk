@@ -56,6 +56,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { tokenize } from "../parser/lexer.js";
 import { parse } from "../parser/parser.js";
+import { TRACES_PER_CELL_UNIT } from "../layout/corridors.js";
 import type {
   AnchorRef,
   Branch,
@@ -430,7 +431,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
     );
   }
   const shapeBox: { value: ShapeName } = { value: "rect" };
-  let size: NodeSize = { width: 1, height: 1 };
+  let size: NodeSize = { width: 5, height: 5 };
   let label = decl.name;
   let orient: "horizontal" | "vertical" | undefined;
   let render: "surface" | "underground" | undefined;
@@ -1242,7 +1243,19 @@ function autoSizeHighways(ctx: BindCtx): void {
   for (const node of ctx.nodes.values()) {
     if (node.shape !== "highway") continue;
     const edgeCount = edgesPerHwy.get(node.id) ?? 0;
-    breadthOf.set(node.id, Math.max(1, Math.ceil(edgeCount / 3)));
+    const rawBreadth = Math.max(1, Math.ceil(edgeCount / TRACES_PER_CELL_UNIT));
+    // Round up to match parity with edgeCount. With CELL_PX = COMB_PITCH,
+    // an F-trace cluster on an L-cell face puts slots at integer cell-
+    // centers only when (L - F) is even — i.e., L and F have the same
+    // parity. If they don't, slots sit on cell boundaries (half-cell
+    // offsets), and downstream-node slots (which always sit at cell
+    // centers via odd default size = 5) can't align without a chamfer.
+    // Bumping breadth by 1 when parity disagrees costs at most one
+    // extra row/col of breadth but removes a class of 4-px kinks.
+    const breadth = (rawBreadth % 2) === (edgeCount % 2)
+      ? rawBreadth
+      : rawBreadth + 1;
+    breadthOf.set(node.id, breadth);
   }
   // Map each highway to its intersect-partner highways (mutual).
   const intersectPartners = new Map<string, string[]>();
@@ -1272,16 +1285,50 @@ function autoSizeHighways(ctx: BindCtx): void {
       const pb = breadthOf.get(p) ?? 1;
       if (pb > lengthCells) lengthCells = pb;
     }
+    // Final breadth must match edgeCount parity (see breadthOf computation).
+    // If max() with default overrides the parity-matched breadth and
+    // gives odd-when-F-is-even (or vice versa), bump by 1.
+    const edgeCount = edgesPerHwy.get(node.id) ?? 0;
+    const parityMatch = (n: number) => (n % 2 === edgeCount % 2) ? n : n + 1;
     if (horiz) {
-      node.size = {
-        width: Math.max(node.size.width, lengthCells),
-        height: Math.max(node.size.height, breadthCells),
-      };
+      const w = Math.max(node.size.width, lengthCells);
+      const h = parityMatch(Math.max(node.size.height, breadthCells));
+      node.size = { width: w, height: h };
     } else {
-      node.size = {
-        width: Math.max(node.size.width, breadthCells),
-        height: Math.max(node.size.height, lengthCells),
-      };
+      const w = parityMatch(Math.max(node.size.width, breadthCells));
+      const h = Math.max(node.size.height, lengthCells);
+      node.size = { width: w, height: h };
+    }
+  }
+
+  // Parity-bump for hub rects: any rect that's the shared of a bus or
+  // a fan-out with ≥2 members on the parallel face should have its
+  // breadth-dim parity match the trace count, so the slot cluster
+  // lands on cell centres (no half-cell offsets ⇒ no chamfer kink at
+  // the hub's face). Mirror of the highway parity rule but applied to
+  // user-shaped boxes that act as hubs.
+  for (const node of ctx.nodes.values()) {
+    if (node.shape === "highway" || node.shape === "module") continue;
+    let inboundTraces = 0;
+    let outboundTraces = 0;
+    for (const b of ctx.buses.values()) {
+      if (b.shared === node.id) inboundTraces += b.producers.length;
+    }
+    for (const f of ctx.fanOuts.values()) {
+      if (f.shared === node.id) outboundTraces += f.consumers.length;
+    }
+    // Pick whichever side has more traces; that's the cluster that
+    // matters for parity.
+    const F = Math.max(inboundTraces, outboundTraces);
+    if (F < 2) continue;
+    // Under LR layout the hub's parallel face is W/E (height = sideLen).
+    // Under TB it's N/S (width). Use the page-level mode.
+    const sideLen = layoutHoriz ? node.size.height : node.size.width;
+    if ((sideLen % 2) === (F % 2)) continue; // already matches
+    if (layoutHoriz) {
+      node.size = { width: node.size.width, height: node.size.height + 1 };
+    } else {
+      node.size = { width: node.size.width + 1, height: node.size.height };
     }
   }
 }
@@ -1334,7 +1381,7 @@ function ensureNode(id: string, ctx: BindCtx): void {
     id,
     label: id,
     shape: "rect",
-    size: { width: 1, height: 1 },
+    size: { width: 5, height: 5 },
   });
   ctx.autoDeclared.add(id);
 }
@@ -1778,7 +1825,7 @@ function bindImport(stmt: ImportDecl, ctx: BindCtx): void {
     id: stmt.alias,
     label: stmt.alias,
     shape: "module",
-    size: { width: 1, height: 1 },
+    size: { width: 5, height: 5 },
   });
   ctx.autoDeclared.delete(stmt.alias);
 }

@@ -463,9 +463,12 @@ side automatically (or the qualified ref's exact internal node).
 ## §5 — Placement errors and what they mean
 
 The placer is strict — it refuses to guess which constraint to
-honour when two compete. Every error below is the placer telling
-you "your source is structurally ambiguous; pick one shape." See
-also SYNTAX.md §3.10 for the underlying model.
+honour when two compete, and it refuses to silently grow a node
+when its face overflows. Most errors below are structural
+("your source is ambiguous; pick one shape"); the last two
+(`E_SIDE_OVERSUBSCRIBED`, `E_CROSSINGS_OVER_BUDGET`) are capacity
+limits that need a one-line tweak rather than a topology change.
+See also SYNTAX.md §3.10 for the underlying model.
 
 ### `E_AMBIGUOUS_PLACEMENT`
 
@@ -534,6 +537,30 @@ bus b: [w3, w4] -> db    # db is already anchored by bus a
 
 Fix: keep `db` in one bus. The other producers reach it via plain
 edges (`w3 -> db`).
+
+### `E_SIDE_OVERSUBSCRIBED`
+
+A node's face holds 1 trace per cell-unit at default pitch
+(`CELL_PX = COMB_PITCH = 8`). A default `5x5` node therefore fits
+5 edges on any one face; the 6th overflows. Hub patterns trigger it:
+
+- A `bus` aggregating 6+ producers into one sink.
+- A `fan-out` spraying 6+ targets from one source.
+- A node reached by a highway that has 6+ via-edges.
+
+Fix: grow the hub on the axis perpendicular to flow.
+
+```melk
+hub { shape: rect, label: "hub", size: 5x7 }   # layout: lr — 7 W/E slots
+hub { shape: rect, label: "hub", size: 7x5 }   # layout: tb — 7 N/S slots
+```
+
+Each extra cell-unit adds 1 slot; the error names the exact recipe.
+The bind pass auto-bumps highway and hub-rect breadth by +1 when its
+parity disagrees with the trace count (so slots land on cell centres);
+you may see a 5x7 hub render as 5x8 in that case. See SYNTAX.md §3.10
+for why explicit sizing is the author's call (determinism — silent
+growth on edge-count changes would shift the whole grid).
 
 ### `E_CROSSINGS_OVER_BUDGET`
 

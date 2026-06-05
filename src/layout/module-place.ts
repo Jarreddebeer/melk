@@ -34,7 +34,7 @@ import { reserveCorridors } from "./corridors.js";
 import { place } from "./place.js";
 import type { Placement } from "./placement.js";
 import { computePixelLayout } from "./pixels.js";
-import { applyTextFit } from "./text-fit.js";
+import { applyTextFit, applyTextFitToSizes } from "./text-fit.js";
 import { packTracks } from "./tracks.js";
 import { buildPolylines } from "./polyline.js";
 import type { Polylines } from "./polyline.js";
@@ -111,6 +111,7 @@ export function placeModules(
     // Run the placement pipeline on the sub-model. Track packing and
     // polyline building happen here too so the renderer (Cut 5) can
     // emit the module's body without re-running the layout pipeline.
+    applyTextFitToSizes(imported.model, theme);
     const subPlacement = place(imported.model);
     const subFit = applyTextFit(subPlacement, imported.model, theme);
     const subReservation = reserveCorridors(imported.model, subFit);
@@ -149,10 +150,9 @@ export function placeModules(
         const sz = sizeOf.get(internalId) ?? { width: 1, height: 1 };
         const widthPx = sz.width * CELL_PX;
         const heightPx = sz.height * CELL_PX;
-        const left = layout.colX[cell.col]! +
-          (layout.colWidthPx[cell.col]! - widthPx) / 2;
-        const top = layout.rowY[cell.row]! +
-          (layout.rowHeightPx[cell.row]! - heightPx) / 2;
+        // Multi-cell: anchor at footprint top-left, fill declared size.
+        const left = layout.colX[cell.col]!;
+        const top = layout.rowY[cell.row]!;
         const centerX = left + widthPx / 2;
         const centerY = top + heightPx / 2;
         ports.set(internalId, {
@@ -266,8 +266,9 @@ function buildFacePorts(
     if (cell === undefined) continue;
     const w = n.size.width * CELL_PX;
     const h = n.size.height * CELL_PX;
-    const x = layout.colX[cell.col]! + (layout.colWidthPx[cell.col]! - w) / 2;
-    const y = layout.rowY[cell.row]! + (layout.rowHeightPx[cell.row]! - h) / 2;
+    // Multi-cell: anchor at footprint top-left, fill declared size.
+    const x = layout.colX[cell.col]!;
+    const y = layout.rowY[cell.row]!;
     boxes.push({ id: n.id, x, y, w, h });
   }
   if (boxes.length === 0) {
@@ -436,10 +437,9 @@ export function applyModuleAlignment(
     if (node === undefined || node.shape === "module") return undefined;
     const w = node.size.width * CELL_PX;
     const h = node.size.height * CELL_PX;
-    const x = layout.colX[cell.col]! +
-      (layout.colWidthPx[cell.col]! - w) / 2;
-    const y = layout.rowY[cell.row]! +
-      (layout.rowHeightPx[cell.row]! - h) / 2;
+    // Multi-cell: anchor at footprint top-left.
+    const x = layout.colX[cell.col]!;
+    const y = layout.rowY[cell.row]!;
     return { x: x + w / 2, y: y + h / 2 };
   };
 

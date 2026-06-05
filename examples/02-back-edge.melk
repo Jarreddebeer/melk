@@ -4,8 +4,8 @@ layout: lr
 # from the sink to the fanout. Exercises bus/fan-out anchoring and the
 # rear-face back-edge corridor.
 
-fanout { shape: rect, size: 1x3 }
-join   { shape: rect, size: 1x3 }
+fanout { shape: rect, size: 5x13 }
+join   { shape: rect, size: 5x13 }
 
 src    -> fanout
 fan-out broadcast: fanout -> [a, b, c]

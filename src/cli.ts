@@ -22,7 +22,7 @@ import { parse } from "./parser/parser.js";
 import { formatProgram } from "./parser/format.js";
 import { bind } from "./bind/bind.js";
 import { place } from "./layout/place.js";
-import { applyTextFit } from "./layout/text-fit.js";
+import { applyTextFit, applyTextFitToSizes } from "./layout/text-fit.js";
 import { reserveCorridors } from "./layout/corridors.js";
 import { packTracks } from "./layout/tracks.js";
 import { buildPolylines } from "./layout/polyline.js";
@@ -207,6 +207,11 @@ function main(): void {
       resolveTheme(undefined, imported.model.themeName, dirname(filePath)),
     );
 
+    // Multi-cell occupancy requires the placer to see the final node
+    // sizes (after label-fit growth), so it can space neighbours
+    // correctly. applyTextFitToSizes mutates node.size in place;
+    // applyTextFit after place() is now a no-op carried for symmetry.
+    applyTextFitToSizes(model, theme);
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
     const reservation = reserveCorridors(model, placement);
@@ -274,6 +279,7 @@ function runValidate(source: string, filePath: string): number {
     placeModules(model, (imported) =>
       resolveTheme(undefined, imported.model.themeName, dirname(filePath)),
     );
+    applyTextFitToSizes(model, theme);
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
     stage = "reserveCorridors";

@@ -7,10 +7,10 @@ crossings: 5
 # forward traffic in shared corridors, hence the explicit budget.
 
 client { shape: circle }
-api    { shape: rect, size: 3x1 }
+api    { shape: rect, size: 13x5 }
 auth   { shape: diamond }
 cache  { shape: cylinder }
-db     { shape: cylinder, size: 1x2, label: "ODS" }
+db     { shape: cylinder, size: 5x9, label: "ODS" }
 worker { shape: rect }
 
 client -> api

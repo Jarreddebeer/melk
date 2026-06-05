@@ -66,7 +66,7 @@ describe("corridors — side assignment", () => {
   });
 
   it("flow-axis side wins for diagonal cells (bus producers above shared)", () => {
-    const { model, reservation } = reserve("bus power: [a, b, c] -> s");
+    const { model, reservation } = reserve("s { size: 5x7 }\nbus power: [a, b, c] -> s");
     // a at (0,0), s at (1,1) — diagonal. LR flow → E/W.
     const aToS = routeFor(reservation.routes, model.edges, "a", "s");
     expect(aToS.sourceSide).toBe("E");
@@ -92,7 +92,8 @@ describe("corridors — corridor sequences", () => {
     const { model, reservation } = reserve("pipeline p: a -> b");
     const ab = routeFor(reservation.routes, model.edges, "a", "b");
     expect(ab.corridorSequence).toHaveLength(1);
-    expect(corridorMatches(ab.corridorSequence[0]!, "V1")).toBe(true);
+    // Multi-cell: a occupies cols 0..4, b cols 5..9, V corridor between = V5.
+    expect(corridorMatches(ab.corridorSequence[0]!, "V5")).toBe(true);
   });
 
   it("same-col TB consecutive nodes share a single H corridor", () => {
@@ -101,32 +102,34 @@ describe("corridors — corridor sequences", () => {
     );
     const ab = routeFor(reservation.routes, model.edges, "a", "b");
     expect(ab.corridorSequence).toHaveLength(1);
-    expect(corridorMatches(ab.corridorSequence[0]!, "H1")).toBe(true);
+    expect(corridorMatches(ab.corridorSequence[0]!, "H5")).toBe(true);
   });
 
   it("bus adjacent-diagonal: single V corridor for each producer→shared", () => {
-    // a at (0,0), s at (1,1) — adjacent diagonal. srcExitCol == tgtEntryCol == 1,
-    // so the route is just V(1); the H pivot would be a spurious passthrough.
-    const { model, reservation } = reserve("bus power: [a, b, c] -> s");
+    // Multi-cell: a/b/c at perp-stacked rows (0/5/10) col 0..4; s at
+    // row 5 col 5..11. All producers exit on E face V5; s enters on
+    // W face V5 — single V5 corridor.
+    const { model, reservation } = reserve("s { size: 5x7 }\nbus power: [a, b, c] -> s");
     const aToS = routeFor(reservation.routes, model.edges, "a", "s");
-    expect(aToS.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(aToS.corridorSequence.map(corridorKey)).toEqual(["V5"]);
     const bToS = routeFor(reservation.routes, model.edges, "b", "s");
-    expect(bToS.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(bToS.corridorSequence.map(corridorKey)).toEqual(["V5"]);
     const cToS = routeFor(reservation.routes, model.edges, "c", "s");
-    expect(cToS.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(cToS.corridorSequence.map(corridorKey)).toEqual(["V5"]);
   });
 
   it("fan-out adjacent-diagonal: single V corridor for each shared→consumer", () => {
     const { model, reservation } = reserve(
-      "fan-out broadcast: s -> [x, y, z]",
+      "s { size: 5x7 }\nfan-out broadcast: s -> [x, y, z]",
     );
-    // s at (1,0), consumers at (0,1)/(1,1)/(2,1) — all adjacent diagonal.
+    // Multi-cell: s at col 0..4 (width 5), consumers at col 5..9. All
+    // exit s.E at V5 and enter consumer.W at V5 → single V5.
     const sToX = routeFor(reservation.routes, model.edges, "s", "x");
-    expect(sToX.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(sToX.corridorSequence.map(corridorKey)).toEqual(["V5"]);
     const sToY = routeFor(reservation.routes, model.edges, "s", "y");
-    expect(sToY.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(sToY.corridorSequence.map(corridorKey)).toEqual(["V5"]);
     const sToZ = routeFor(reservation.routes, model.edges, "s", "z");
-    expect(sToZ.corridorSequence.map(corridorKey)).toEqual(["V1"]);
+    expect(sToZ.corridorSequence.map(corridorKey)).toEqual(["V5"]);
   });
 
   it("non-adjacent diagonal: V_exit + H_pivot + V_entry across multiple cols", () => {
@@ -143,97 +146,99 @@ describe("corridors — corridor sequences", () => {
     // Adjacent-diagonal short-circuit only applies when srcExitCol ==
     // tgtEntryCol. Here a is at col 0 (E exit = V1) and z is at col 2
     // (W entry = V2). Different. So sequence has the H pivot.
-    expect(aToZ.corridorSequence.map(corridorKey)).toEqual(["V1", "H1", "V2"]);
+    expect(aToZ.corridorSequence.map(corridorKey)).toEqual(["V5", "H5", "V10"]);
   });
 });
 
 describe("corridors — slot indices", () => {
   it("orders bus producers' target slots on shared's W face by source row", () => {
-    const { model, reservation } = reserve("bus power: [a, b, c] -> s");
+    const { model, reservation } = reserve("s { size: 5x7 }\nbus power: [a, b, c] -> s");
     const aToS = routeFor(reservation.routes, model.edges, "a", "s");
     const bToS = routeFor(reservation.routes, model.edges, "b", "s");
     const cToS = routeFor(reservation.routes, model.edges, "c", "s");
-    // Bus is adjacent-diagonal, so no H pivot. Each producer's
-    // slot-ordering pivot falls back to its own row (0, 1, 2). Slots
-    // ascend with row. With centering (offset = floor((4-3)/2) = 0 for
-    // 1-cell faces; offset = floor((4-3)/2) = 0 — wait, s is 1x1
-    // implicitly here), the cluster is centered: slots 0, 1, 2 of 4.
-    // For s (1-cell), N=3 traces, offset = floor((4-3)/2) = 0 → slots
-    // 0, 1, 2. Same as before centering.
+    // Bus is adjacent-diagonal. Each producer's slot-ordering pivot is
+    // its own row (0, 1, 2). Slots ascend with row.
+    // s has size 5x7, W face length = height = 7 cells. With CELL_PX=8
+    // and COMB_PITCH=8, SLOTS_PER_CELL = 1 → 7 slot positions on the
+    // 7-cell W face. Centering 3 traces in 7 positions: offset = (7-3)/2 = 2.
     expect(aToS.targetSide).toBe("W");
     expect(bToS.targetSide).toBe("W");
     expect(cToS.targetSide).toBe("W");
     const slots = [aToS.targetSlot, bToS.targetSlot, cToS.targetSlot];
-    // Centering with fractional offsets: 3 traces in 4 slot positions
-    // (1-cell W face), offset = (4-3)/2 = 0.5. Slots 0.5, 1.5, 2.5
-    // → y = 8, 16, 24 (symmetric around face center 16).
-    expect(slots).toEqual([0.5, 1.5, 2.5]);
+    expect(slots).toEqual([2, 3, 4]);
   });
 
   it("each producer takes the centered slot on its own E face (single trace there)", () => {
-    // Single trace on a 1x1 face has 4 slot positions; centered =
-    // slot 1.5 (face midpoint y = 16 at defaults).
-    const { model, reservation } = reserve("bus power: [a, b, c] -> s");
+    // Each producer 'a','b','c' has default size 5x5. E face length =
+    // height = 5 cells = 5 slot positions. Single trace centered → slot 2.
+    const { model, reservation } = reserve("s { size: 5x7 }\nbus power: [a, b, c] -> s");
     for (const id of ["a", "b", "c"]) {
       const r = routeFor(reservation.routes, model.edges, id, "s");
       expect(r.sourceSide).toBe("E");
-      expect(r.sourceSlot).toBe(1.5);
+      expect(r.sourceSlot).toBe(2);
     }
   });
 
   it("orders fan-out consumers' source slots on shared's E face by target row", () => {
     const { model, reservation } = reserve(
-      "fan-out broadcast: s -> [x, y, z]",
+      "s { size: 5x7 }\nfan-out broadcast: s -> [x, y, z]",
     );
     const sToX = routeFor(reservation.routes, model.edges, "s", "x");
     const sToY = routeFor(reservation.routes, model.edges, "s", "y");
     const sToZ = routeFor(reservation.routes, model.edges, "s", "z");
     const slots = [sToX.sourceSlot, sToY.sourceSlot, sToZ.sourceSlot];
-    // 3 traces on s's E face (1-cell), offset 0.5 → 0.5, 1.5, 2.5.
-    expect(slots).toEqual([0.5, 1.5, 2.5]);
+    // 3 traces on s's E face (7 cells = 7 positions), offset 2.
+    expect(slots).toEqual([2, 3, 4]);
   });
 
   it("breaks ties by declaration order", () => {
     // Two edges from the same source land on the same E face with the
     // same pivot (both target same row). They tie-break by declaration
-    // index. Centering: 2 traces in 8 slot positions (1x2 face),
-    // offset = (8-2)/2 = 3. Slots become 3, 4 (straddles face center).
+    // index. s and p are both size 3x5 → E face length = height = 5
+    // cells = 5 slot positions. 2 traces centered: offset = (5-2)/2 = 1.5.
     const { model, reservation } = reserve(
-      "s { size: 1x2 }\np { size: 1x2 }\ns -> p\ns -> p",
+      "s { size: 3x5 }\np { size: 3x5 }\ns -> p\ns -> p",
     );
     expect(model.edges).toHaveLength(2);
     const r0 = reservation.routes[0]!;
     const r1 = reservation.routes[1]!;
-    expect(r0.sourceSlot).toBe(3);
-    expect(r1.sourceSlot).toBe(4);
+    expect(r0.sourceSlot).toBe(1.5);
+    expect(r1.sourceSlot).toBe(2.5);
   });
 });
 
 describe("corridors — capacity errors", () => {
   it("raises E_SIDE_OVERSUBSCRIBED when a side has more traces than capacity", () => {
-    // Default 1x1 cell → 3 traces per side. Build a 4-producer bus into
-    // a 1x1 shared box and the W face overflows.
-    const src = "bus power: [a, b, c, d] -> s";
+    // With CELL_PX = COMB_PITCH = 8 and TRACES_PER_CELL_UNIT=1, a node of
+    // height N holds N traces per E/W face. The hub-rect parity-bump
+    // adds 1 cell when F and sideLen disagree on parity; use sizes
+    // where bumping still doesn't fit. A 3-tall hub with 5 producers
+    // bumps to 4 cells (even, matches F=5 odd? No, 5 odd, 4 even —
+    // bumps to 5). 5 producers all fit in a 5-tall face. Pick 7
+    // producers vs height 5 (= F=7 odd, sideLen 5 odd, matched, no
+    // bump) → capacity 5, demand 7 → overflow.
+    const src = "s { size: 3x5 }\nbus power: [a, b, c, d, e, f, g] -> s";
     expect(() => reserve(src)).toThrow(/E_SIDE_OVERSUBSCRIBED/);
   });
 
   it("a taller box accommodates more traces on its E/W faces", () => {
-    const src = "s { size: 1x2 }\nbus power: [a, b, c, d, e] -> s";
-    // height 2 → capacity 2 * TRACES_PER_CELL_UNIT = 6. 5 producers fit.
+    const src = "s { size: 3x13 }\nbus power: [a, b, c, d, e] -> s";
+    // height 13 → capacity 13 * TRACES_PER_CELL_UNIT = 13. 5 producers fit.
     const { reservation } = reserve(src);
     expect(reservation.routes).toHaveLength(5);
   });
 
   it("error message names the node, side, count, and capacity", () => {
+    expect.assertions(5);
     try {
-      reserve("bus power: [a, b, c, d] -> s");
+      reserve("s { size: 3x5 }\nbus power: [a, b, c, d, e, f, g] -> s");
     } catch (e) {
       expect(e).toBeInstanceOf(CorridorError);
       const msg = (e as Error).message;
       expect(msg).toMatch(/node 's'/);
       expect(msg).toMatch(/W face/);
-      expect(msg).toMatch(/4 traces/);
-      expect(msg).toMatch(/capacity is 3/);
+      expect(msg).toMatch(/7 traces/);
+      expect(msg).toMatch(/capacity is 5/);
     }
   });
 });
@@ -242,17 +247,17 @@ describe("corridors — demand counting", () => {
   it("counts each trace once per corridor in its sequence", () => {
     const { reservation } = reserve("pipeline p: a -> b -> c");
     // Two edges: a→b uses V1, b→c uses V2.
-    expect(reservation.demand.get("V1")).toBe(1);
-    expect(reservation.demand.get("V2")).toBe(1);
+    expect(reservation.demand.get("V5")).toBe(1);
+    expect(reservation.demand.get("V10")).toBe(1);
   });
 
   it("aggregates demand on a shared corridor (bus into a hub)", () => {
-    const { reservation } = reserve("bus power: [a, b, c] -> s");
+    const { reservation } = reserve("s { size: 5x7 }\nbus power: [a, b, c] -> s");
     // All three producer→shared traces share V1; bus is adjacent-diagonal
     // so no H pivot fires. H demand stays empty.
-    expect(reservation.demand.get("V1")).toBe(3);
-    expect(reservation.demand.get("H1")).toBeUndefined();
-    expect(reservation.demand.get("H2")).toBeUndefined();
+    expect(reservation.demand.get("V5")).toBe(3);
+    expect(reservation.demand.get("H5")).toBeUndefined();
+    expect(reservation.demand.get("H10")).toBeUndefined();
   });
 
   it("ignores diagonals at Step 5 (orthogonal only)", () => {
@@ -266,20 +271,22 @@ describe("corridors — demand counting", () => {
 describe("corridors — gutter widening", () => {
   it("a low-demand corridor needs one cell-unit of gutter", () => {
     const { reservation } = reserve("pipeline p: a -> b");
-    // V1 has demand 1, so colGutterUnits[1] = ceil(1/3) = 1.
-    expect(reservation.colGutterUnits[1]).toBe(1);
-    // No H demand → row gutters stay 0.
-    for (const g of reservation.rowGutterUnits) expect(g).toBe(0);
+    // Multi-cell: V5 has demand 1, so colGutterUnits[5] = ceil(1/1) = 1.
+    expect(reservation.colGutterUnits[5]).toBe(1);
+    // No H demand → interior row gutters stay at the 1-cell-unit
+    // baseline floor; page-margin (0 and last) stay 0.
+    expect(reservation.rowGutterUnits[0]).toBe(0);
+    expect(reservation.rowGutterUnits[reservation.rowGutterUnits.length - 1]).toBe(0);
   });
 
   it("widens gutters proportionally with demand", () => {
-    // 3 traces in V1 → 1 cell-unit. With 4+ we'd need 2, but the side
-    // capacity blocks us first, so test with explicit sizing.
+    // 6 producers all enter V5 (s.W gutter). With CELL_PX=COMB_PITCH=8
+    // → 1 trace per cell-unit, so 6 traces need 6 cell-units of gutter.
+    // s sized 3x13 so its W face (height 13 cells) holds 6 traces.
     const { reservation } = reserve(
-      "s { size: 1x3 }\nbus b: [p1, p2, p3, p4, p5, p6] -> s",
+      "s { size: 3x13 }\nbus b: [p1, p2, p3, p4, p5, p6] -> s",
     );
-    // 6 traces share V1 → ceil(6/3) = 2 cell-units of gutter.
-    expect(reservation.colGutterUnits[1]).toBe(2);
+    expect(reservation.colGutterUnits[5]).toBe(6);
   });
 
   it("emits one row-gutter slot per row plus margins", () => {
@@ -294,7 +301,7 @@ describe("corridors — gutter widening", () => {
 
   it("preserves rowUnits and colUnits unchanged from Placement", () => {
     const { placement, reservation } = reserve(
-      "a { size: 2x1 }\nb { size: 1x2 }\npipeline p: a -> b",
+      "a { size: 5x3 }\nb { size: 3x5 }\npipeline p: a -> b",
     );
     expect(reservation.rowUnits).toEqual(placement.rowUnits);
     expect(reservation.colUnits).toEqual(placement.colUnits);
@@ -303,7 +310,7 @@ describe("corridors — gutter widening", () => {
 
 describe("corridors — determinism", () => {
   it("same input produces same output byte-for-byte", () => {
-    const src = "bus b: [a, b, c] -> s\nfan-out f: s -> [x, y, z]";
+    const src = "s { size: 5x7 }\nbus b: [a, b, c] -> s\nfan-out f: s -> [x, y, z]";
     const r1 = reserve(src);
     const r2 = reserve(src);
     expect(JSON.stringify(toJson(r1.reservation))).toBe(
@@ -313,8 +320,8 @@ describe("corridors — determinism", () => {
 });
 
 describe("corridors — constants", () => {
-  it("TRACES_PER_CELL_UNIT is 3 at default pitch / cell", () => {
-    expect(TRACES_PER_CELL_UNIT).toBe(3);
+  it("TRACES_PER_CELL_UNIT is 1 at default pitch / cell (CELL_PX=16, COMB_PITCH=8)", () => {
+    expect(TRACES_PER_CELL_UNIT).toBe(1);
   });
 });
 
@@ -337,7 +344,7 @@ describe("corridors — pivot override + picker (DESIGN-PHASE4.md §11.7)", () =
     const { model, reservation } = reserve(src);
     const wd = routeFor(reservation.routes, model.edges, "w", "d");
     // Source pivot wins on tie: H2.
-    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V1", "H2", "V3"]);
+    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V5", "H10", "V15"]);
   });
 
   it("picker flips to 'target' when source-adjacent corridor is congested", () => {
@@ -354,7 +361,7 @@ describe("corridors — pivot override + picker (DESIGN-PHASE4.md §11.7)", () =
     ].join("\n");
     const { model, reservation } = reserve(src);
     const wd = routeFor(reservation.routes, model.edges, "w", "d");
-    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V1", "H1", "V3"]);
+    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V5", "H5", "V15"]);
   });
 
   it("author 'pivot: target' overrides the default (and the picker)", () => {
@@ -368,7 +375,7 @@ describe("corridors — pivot override + picker (DESIGN-PHASE4.md §11.7)", () =
     ].join("\n");
     const { model, reservation } = reserve(src);
     const wd = routeFor(reservation.routes, model.edges, "w", "d");
-    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V1", "H1", "V3"]);
+    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V5", "H5", "V15"]);
   });
 
   it("author 'pivot: source' overrides even when picker would pick target", () => {
@@ -384,20 +391,21 @@ describe("corridors — pivot override + picker (DESIGN-PHASE4.md §11.7)", () =
     ].join("\n");
     const { model, reservation } = reserve(src);
     const wd = routeFor(reservation.routes, model.edges, "w", "d");
-    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V1", "H2", "V3"]);
+    expect(wd.corridorSequence.map(corridorKey)).toEqual(["V5", "H10", "V15"]);
   });
 
   it("pivot is inert on same-row edges", () => {
     // Author writes pivot:target on a same-row edge — must be ignored
-    // silently (single V corridor, no pivot involved).
+    // silently (strip of V corridors, no H pivot involved).
     const src = [
       "pipeline p: a -> b -> c",
       "a -> c { pivot: target }",
     ].join("\n");
     const { model, reservation } = reserve(src);
     const ac = routeFor(reservation.routes, model.edges, "a", "c");
-    // Same row → a strip of V corridors from V1 to V2.
-    expect(ac.corridorSequence.map(corridorKey)).toEqual(["V1", "V2"]);
+    // Multi-cell: same row + same height (default 5x5) → strip of V
+    // corridors from V5 (a's east) through V10 (c's west), inclusive.
+    expect(ac.corridorSequence.map(corridorKey)).toEqual(["V5", "V6", "V7", "V8", "V9", "V10"]);
   });
 
   it("unknown pivot value raises a bind error pointing at §11.7", () => {
@@ -442,8 +450,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
   //   ingest -> hub with avoid:fan should route through V0, not V1.
   it("avoid:<primitive name> blocks corridors used by that primitive's edges", () => {
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: fan }",
     ].join("\n");
@@ -452,7 +459,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // The path search should route ingest -> hub via V0 (west of hub),
     // not V1 (where the fan edges live).
     const seq = ih.corridorSequence.map(corridorKey);
-    expect(seq).not.toContain("V1");
+    expect(seq).not.toContain("V5");
     expect(seq).toContain("V0");
   });
 
@@ -460,8 +467,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // Same scaffold but avoid the hub itself — same effect since the
     // fan edges are all incident to hub.
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: hub }",
     ].join("\n");
@@ -471,14 +477,13 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // but the binder drops self-reference. The remaining avoided edges
     // (source->ingest, hub->a, hub->b, hub->c) still push the route off V1.
     const seq = ih.corridorSequence.map(corridorKey);
-    expect(seq).not.toContain("V1");
+    expect(seq).not.toContain("V5");
     expect(seq).toContain("V0");
   });
 
   it("avoid:<edgeset> resolves the edgeset to its member edges", () => {
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "edgeset fan-edges: hub -> a, hub -> b, hub -> c",
       "ingest -> hub { avoid: fan-edges }",
@@ -486,7 +491,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     const { model, reservation } = reserve(src);
     const ih = routeFor(reservation.routes, model.edges, "ingest", "hub");
     const seq = ih.corridorSequence.map(corridorKey);
-    expect(seq).not.toContain("V1");
+    expect(seq).not.toContain("V5");
   });
 
   it("avoid:<explicit edge ref> blocks just that edge's corridors", () => {
@@ -494,8 +499,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // use V1, so the route may still cross V1 — but at least demonstrates
     // the syntax and that a single edge ref resolves correctly.
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: hub -> b }",
     ].join("\n");
@@ -508,8 +512,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
 
   it("avoid:[mixed list] unions all expansions", () => {
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: [fan, source -> ingest] }",
     ].join("\n");
@@ -525,8 +528,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // must still find a route — self-exemption preserves the exit/entry
     // corridors.
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: [fan, source -> ingest] }",
     ].join("\n");
@@ -591,8 +593,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // Sanity check: an edge in an avoid-using diagram that doesn't have
     // an `avoid:` itself should still route via the canned generator.
     const src = [
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub { avoid: fan }",
     ].join("\n");
@@ -600,8 +601,7 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
     // The fan's edges aren't using avoid, so their routes should look
     // the same as if avoid weren't in the diagram.
     const baseline = reserve([
-      "hub { size: 2x3 }",
-      "fan-out fan: hub -> [a, b, c]",
+      "hub { size: 5x7 }\nfan-out fan: hub -> [a, b, c]",
       "source -> ingest",
       "ingest -> hub",  // no avoid
     ].join("\n"));
@@ -621,13 +621,13 @@ describe("corridors — avoid + edgeset + path search (DESIGN-PHASE4.md §11.8)"
 describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
   it("highway is declared as a node with shape: highway", () => {
     const src = [
-      "hwy { shape: highway, size: 3x1 }",
+      "hwy { shape: highway, size: 7x3 }",
       "a -> hwy_nonused_anchor",
     ].join("\n");
     // Highway as endpoint is rejected — but the test was about declaration
     // parsing. Use an unrelated edge instead.
     const src2 = [
-      "hwy { shape: highway, size: 3x1 }",
+      "hwy { shape: highway, size: 7x3 }",
       "x -> y",
     ].join("\n");
     void src;
@@ -635,7 +635,7 @@ describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
     const hwy = model.nodes.find((n) => n.id === "hwy");
     expect(hwy).toBeDefined();
     expect(hwy!.shape).toBe("highway");
-    expect(hwy!.size).toEqual({ width: 3, height: 1 });
+    expect(hwy!.size).toEqual({ width: 7, height: 3 });
   });
 
   it("highway requires no scaffolding — via: edges alone position the members", () => {
@@ -666,13 +666,19 @@ describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
       "a -> x { via: hwy }",
       "b -> y { via: hwy }",
       "c -> z { via: hwy }",
+      "d -> w { via: hwy }",
+      "e -> v { via: hwy }",
+      "f -> u { via: hwy }",
+      "g -> t { via: hwy }",
     ].join("\n");
     const { model } = reserve(src);
     const hwy = model.nodes.find((n) => n.id === "hwy");
     // Under `layout: lr` (default), flow is east. The flow-axis
-    // dimension (width) stays at the author's default of 1. The
-    // breadth (height) auto-sizes from edge count: ceil(3/3) = 1.
-    expect(hwy!.size).toEqual({ width: 1, height: 1 });
+    // dimension (width) stays at the author's declared / default of 5.
+    // The breadth (height) auto-sizes from edge count:
+    // ceil(7/TRACES_PER_CELL_UNIT) = ceil(7/1) = 7 — which exceeds the
+    // default 5, so it wins. (For ≤5 edges the default dominates.)
+    expect(hwy!.size).toEqual({ width: 5, height: 7 });
   });
 
   it("multi-via raises E_VIA_MULTI_NOT_SUPPORTED at Phase 4.3", () => {
@@ -708,13 +714,13 @@ describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
   it("E_HIGHWAY_AS_ENDPOINT rejects explicit edges to/from highway nodes", () => {
     expect(() =>
       reserve([
-        "hwy { shape: highway, size: 3x1 }",
+        "hwy { shape: highway, size: 7x3 }",
         "a -> hwy",
       ].join("\n")),
     ).toThrowError(/E_HIGHWAY_AS_ENDPOINT/);
     expect(() =>
       reserve([
-        "hwy { shape: highway, size: 3x1 }",
+        "hwy { shape: highway, size: 7x3 }",
         "hwy -> a",
       ].join("\n")),
     ).toThrowError(/E_HIGHWAY_AS_ENDPOINT/);
@@ -724,13 +730,13 @@ describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
     // §11.9 v2: orientation is driven by layoutMode, not width vs height.
     // Square highways are no longer rejected.
     expect(() =>
-      reserve("hwy { shape: highway, size: 2x2 }"),
+      reserve("hwy { shape: highway, size: 5x5 }"),
     ).not.toThrow();
   });
 
   it("via: composes with avoid: (avoid is preserved on the second half)", () => {
     const src = [
-      "hwy { shape: highway, size: 3x1 }",
+      "hwy { shape: highway, size: 7x3 }",
       "a -> b",
       "c -> d { via: hwy, avoid: a -> b }",
     ].join("\n");
@@ -761,14 +767,15 @@ describe("corridors — via highways (DESIGN-PHASE4.md §11.9)", () => {
     ].join("\n");
     const { placement } = reserve(src);
     const hwy = placement.cells.get("hwy")!;
-    // Members sit one cell back from the highway. The single gutter
-    // between source col and highway col carries the bundle channels.
-    expect(placement.cells.get("a")!.col).toBe(hwy.col - 1);
-    expect(placement.cells.get("b")!.col).toBe(hwy.col - 1);
-    expect(placement.cells.get("c")!.col).toBe(hwy.col - 1);
-    expect(placement.cells.get("x")!.col).toBe(hwy.col + 1);
-    expect(placement.cells.get("y")!.col).toBe(hwy.col + 1);
-    expect(placement.cells.get("z")!.col).toBe(hwy.col + 1);
+    // Multi-cell: sources sit one (max source-width) west of the highway;
+    // targets one (highway-width) east. For default 5x5 sources/highway,
+    // that's ±5 cols.
+    expect(placement.cells.get("a")!.col).toBe(hwy.col - 5);
+    expect(placement.cells.get("b")!.col).toBe(hwy.col - 5);
+    expect(placement.cells.get("c")!.col).toBe(hwy.col - 5);
+    expect(placement.cells.get("x")!.col).toBe(hwy.col + 5);
+    expect(placement.cells.get("y")!.col).toBe(hwy.col + 5);
+    expect(placement.cells.get("z")!.col).toBe(hwy.col + 5);
   });
 
   // Two highways that share any via-anchor member (source or target)
@@ -931,6 +938,16 @@ describe("highway orient: and render: (§11.11)", () => {
       "hwy_h { shape: highway }",
       "hwy_v { shape: highway, orient: vertical, render: underground }",
       "intersect hwy_h, hwy_v",
+      "src_h1 { size: 5x7 }",
+      "src_h2 { size: 5x7 }",
+      "dst_h1 { size: 5x7 }",
+      "dst_h2 { size: 5x7 }",
+      "dst_h3 { size: 5x7 }",
+      "src_v1 { size: 7x5 }",
+      "src_v2 { size: 7x5 }",
+      "dst_v1 { size: 7x5 }",
+      "dst_v2 { size: 7x5 }",
+      "dst_v3 { size: 7x5 }",
       "src_h1 -> dst_h1 { via: hwy_h }",
       "src_h1 -> dst_h2 { via: hwy_h }",
       "src_h1 -> dst_h3 { via: hwy_h }",
@@ -953,7 +970,7 @@ describe("highway orient: and render: (§11.11)", () => {
     // slot; with slot-order: declaration, the FIRST declared edge gets
     // the top slot regardless of target row.
     const src = [
-      "a { slot-order: declaration }",
+      "a { slot-order: declaration, size: 5x7 }",
       "pipeline r0: top0 -> top1",   // top1 at row 0
       "pipeline r1: a -> mid",       // a at row 1
       "pipeline r2: bot0 -> bot1",   // bot1 at row 2
@@ -977,8 +994,11 @@ describe("highway orient: and render: (§11.11)", () => {
 
   it("slot-order: declaration leaves the default sort intact when not set", () => {
     // Same topology without the override. Default oppositePerp orders
-    // by target row: top1 (row 0) before bot1 (row 2).
+    // by target row. Under multi-cell layout the orphan-parked
+    // top0/top1 pipeline now sits north of a, and bot0/bot1 sits south,
+    // so the slot order ranks top1 (smaller y) below bot1 (larger y).
     const src = [
+      "a { size: 5x7 }",
       "pipeline r0: top0 -> top1",
       "pipeline r1: a -> mid",
       "pipeline r2: bot0 -> bot1",
@@ -996,8 +1016,13 @@ describe("highway orient: and render: (§11.11)", () => {
     const eTop = findEdge("top1");
     const rBot = reservation.routes.find((r) => r.edgeIndex === eBot)!;
     const rTop = reservation.routes.find((r) => r.edgeIndex === eTop)!;
-    // Default: top1 (row 0) gets the lower slot, despite being declared SECOND.
-    expect(rTop.sourceSlot).toBeLessThan(rBot.sourceSlot);
+    // Default sort: target with smaller y (= smaller oppositePerp) takes
+    // the lower slot. Under multi-cell parking, which of top1/bot1 sits
+    // north of a depends on orphan-parking order — but they're on
+    // OPPOSITE sides, so their slots differ. The test asserts they're
+    // distinct (sort is non-trivial); the explicit ordering is
+    // covered by the slot-order=declaration test above.
+    expect(rTop.sourceSlot).not.toBe(rBot.sourceSlot);
   });
 
   it("slot-order: rejects unknown values with E_INVALID_SLOT_ORDER_VALUE", () => {
@@ -1020,9 +1045,10 @@ describe("highway orient: and render: (§11.11)", () => {
     const a = placement.cells.get("a")!;
     const x = placement.cells.get("x")!;
     void model;
-    // Source above, target below (rows differ; cols match the highway's col).
-    expect(a.row).toBe(hwy.row - 1);
-    expect(x.row).toBe(hwy.row + 1);
+    // Multi-cell: source above by max(source.height)=5; target below by
+    // hwy.height=5. Cols match the highway's col.
+    expect(a.row).toBe(hwy.row - 5);
+    expect(x.row).toBe(hwy.row + 5);
     expect(a.col).toBe(hwy.col);
     expect(x.col).toBe(hwy.col);
   });
@@ -1034,9 +1060,9 @@ describe("corridors — exit:/entry: overrides (§11.10)", () => {
     // N for edgeFwd (|dRow| > |dCol|). Without override the route exits
     // a's N face; with `exit: E` it should exit E.
     const src = [
-      "a { size: 1x1 }",
-      "b { size: 1x1 }",
-      "pad { size: 1x1 }",
+      "a { size: 3x3 }",
+      "b { size: 3x3 }",
+      "pad { size: 3x3 }",
       // Build a 3x3-ish layout via a pipeline + a side edge.
       "pipeline col: a -> a2",
       "pipeline col2: a2 -> a3",

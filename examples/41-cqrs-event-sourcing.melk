@@ -1,0 +1,53 @@
+layout: lr
+crossings: 6
+title: "CQRS + Event Sourcing"
+subtitle: "Write side appends events; read side projects them into query models"
+caption: "Source: examples/41-cqrs-event-sourcing.melk"
+legend: on
+
+# CQRS separates writes from reads. Commands mutate state via an
+# append-only event log; queries read pre-built projections.
+#
+# Top spine — write path:
+#   client -> API -> command handler -> aggregate -> event store
+#
+# Middle — projector fans events from the store to the read models:
+#   event store -> projector -> [orders, inventory, audit]
+#
+# Bottom — query path joins back at the API and reads the orders model:
+#   API -> query handler -> orders read-model
+#
+# The event store is the seam: writes append, projectors read.
+# Read models are durable (cylinders) and rebuildable from the log.
+
+client    { shape: rect,      label: "client" }
+api       { shape: rect,      label: "API\ngateway" }
+
+# Write side.
+cmd       { shape: rect,      label: "command\nhandler" }
+aggregate { shape: rect,      label: "aggregate\nroot" }
+events    { shape: cylinder,  label: "event store\n(append-only log)" }
+
+# Read-model fan.
+projector { shape: rect, label: "projector\n(event consumer)" }
+orders_rm { shape: cylinder,  label: "orders\nread-model" }
+inv_rm    { shape: cylinder,  label: "inventory\nread-model" }
+audit_rm  { shape: cylinder,  label: "audit\nread-model", tags: [critical] }
+
+# Query side.
+query     { shape: rect,      label: "query\nhandler" }
+
+# Write spine: anchors client, api, cmd, aggregate, events on one row.
+pipeline write_path: client -> api -> cmd -> aggregate -> events
+
+# Projector watches the log, then fans to the three read models on
+# the row below.
+branch project:right: events -> projector
+fan-out read-models: projector -> [orders_rm, inv_rm, audit_rm]
+
+# Read path: queries enter through the API; the query handler
+# fetches from the orders read-model. The branch anchors `query` one
+# row below `api`; `orders_rm` is already placed by the fan-out so a
+# plain edge finds it.
+branch read-side:right: api -> query
+query -> orders_rm

@@ -64,16 +64,16 @@ describe("lexer", () => {
 
 describe("parser — nodes and edges", () => {
   it("parses bare node declarations with cell sizing", () => {
-    const model = run("foo { shape: rect, size: 2x1 }");
+    const model = run("foo { shape: rect, size: 5x3 }");
     expect(model.nodes).toHaveLength(1);
     expect(model.nodes[0]!.id).toBe("foo");
     expect(model.nodes[0]!.shape).toBe("rect");
-    expect(model.nodes[0]!.size).toEqual({ width: 2, height: 1 });
+    expect(model.nodes[0]!.size).toEqual({ width: 5, height: 3 });
   });
 
-  it("defaults node size to 1x1 when omitted", () => {
+  it("defaults node size to 5x5 when omitted", () => {
     const model = run("foo");
-    expect(model.nodes[0]!.size).toEqual({ width: 1, height: 1 });
+    expect(model.nodes[0]!.size).toEqual({ width: 5, height: 5 });
   });
 
   it("parses forward edges", () => {
@@ -290,20 +290,20 @@ describe("bind — pipeline projection", () => {
     expect(model.pipelines[0]!.members).toEqual(["a", "b", "c"]);
   });
 
-  it("auto-declares pipeline members as 1x1 rects", () => {
+  it("auto-declares pipeline members as 5x5 rects", () => {
     const model = run("pipeline x: a -> b");
     expect(model.nodes).toHaveLength(2);
-    expect(model.nodes[0]!.size).toEqual({ width: 1, height: 1 });
+    expect(model.nodes[0]!.size).toEqual({ width: 5, height: 5 });
     expect(model.nodes[0]!.shape).toBe("rect");
   });
 
   it("lets an explicit declaration upgrade an auto-declared pipeline member", () => {
     const model = run(
-      "pipeline x: a -> b\nb { shape: cylinder, size: 2x1, label: \"B\" }",
+      "pipeline x: a -> b\nb { shape: cylinder, size: 5x3, label: \"B\" }",
     );
     const b = model.nodes.find((n) => n.id === "b")!;
     expect(b.shape).toBe("cylinder");
-    expect(b.size).toEqual({ width: 2, height: 1 });
+    expect(b.size).toEqual({ width: 5, height: 3 });
     expect(b.label).toBe("B");
   });
 

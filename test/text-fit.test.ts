@@ -1,77 +1,58 @@
 /**
  * Phase 5 text-fit tests.
  *
- * The pass runs between place and reserveCorridors. Two contracts:
- *
- *   1. Short labels in 1x1 cells stay at 1x1 (no needless growth).
- *   2. Long labels in 1x1 cells grow the cell width (and the node's
- *      size) to integer cell-units that contain the label + padding.
- *
- * Plus: circle nodes stay square at the bigger dimension so the
- * circle's radius fits the text.
+ * The pass is now a no-op: declared `size` is authoritative for
+ * placement, and labels that don't fit inside the box overflow
+ * visually. The pure measurement helpers are still exercised so
+ * downstream callers (corridor reserver, theme tests) keep a stable
+ * contract.
  */
 import { describe, expect, it } from "vitest";
 import { tokenize } from "../src/parser/lexer.js";
 import { parse } from "../src/parser/parser.js";
 import { bind } from "../src/bind/bind.js";
 import { place } from "../src/layout/place.js";
-import { applyTextFit, estimateLabelWidth, neededBoxWidthPx } from "../src/layout/text-fit.js";
+import { applyTextFit, applyTextFitToSizes, estimateLabelWidth, neededBoxWidthPx } from "../src/layout/text-fit.js";
 import { loadTheme } from "../src/theme/theme.js";
 
 const theme = loadTheme("document-light"); // body=10pt
 
 function run(src: string) {
   const model = bind(parse(tokenize(src)));
+  applyTextFitToSizes(model, theme);
   const placement = applyTextFit(place(model), model, theme);
   return { model, placement };
 }
 
-describe("text-fit — short labels stay small", () => {
-  it("single-char ids stay 1x1", () => {
+describe("text-fit — declared size is authoritative", () => {
+  it("single-char ids stay at default 5x5", () => {
     const { model, placement } = run("a -> b");
-    expect(model.nodes.find((n) => n.id === "a")?.size).toEqual({ width: 1, height: 1 });
+    expect(model.nodes.find((n) => n.id === "a")?.size).toEqual({ width: 5, height: 5 });
+    // Multi-cell: every cell unit is 1; the node's 5-cell width is
+    // expressed via its footprint spanning 5 cols, not by colUnits inflation.
     expect(placement.colUnits.every((u) => u === 1)).toBe(true);
   });
 
-  it("2-char ids stay 1x1", () => {
-    // Boundary case: 1-2 char ids comfortably fit a 32px cell at 10pt
-    // with padding. The 3-char boundary is right at the edge — and the
-    // pass intentionally over-estimates slightly to guarantee breathing
-    // room rather than risk clipping.
-    const { model } = run("a -> bb");
-    expect(model.nodes.find((n) => n.id === "a")?.size.width).toBe(1);
-    expect(model.nodes.find((n) => n.id === "bb")?.size.width).toBe(1);
+  it("long-id default-sized nodes stay 5x5 — label overflows", () => {
+    // Pre-rule, text-fit grew this past 5; now the box stays put and the
+    // label spills out the side.
+    const { model } = run("src_v2 -> dst");
+    expect(model.nodes.find((n) => n.id === "src_v2")?.size).toEqual({ width: 5, height: 5 });
+  });
+
+  it("explicit size: 7x3 is respected verbatim", () => {
+    const { model } = run('big { size: 7x3, label: "ab" }\nbig -> x');
+    expect(model.nodes.find((n) => n.id === "big")?.size).toEqual({ width: 7, height: 3 });
+  });
+
+  it("explicit size smaller than a long label is respected — overflow is fine", () => {
+    const { model } = run('a { size: 5x5, label: "this_is_a_very_long_label" }\na -> b');
+    expect(model.nodes.find((n) => n.id === "a")?.size).toEqual({ width: 5, height: 5 });
   });
 });
 
-describe("text-fit — long labels grow the cell", () => {
-  it("6-char id grows to 2 cell units wide", () => {
-    const { model, placement } = run("src_v2 -> dst");
-    const src = model.nodes.find((n) => n.id === "src_v2")!;
-    expect(src.size.width).toBeGreaterThanOrEqual(2);
-    // The col containing src_v2 must be widened too.
-    const cell = placement.cells.get("src_v2")!;
-    expect(placement.colUnits[cell.col]).toBe(src.size.width);
-  });
-
-  it("respects an explicit larger size (size: 3x1 trumps a label that needs 2)", () => {
-    const { model } = run('big { size: 3x1, label: "ab" }\nbig -> x');
-    expect(model.nodes.find((n) => n.id === "big")?.size.width).toBe(3);
-  });
-
-  it("grows further if an explicit size is too small for the label", () => {
-    // size: 1x1 with a 20-char label needs many more cells.
-    const { model } = run('a { label: "this_is_a_very_long_label" }\na -> b');
-    expect(model.nodes.find((n) => n.id === "a")?.size.width).toBeGreaterThan(2);
-  });
-});
-
-describe("text-fit — icon-as-body grows cell to contain label", () => {
-  it("an icon node grows its cell footprint to contain icon + label-below", () => {
-    // shape: icon(...) shares the label-below convention with circles
-    // (DESIGN-PHASE5-ICONS §2.3). Text-fit grows the cell vertically so
-    // the label sits inside the node's footprint instead of spilling
-    // into the next row's traces.
+describe("text-fit — icons and circles also stay at declared size", () => {
+  it("an icon node keeps its declared size; label overflows below", () => {
     const { model } = run(
       [
         'icons: aws from "./icons/aws/"',
@@ -80,75 +61,15 @@ describe("text-fit — icon-as-body grows cell to contain label", () => {
       ].join("\n"),
     );
     const srv = model.nodes.find((n) => n.id === "srv")!;
-    expect(srv.iconArea).toEqual({ width: 1, height: 1 });
-    expect(srv.size.height).toBeGreaterThan(1);
+    expect(srv.size).toEqual({ width: 5, height: 5 });
+    expect(srv.iconArea).toBeUndefined();
   });
 
-  it("icon node width grows for wider labels", () => {
-    const { model } = run(
-      [
-        'icons: aws from "./icons/aws/"',
-        "srv { shape: icon(aws/server), label: \"Very Long Service Name\" }",
-        "srv -> b",
-      ].join("\n"),
-    );
-    const srv = model.nodes.find((n) => n.id === "srv")!;
-    expect(srv.size.width).toBeGreaterThan(1);
-  });
-});
-
-describe("text-fit — circles stay 1x1 (label renders below)", () => {
-  it("a circle node grows its cell footprint to contain icon + label-below", () => {
-    // Circles render their label OUTSIDE the glyph (BPMN/flowchart
-    // convention for sources/sinks/events). To keep the label visually
-    // inside the node's footprint (so traces don't cut through it), the
-    // text-fit pass grows the cell vertically by one row to make room.
-    // `iconArea` records the original glyph footprint so the renderer
-    // can draw the circle at the top and centre the label in the
-    // bottom portion.
+  it("a circle keeps its declared size; label overflows below", () => {
     const { model } = run('client { shape: circle, label: "Client App" }\na -> client');
     const client = model.nodes.find((n) => n.id === "client")!;
-    expect(client.iconArea).toEqual({ width: 1, height: 1 });
-    // Height grew to fit the label-below band.
-    expect(client.size.height).toBeGreaterThan(1);
-  });
-});
-
-describe("text-fit — diamonds stay square", () => {
-  it("a diamond grows in both dims when the label needs more width", () => {
-    const { model } = run("d { shape: diamond, label: \"verify-this\" }\nd -> x");
-    const d = model.nodes.find((n) => n.id === "d")!;
-    expect(d.size.width).toBe(d.size.height);
-    expect(d.size.width).toBeGreaterThanOrEqual(2);
-  });
-});
-
-describe("text-fit — cylinders enforce min aspect", () => {
-  it("a wide cylinder grows in height to keep ~2:3 height:width aspect", () => {
-    const { model } = run("c { shape: cylinder, label: \"audit log\" }\nc -> x");
-    const c = model.nodes.find((n) => n.id === "c")!;
-    // width ought to grow for the label; height should be at least
-    // ceil(width * 2/3).
-    const minH = Math.ceil((c.size.width * 2) / 3);
-    expect(c.size.height).toBeGreaterThanOrEqual(minH);
-  });
-});
-
-describe("text-fit — highway nodes untouched", () => {
-  it("a highway node keeps its bound size, no text-fit growth", () => {
-    const src = [
-      "hwy { shape: highway }",
-      "src1 -> dst1 { via: hwy }",
-      "src1 -> dst2 { via: hwy }",
-      "src1 -> dst3 { via: hwy }",
-    ].join("\n");
-    const { model } = run(src);
-    const hwy = model.nodes.find((n) => n.id === "hwy")!;
-    // The highway auto-sizer set the size in bind; text-fit must not
-    // grow it just because "hwy" is a label-bearing token (it isn't —
-    // highways render no label).
-    expect(hwy.size.width).toBeGreaterThan(0);
-    expect(hwy.size.height).toBeGreaterThan(0);
+    expect(client.size).toEqual({ width: 5, height: 5 });
+    expect(client.iconArea).toBeUndefined();
   });
 });
 
@@ -185,7 +106,6 @@ describe("text-fit — idempotence", () => {
     const p2 = applyTextFit(p1, model1, theme);
     expect(p2.colUnits).toEqual(p1.colUnits);
     expect(p2.rowUnits).toEqual(p1.rowUnits);
-    // node.size should also be stable.
     expect(model1.nodes.find((n) => n.id === "longname")!.size).toEqual(
       model1.nodes.find((n) => n.id === "longname")!.size,
     );

@@ -81,7 +81,11 @@ export function computePixelLayout(
  * Pixel position of a slot port on a box face. The slot is centered
  * in its comb-tooth cell (+ COMB_PITCH/2 offset from the slot's edge).
  *
- * Smaller boxes inside a tall row / wide col are centered (DESIGN §2.4).
+ * Multi-cell occupancy: the box is anchored at the top-left of its
+ * footprint cell (`boxCell`) and its pixel size is declared
+ * (`boxWidthCells * CELL_PX` × `boxHeightCells * CELL_PX`). No
+ * centering — the box fills its footprint by construction (cells
+ * span multiple grid rows/cols when needed instead of inflating).
  */
 export function slotPixel(
   side: Side,
@@ -93,8 +97,8 @@ export function slotPixel(
 ): Point {
   const widthPx = boxWidthCells * CELL_PX;
   const heightPx = boxHeightCells * CELL_PX;
-  const left = layout.colX[boxCell.col]! + (layout.colWidthPx[boxCell.col]! - widthPx) / 2;
-  const top = layout.rowY[boxCell.row]! + (layout.rowHeightPx[boxCell.row]! - heightPx) / 2;
+  const left = layout.colX[boxCell.col]!;
+  const top = layout.rowY[boxCell.row]!;
   const slotOffset = slot * COMB_PITCH + COMB_PITCH / 2;
   switch (side) {
     case "W":

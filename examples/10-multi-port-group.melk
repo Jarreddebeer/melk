@@ -5,7 +5,7 @@ crossings: 20
 # external consumers. Tests slot demand on the fan-out's east comb
 # and the convergence of multiple channels onto each cylinder.
 
-router     { shape: rect,     size: 2x3, label: "router" }
+router     { shape: rect,     size: 9x13, label: "router" }
 source     { shape: rect,     label: "source" }
 prometheus { shape: cylinder, label: "prometheus" }
 kafka      { shape: cylinder, label: "kafka" }

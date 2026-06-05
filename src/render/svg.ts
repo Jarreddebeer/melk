@@ -501,13 +501,12 @@ function boxBounds(
     const sz = sizeOf.get(id) ?? { width: 1, height: 1 };
     const width = sz.width * CELL_PX;
     const height = sz.height * CELL_PX;
-    // Center smaller boxes within their containing row/col (DESIGN
-    // §2.4 — "Smaller boxes in a tall row are aligned to the row's
-    // centre line"). The slot-port computation in polyline.ts uses the
-    // same offset so the polylines terminate at the centered box face.
+    // Multi-cell occupancy: box is anchored at the top-left of its
+    // footprint cell and fills its declared pixel size. No centering;
+    // boxes wider/taller than 1 cell span multiple grid rows/cols.
     out.set(id, {
-      x: layout.colX[cell.col]! + (layout.colWidthPx[cell.col]! - width) / 2,
-      y: layout.rowY[cell.row]! + (layout.rowHeightPx[cell.row]! - height) / 2,
+      x: layout.colX[cell.col]!,
+      y: layout.rowY[cell.row]!,
       width,
       height,
     });

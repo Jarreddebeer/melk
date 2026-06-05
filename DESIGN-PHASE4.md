@@ -31,7 +31,7 @@ pixel_x = col * CELL_PX + col_offset
 pixel_y = row * CELL_PX + row_offset
 ```
 
-where `CELL_PX` is the global render pitch (default 32 px — large enough that a single comb-tooth-rich box side reads cleanly). `col_offset` and `row_offset` are per-column/row pixel offsets that accommodate variable-width boxes (see §2.4).
+where `CELL_PX` is the global render pitch — set to **8 px**, equal to `COMB_PITCH`. **Cells are slots.** Moving a node from row `r` to row `r+1` shifts it by exactly one slot pitch, so slot positions on adjacent boxes line up by construction. `col_offset` and `row_offset` are per-column/row pixel offsets that accommodate gutter widths (see §2.4).
 
 ### 1.2 Grid neighbours and routing axes
 
@@ -120,13 +120,13 @@ There is no force-directed or barycentric reordering. The placer is **determinis
 
 ### 2.4 Cell-based box sizing
 
-A box's size is declared in **grid cells**, not pixels. A node declaration carries `size: WxH` meaning W cells wide and H cells tall. Both W and H are positive integers. There are no T-shirt names; the user writes `size: 2x1` or `size: 4x2`.
+A box's size is declared in **grid cells**, not pixels. A node declaration carries `size: WxH` meaning W cells wide and H cells tall. Both W and H are positive integers. There are no T-shirt names; the user writes `size: 5x5` or `size: 7x3`.
 
-A box that needs more slot ports than its declared size accommodates raises **E_SIDE_OVERSUBSCRIBED** (see §5). The user fixes the source by increasing the size, splitting the node, or reducing fan-in/out. The placer does not silently grow the box.
+A box that needs more slot ports than its declared size accommodates raises **E_SIDE_OVERSUBSCRIBED** (see §5). The user fixes the source by increasing the size, splitting the node, or reducing fan-in/out. The placer does not silently grow the box for capacity reasons. Highways and hub-rects (any rect that's the shared of a bus or fan-out) do receive a small `+1` cell parity bump at bind time when their face length and trace count disagree on parity — this is what makes slot positions land on cell centres rather than half-cell offsets.
 
-A row's pixel height = `max(cell-height of all nodes in the row) * CELL_PX`. Same for cols. This means box sizes are aligned to row and col units, and the grid stays rectangular. Smaller boxes in a tall row are aligned to the row's centre line.
+**Multi-cell occupancy.** A node with `size: WxH` claims a W×H block of cells starting at its anchor cell. Every `rowUnits[r]` and `colUnits[c]` is **always 1**. A taller-than-default node expresses its height via footprint span (its anchor is the top-left of a multi-row block), not by inflating one row's unit count. Two nodes whose footprints overlap collide with E_AMBIGUOUS_PLACEMENT.
 
-Default size when omitted: `1x1`. A 1x1 box renders as a single cell with comb capacity equal to `CELL_PX / COMB_PITCH` slots per side (default 4 slots per side at CELL_PX=32 and COMB_PITCH=8).
+Default size when omitted: `5x5` (40×40 px at `CELL_PX = 8`). A 5x5 box renders with comb capacity = 5 slots per side (face length 5 × TRACES_PER_CELL_UNIT = 1 trace per cell-unit). The default is odd so a single-trace face produces a slot at the middle cell's centre — a clean cell-centre coord.
 
 ### 2.5 Local forward direction (isometry)
 
@@ -221,7 +221,7 @@ Back-edges traverse the rear-face corridors as described in §3.3, then wrap thr
 
 ### 3.5 Slot-index assignment
 
-Each box side has a finite capacity: with `COMB_PITCH` = 8 px and `CELL_PX` = 32 px, a 1-cell-tall east face has 4 comb-tooth slots. A box of cell-height H has `4 * H` slots per east/west face; a box of cell-width W has `4 * W` slots per north/south face.
+Each box side has a finite capacity: with `CELL_PX = COMB_PITCH = 8 px`, a 1-cell-tall east face has exactly 1 slot. A box of cell-height H has `H` slots per east/west face; a box of cell-width W has `W` slots per north/south face. The default `5x5` box has 5 slots per face.
 
 Step 5 assigns each incident trace on a box side a **slot index** ∈ `[0, capacity)`. The assignment is deterministic and follows the **uniform-flux rule** from `feedback-uniform-flux-rule.md`:
 
@@ -249,9 +249,11 @@ rowGutterUnits[g] = ceil(demand(H(g)) / TRACES_PER_CELL_UNIT)
 colGutterUnits[g] = ceil(demand(V(g)) / TRACES_PER_CELL_UNIT)
 ```
 
-where `TRACES_PER_CELL_UNIT = floor(CELL_PX / COMB_PITCH) - 1 = 3` at defaults (one comb tooth at each end reserved as margin).
+where `TRACES_PER_CELL_UNIT = max(1, floor(CELL_PX / COMB_PITCH) - 1) = 1` at the current `CELL_PX = COMB_PITCH = 8` defaults. (The historical formula reserved a margin slot per cell. With cells equal to slots there is no margin to reserve; the floor keeps it at 1.)
 
-A gutter of width 0 means "boxes are immediately adjacent on that edge". A gutter of width 1 means "one cell-unit of inter-row space" = 32 px at defaults, holding up to 3 traces. Wider gutters scale linearly: width 2 holds up to 6 traces, width 3 holds 9, etc.
+A gutter of width 0 means "boxes are immediately adjacent on that edge". A gutter of width 1 means "one cell-unit of inter-row space" = 8 px at defaults, holding up to 1 trace. Wider gutters scale linearly: width 2 holds up to 2 traces, width 3 holds 3, etc.
+
+**Multi-cell aware floor.** The widen pass applies a 1-cell-unit floor to interior gutters between distinct nodes' footprints, but **skips gutters inside a single node's own footprint** (the cells between, say, col 1 and col 2 of a 5-cell-wide node). Without this, every interior cell of a multi-cell box would inflate the rendered layout by an extra slot pitch per cell.
 
 The renderer (Step 8) translates to pixels by adding gutter widths between the box rows/cols:
 

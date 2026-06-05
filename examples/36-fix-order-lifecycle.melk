@@ -22,13 +22,13 @@ legend: on
 # error state; `fill` is the happy-path terminal and stays plain.
 
 oms          { shape: rect,      label: "OMS\n(NewOrderSingle)" }
-gateway      { shape: rect,      label: "FIX gateway" }
+gateway      { shape: rect,      label: "FIX gateway", size: 13x7 }
 risk         { shape: diamond,   label: "pre-trade\nrisk" }
 exchange     { shape: rect,      label: "exchange\nmatching" }
-ack          { shape: roundrect, label: "Exec(New)\n150=0" }
-partial      { shape: roundrect, label: "Exec(Partial)\n150=1" }
-fill         { shape: roundrect, label: "Exec(Fill)\n150=2" }
-rejected     { shape: roundrect, label: "Exec(Rejected)\n150=8", tags: [critical] }
+ack          { shape: rect, label: "Exec(New)\n150=0" }
+partial      { shape: rect, label: "Exec(Partial)\n150=1" }
+fill         { shape: rect, label: "Exec(Fill)\n150=2" }
+rejected     { shape: rect, label: "Exec(Rejected)\n150=8", tags: [critical] }
 
 pipeline order_flow: oms -> gateway -> risk -> exchange -> ack -> partial -> fill
 

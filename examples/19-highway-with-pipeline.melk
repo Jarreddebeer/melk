@@ -10,6 +10,8 @@ crossings: 10
 # both try to fix the position of svc_a / svc_b. Plain edges
 # follow the highway's placement without competing for it.
 
+svc_b { shape: rect, size: 7x7 }
+svc_a { shape: rect, size: 7x7 }
 inlet { shape: highway }
 db    { shape: cylinder, label: "store" }
 

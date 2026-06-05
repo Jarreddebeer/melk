@@ -18,11 +18,11 @@ legend: on
 # the theme's `tags.future.legend` and `tags.critical.legend` captions
 # show up next to swatches matching the tag's resolved visual style.
 
-transform { shape: rect,    size: 2x1, label: "ETL" }
+transform { shape: rect,    size: 9x5, label: "ETL" }
 validate  { shape: diamond }
 publish   { shape: rect }
-enrich    { shape: roundrect, tags: [future] }
-alert     { shape: roundrect, label: "alert!", tags: [critical] }
+enrich    { shape: rect, tags: [future] }
+alert     { shape: rect, label: "alert!", tags: [critical] }
 
 pipeline main: ingest -> transform -> validate -> publish
 

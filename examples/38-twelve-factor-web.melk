@@ -18,19 +18,19 @@ caption: "Source: examples/38-twelve-factor-web.melk"
 #                              to backing services)
 #
 # Backing services are drawn as cylinders to read as durable state;
-# dyno-tier nodes are roundrects to read as stateless processes.
+# dyno-tier nodes are plain rects.
 
-lb       { shape: rect,      label: "load balancer" }
-queue    { shape: roundrect, label: "queue\n(broker)" }
-db       { shape: cylinder,  label: "PostgreSQL\n(primary)" }
-cache    { shape: cylinder,  label: "Redis\n(cache)" }
+lb       { shape: rect,      label: "load balancer", size: 13x5 }
+queue    { shape: rect,      label: "queue\n(broker)", size: 9x5 }
+db       { shape: cylinder,  label: "PostgreSQL\n(primary)", size: 13x9 }
+cache    { shape: cylinder,  label: "Redis\n(cache)", size: 9x7 }
 
-web1     { shape: roundrect, label: "web.1" }
-web2     { shape: roundrect, label: "web.2" }
-web3     { shape: roundrect, label: "web.3" }
+web1     { shape: rect, label: "web.1", size: 7x5 }
+web2     { shape: rect, label: "web.2", size: 7x5 }
+web3     { shape: rect, label: "web.3", size: 7x5 }
 
-worker1  { shape: roundrect, label: "worker.1" }
-worker2  { shape: roundrect, label: "worker.2" }
+worker1  { shape: rect, label: "worker.1", size: 9x5 }
+worker2  { shape: rect, label: "worker.2", size: 9x5 }
 
 # Frontline path: client -> LB -> three stateless web dynos -> queue.
 # Bus structure: web tier funnels onto the shared broker.

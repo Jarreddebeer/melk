@@ -14,6 +14,7 @@ crossings: 20
 # then north up to log's S face. Same number of corridors but a
 # different shape.
 
+svc_b { shape: rect, size: 7x7 }
 hwy { shape: highway }
 log { shape: cylinder, label: "audit" }
 

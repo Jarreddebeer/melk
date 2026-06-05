@@ -7,6 +7,7 @@ crossings: 20
 # the bundle but also has a direct side-edge to a logger that
 # doesn't pass through the highway.
 
+svc_b { shape: rect, size: 7x7 }
 hwy { shape: highway }
 log { shape: cylinder, label: "audit" }
 

@@ -32,10 +32,10 @@ confirm    { shape: rect,      label: "confirmation\n(MarkitWire)" }
 clearing   { shape: diamond,   label: "clearing\neligibility?" }
 ccp        { shape: rect,      label: "CCP novation\n(LCH SwapClear)" }
 settlement { shape: cylinder,  label: "settlement\n+ margin" }
-maturity   { shape: roundrect, label: "maturity\n/ termination" }
+maturity   { shape: rect, label: "maturity\n/ termination" }
 
-report     { shape: roundrect, label: "trade repository\n(DTCC GTR)" }
-bilateral  { shape: roundrect, label: "bilateral\n+ UMR margin", tags: [critical] }
+report     { shape: rect, label: "trade repository\n(DTCC GTR)" }
+bilateral  { shape: rect, label: "bilateral\n+ UMR margin", tags: [critical] }
 
 pipeline trade_flow: execution -> confirm -> clearing -> ccp -> settlement -> maturity
 

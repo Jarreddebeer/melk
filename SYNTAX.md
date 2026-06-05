@@ -222,17 +222,19 @@ orient   render     slot-order
 ```
 
 ```melk
-ingest      { shape: rect, size: 2x1, label: "Ingest tier" }
-publish     { shape: roundrect, label: "Publish" }
-cache       { shape: cylinder, size: 1x2 }
+ingest      { shape: rect, size: 4x2, label: "Ingest tier" }
+publish     { shape: rect, label: "Publish" }
+cache       { shape: cylinder, size: 2x4 }
 core        { shape: circle, icon: aws/lambda }
 hot_path    { tags: [hot, critical] }
 ```
 
 A node referenced from an edge or composition primitive but never
-explicitly declared is **auto-declared as `1x1` `rect`** at bind time.
+explicitly declared is **auto-declared as `2x2` `rect`** at bind time.
 That's a feature, not a warning — you can sketch the topology first
-and add attributes later.
+and add attributes later. (Note: §3.2 — default to `rect`. The `roundrect`
+shape is a stylistic alternative; mixing them on one diagram reads as
+inconsistency unless explained in a legend.)
 
 ### 3.2 `shape:`
 
@@ -241,7 +243,7 @@ One of:
 | value       | meaning                                                 |
 |-------------|---------------------------------------------------------|
 | `rect`      | rectangle, 2-px corner radius. Default.                 |
-| `roundrect` | rectangle, 8-px corner radius.                          |
+| `roundrect` | rectangle, 8-px corner radius. Stylistic alternative to `rect`. |
 | `circle`    | circle; label renders below (BPMN convention).          |
 | `diamond`   | diamond/rhombus.                                        |
 | `cylinder`  | cylinder (datastore).                                   |
@@ -249,12 +251,99 @@ One of:
 | `module`    | synthetic marker for an imported module — set automatically by the `import` directive. Don't write this by hand. |
 | `icon(<alias>/<name>)` | icon as the node body. Requires the named icon pack to be registered. |
 
+**Choosing between `rect` and `roundrect`.** Default to `rect`.
+The two shapes look very similar by design — corner radius is too
+subtle to carry meaning a reader will reliably pick up. Pick one
+per diagram. If you genuinely want both, do it deliberately:
+attach a tag to the rounded ones and define what the tag means in
+a legend entry. Mixing them without that scaffolding reads as
+inconsistency, not intent.
+
 ### 3.3 `size:`
 
-`WxH` cell dimensions. Examples: `1x1`, `2x1`, `3x2`. Phase 4 dropped
-T-shirt sizes — writing `size: S` raises `E_DEPRECATED_TSHIRT_SIZE`.
+`WxH` cell dimensions, in 8-px cell units. Examples: `5x5` (40×40 px,
+the default), `5x9`, `7x3`. Phase 4 dropped T-shirt sizes — writing
+`size: S` raises `E_DEPRECATED_TSHIRT_SIZE`.
 
-Default: `1x1`.
+Default: `5x5` (40×40 px). This default holds 5 trace slots per face
+(face length 5 cell-units × `TRACES_PER_CELL_UNIT` = 1 trace per cell-
+unit at default pitch). Hubs with 6+ peers on one face need explicit
+sizing — see EXAMPLES.md §5 `E_SIDE_OVERSUBSCRIBED` for recipes.
+
+**Cell pitch equals slot pitch** (8 px). Moving a node from row r to
+row r+1 shifts it by exactly one slot position, so slots on adjacent
+boxes line up by construction. **Cells are slots.**
+
+**Odd dimensions matter** for boxes that act as hubs. A face of length
+L with F traces clustered on it produces slot positions at cell centres
+only when `L ≡ F (mod 2)`. Otherwise slots fall on cell boundaries
+(half-cell offsets) and the downstream node's centred slot can't align
+— producing a 4-px chamfer kink. The bind pass auto-bumps highway and
+hub-rect dimensions by 1 to enforce matched parity; explicit sizes
+declared on hubs may grow by 1 cell on the breadth axis for the same
+reason. Plain non-hub nodes are usually best as `5x5` (default).
+
+**Multi-cell occupancy.** A `size: 5x9` node occupies a 5×9 grid
+block, not a 1×1 cell with inflated row/col units. Two nodes whose
+footprints overlap collide with `E_AMBIGUOUS_PLACEMENT`. Every
+`rowUnits[r]` / `colUnits[c]` is always 1 — node extents are
+expressed by footprint span, not by per-row inflation.
+
+**Declared size is authoritative.** The placer takes `size:` at face
+value; nothing grows a node to fit its label. If a label is longer
+than the box, the text overflows the box edge visually. Size the box
+for the label up front using the table below.
+
+#### Picking `size:` from the label
+
+Read the visible label (the literal characters that render — the
+node id if no `label:`, otherwise the `label:` value). Count
+characters in the LONGEST line. Pick the row from the table; apply
+the shape adjustment.
+
+| Longest line | rect / roundrect | cylinder      | diamond | circle |
+|--------------|------------------|---------------|---------|--------|
+| 1–4 chars    | `5x5`            | `5x5`         | `5x5`   | `5x5`  |
+| 5–6 chars    | `7x5`            | `7x5`         | `7x7`   | `7x7`  |
+| 7–9 chars    | `9x5`            | `9x7`         | `9x9`   | `9x9`  |
+| 10–12 chars  | `11x5`           | `11x7`        | `11x11` | `11x11`|
+| 13–15 chars  | `13x5`           | `13x9`        | `13x13` | `13x13`|
+| 16–18 chars  | `15x5`           | `15x11`       | `15x15` | `15x15`|
+
+A cylinder looks squashed when its width is much greater than its
+height. The cylinder column already enforces `height ≥ ⌈width × 2/3⌉`
+— don't override that for a tighter look.
+
+**Per extra line** (`\n` in the label), add 2 cells to the height.
+A 2-line rect with each line ≤ 6 chars wants `7x7`; a 3-line
+cylinder with the longest line at 9 chars wants `9x11` (height 7
+from the cylinder column, +2 per extra line = 7+4 = 11).
+
+**ALL-CAPS / wide-char labels** ("WWW", "DTCC GTR"): bump up one
+row. Uppercase glyphs render ~1.4× the width of lowercase.
+
+**Shape rationale.** Cylinders need height ≈ ⅔ × width so the
+ellipse caps don't squash; diamonds and circles need width = height
+because the inscribed text uses both diagonals.
+
+**Hub parity bump.** A node that's the shared of a `bus` or
+`fan-out` (the side every trace converges on) is auto-bumped +1 on
+the breadth axis when the trace count parity doesn't match — see
+§11 for the rule. Picking sizes from this table already lands on
+odd values, so the bump usually leaves the source dimensions
+intact.
+
+**Examples.**
+- `web1 { label: "web.1" }` — 5 chars → `5x5` (rect default).
+- `queue { label: "queue\n(broker)" }` — longest line "(broker)" =
+  8 chars → `9x5` baseline, +2 for the extra line → `9x7`.
+- `db { shape: cylinder, label: "PostgreSQL\n(primary)" }` —
+  longest line "PostgreSQL" = 10 chars (capital P, L) → bump to
+  `13x9` (cylinder column, then +2 for the extra line).
+- `clearing { shape: diamond, label: "clearing\neligibility?" }` —
+  longest line "eligibility?" = 12 chars → `11x11` baseline, +2 for
+  the extra line → `11x13`; diamond wants square so bump width to
+  match → `13x13`.
 
 ### 3.4 `label:`
 
@@ -321,19 +410,26 @@ This is the mental model every author needs. It's why
 `E_AMBIGUOUS_PLACEMENT` exists, why `branch` has a `:side`, and why
 "just connect them" sometimes doesn't work.
 
-**The grid.** Layout is a uniform grid of cells indexed by `(row,
-col)`. Every node occupies at least one cell (more for nodes with
-`size: WxH`). In `layout: lr`, `col` advances along the flow; in
-`layout: tb`, `row` does.
+**What you have to specify, and why.** melk gives the author two
+levers that no other input controls: which composition primitive
+each group of edges belongs to, and the cell-size of any node that
+exceeds default capacity. Both are manual on purpose. Their *why*
+is the same: the same `.melk` source must always render the same
+diagram. Inferring either lever from edge counts would mean an
+unrelated edit elsewhere silently shifts the layout. The rest of
+this section spells out the three rules that follow.
 
-**Cells come from constraints, not from edges.** A bare edge
-`a -> b` is *unconstrained placement*. The placer's rule for it is
-"extend the source's row forward by one column" — `b` lands at
-`(row_of_a, col_of_a + 1)`. That's a side-effect of how the placer
-fills in the gaps, not an intentional design choice you made.
+**1. The grid.** Layout is a uniform grid of cells indexed by
+`(row, col)`. Every node occupies at least one cell (more for nodes
+with `size: WxH`). In `layout: lr`, `col` advances along the flow;
+in `layout: tb`, `row` does. Bare edges are *unconstrained
+placement* — `a -> b` just extends `a`'s row by one column. That's
+gap-filling, not intent.
 
-**Composition primitives are anchored placement.** Each one says
-*where its members go*:
+**2. Composition primitives are how you express intent.** Each
+primitive both creates edges *and* anchors cells. Picking the right
+one is the author's job; the placer won't guess from a wall of
+plain edges.
 
 | primitive | what it anchors |
 |-----------|-----------------|
@@ -342,6 +438,44 @@ fills in the gaps, not an intentional design choice you made.
 | `fan-out src -> [a, b, c]` | targets stacked in one column, one past `src` |
 | `branch :side: spine -> m` | `m` placed perpendicular to spine (one cell up for default `:left`, one down for `:right` in LR layout) |
 | `intersect h1, h2` | the listed highways meet at one shared cell |
+
+*Why:* primitive choice is the diagram's structural intent, and
+intent has to be authored. A `bus` and four bare edges to the same
+sink produce visually different layouts — the author has to pick.
+
+**3. Faces have capacity, and you grow nodes manually to fit.**
+Each cell-unit of a node's face holds one trace
+(`CELL_PX = COMB_PITCH = 8` → `TRACES_PER_CELL_UNIT = 1`). A default
+`5x5` node therefore takes 5 edges per face. A hub with 6+ peers on
+one face needs explicit growth: in `lr` layout grow the height
+(e.g. `size: 5x7`); in `tb` grow the width (e.g. `size: 7x5`). Each
+extra cell-unit adds 1 slot. Highways and hub-rects (any rect that's
+the shared of a bus or fan-out) auto-size: highway breadth grows to
+match via-edge count; hub-rect breadth gets a +1 parity bump when
+its face length and trace count disagree on parity (so slots land
+on cell centres). The author can still set explicit larger sizes;
+the parity bump only fires on top of the declared minimum.
+
+*Why:* a node's cell-size affects the grid (each extra cell-unit
+adds one slot pitch). Silent growth on edge-count changes would
+mean adding a single peer to a hub silently relays out the whole
+diagram. Making the explicit minimum is the author's call; the
+parity bump is a small +1 adjustment that prevents kinks without
+changing the diagram's structure.
+
+Exceeding face capacity raises `E_SIDE_OVERSUBSCRIBED`; the error
+names the failing face and gives the exact size to use.
+
+**4. Multi-cell occupancy.** A `size: 5x9` node occupies a 5×9 grid
+block. Two nodes whose footprints overlap collide with
+`E_AMBIGUOUS_PLACEMENT` — even if their anchor cells don't match.
+This is what makes `size: 5x9` visually "take up 5 cols and 9 rows"
+on the rendered diagram (rather than inflating one cell). Every
+neighbouring primitive (pipeline, bus, branch, etc.) advances by
+the previous node's full forward extent, so a `5x9` node followed
+by a `5x5` node sits at col 5, col 10, not col 1, col 2.
+
+---
 
 **Two constraints can collide on the same cell.** This is the
 error you'll hit most. Common shapes:
@@ -378,12 +512,6 @@ asks you to be more explicit.
 6. **Many things off one branch** — root a `pipeline` or `fan-out`
    on the branched node; one chained construct beats N branches.
 
-**Why the placer is strict.** Determinism. The same source always
-produces the same diagram. Auto-resolving collisions would mean
-guessing which constraint to honour, and that guess would change
-when surrounding code changed. Better to surface the ambiguity once
-than to ship a layout that quietly drifts when the author edits an
-unrelated line.
 
 For copy-pasteable collision recipes, see EXAMPLES.md §3
 ("Shared backing service", "Side-channel off a spine", etc.)
