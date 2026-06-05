@@ -545,6 +545,23 @@ export interface ImportedModule {
    * `src/layout/module-place.ts`.
    */
   body?: unknown;
+  /**
+   * Cross-flow alignment offset, in pixels, added to the module body's
+   * local origin at render time and to every port/face-port lookup that
+   * the polyline builder makes. Populated by `applyModuleAlignment`
+   * after parent placement so the body shifts to line up flow-axis
+   * ports with their connected counterparts. Defaults to 0 / 0.
+   *
+   * - LR parent layout: cross-flow axis is Y; `bodyOffsetY` is the
+   *   active dimension, `bodyOffsetX` stays 0.
+   * - TB parent layout: cross-flow axis is X; `bodyOffsetX` is active.
+   *
+   * The offset is clamped so the body stays inside the synthetic cell
+   * the parent placer reserved for the module (i.e. the cell's row/col
+   * extent isn't violated).
+   */
+  bodyOffsetX?: number;
+  bodyOffsetY?: number;
 }
 
 /**
@@ -562,6 +579,10 @@ export interface ModulePort {
   internalNodeId: string;
   localX: number;
   localY: number;
+  /** Internal node's pixel width (= size.width * CELL_PX). */
+  localWidth: number;
+  /** Internal node's pixel height (= size.height * CELL_PX). */
+  localHeight: number;
   faceSide: "N" | "S" | "E" | "W";
 }
 

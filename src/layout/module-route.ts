@@ -36,7 +36,10 @@ import type { Polylines } from "./polyline.js";
 export interface ModulePortInfo {
   originX: number;
   originY: number;
-  ports: Map<string, { localX: number; localY: number }>;
+  ports: Map<
+    string,
+    { localX: number; localY: number; localWidth: number; localHeight: number }
+  >;
   facePorts: {
     N: { localX: number; localY: number }[];
     S: { localX: number; localY: number }[];
@@ -67,17 +70,23 @@ export function buildModulePortIndex(
     if (node === undefined) continue;
     const cell = placement.cells.get(imported.alias);
     if (cell === undefined) continue;
-    const widthPx = node.size.width * CELL_PX;
-    const heightPx = node.size.height * CELL_PX;
-    const boxX = layout.colX[cell.col]! +
-      (layout.colWidthPx[cell.col]! - widthPx) / 2;
-    const boxY = layout.rowY[cell.row]! +
-      (layout.rowHeightPx[cell.row]! - heightPx) / 2;
-    const padX = Math.max(0, (widthPx - (imported.pixelWidth ?? 0)) / 2);
-    const padY = Math.max(0, (heightPx - (imported.pixelHeight ?? 0)) / 2);
+    // Center the body inside the full *cell* pixel rect — not the
+    // synthetic node's smaller rect. The module body owns the cell;
+    // the synthetic node is invisible. This gives applyModuleAlignment
+    // the full (cellPx - body) slack to shift inside, mirroring the
+    // renderer's `renderModuleBody` which now also uses the cell rect.
+    void node;
+    const cellX = layout.colX[cell.col]!;
+    const cellY = layout.rowY[cell.row]!;
+    const cellW = layout.colWidthPx[cell.col]!;
+    const cellH = layout.rowHeightPx[cell.row]!;
+    const padX = Math.max(0, (cellW - (imported.pixelWidth ?? 0)) / 2);
+    const padY = Math.max(0, (cellH - (imported.pixelHeight ?? 0)) / 2);
+    const offX = imported.bodyOffsetX ?? 0;
+    const offY = imported.bodyOffsetY ?? 0;
     out.set(imported.alias, {
-      originX: boxX + padX,
-      originY: boxY + padY,
+      originX: cellX + padX + offX,
+      originY: cellY + padY + offY,
       ports: imported.ports,
       facePorts: imported.facePorts ?? { N: [], S: [], E: [], W: [] },
     });
@@ -106,6 +115,35 @@ export function applyModulePortEndpoints(
 ): void {
   if (model.imports.length === 0) return;
   const index = buildModulePortIndex(model, placement, reservation);
+  // Skip if the current endpoint already sits on the internal node's
+  // bounding box (any face, with slot-spread along the face axis). The
+  // router lands on a face midpoint with COMB_PITCH spread for fan-in/
+  // fan-out, so a true no-op needs to accept any point on the node's
+  // perimeter — not just the centroid.
+  const epsilon = 1e-3;
+  const isOnNodePerimeter = (
+    point: { x: number; y: number },
+    info: { originX: number; originY: number },
+    port: {
+      localX: number;
+      localY: number;
+      localWidth: number;
+      localHeight: number;
+    },
+  ): boolean => {
+    const cx = info.originX + port.localX;
+    const cy = info.originY + port.localY;
+    const halfW = port.localWidth / 2;
+    const halfH = port.localHeight / 2;
+    const dx = point.x - cx;
+    const dy = point.y - cy;
+    const onN = Math.abs(dy + halfH) < epsilon && Math.abs(dx) <= halfW + epsilon;
+    const onS = Math.abs(dy - halfH) < epsilon && Math.abs(dx) <= halfW + epsilon;
+    const onW = Math.abs(dx + halfW) < epsilon && Math.abs(dy) <= halfH + epsilon;
+    const onE = Math.abs(dx - halfW) < epsilon && Math.abs(dy) <= halfH + epsilon;
+    const onCentroid = Math.abs(dx) < epsilon && Math.abs(dy) < epsilon;
+    return onN || onS || onW || onE || onCentroid;
+  };
   for (const pl of polylines.polylines) {
     const edge = model.edges[pl.edgeIndex];
     if (edge === undefined) continue;
@@ -113,11 +151,12 @@ export function applyModulePortEndpoints(
       const info = index.get(edge.from);
       const port = info?.ports.get(edge.fromInternal);
       if (info !== undefined && port !== undefined && pl.points.length > 0) {
-        const px = info.originX + port.localX;
-        const py = info.originY + port.localY;
         const first = pl.points[0]!;
-        if (first.x !== px || first.y !== py) {
-          pl.points[0] = { x: px, y: py };
+        if (!isOnNodePerimeter(first, info, port)) {
+          pl.points[0] = {
+            x: info.originX + port.localX,
+            y: info.originY + port.localY,
+          };
         }
       }
     }
@@ -125,11 +164,12 @@ export function applyModulePortEndpoints(
       const info = index.get(edge.to);
       const port = info?.ports.get(edge.toInternal);
       if (info !== undefined && port !== undefined && pl.points.length > 0) {
-        const px = info.originX + port.localX;
-        const py = info.originY + port.localY;
         const last = pl.points[pl.points.length - 1]!;
-        if (last.x !== px || last.y !== py) {
-          pl.points[pl.points.length - 1] = { x: px, y: py };
+        if (!isOnNodePerimeter(last, info, port)) {
+          pl.points[pl.points.length - 1] = {
+            x: info.originX + port.localX,
+            y: info.originY + port.localY,
+          };
         }
       }
     }

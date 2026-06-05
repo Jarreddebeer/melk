@@ -25,7 +25,7 @@ import { applyTextFit } from "./layout/text-fit.js";
 import { reserveCorridors } from "./layout/corridors.js";
 import { packTracks } from "./layout/tracks.js";
 import { buildPolylines } from "./layout/polyline.js";
-import { placeModules } from "./layout/module-place.js";
+import { applyModuleAlignment, placeModules } from "./layout/module-place.js";
 import { renderSVG } from "./render/svg.js";
 import {
   BUILTIN_THEME_NAMES,
@@ -191,6 +191,13 @@ function main(): void {
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
     const reservation = reserveCorridors(model, placement);
+    // DESIGN-PHASE5-MODULES.md §3.3 (extension) — shift each imported
+    // module body inside its synthetic cell along the cross-flow axis
+    // so face-to-face flow-axis ports line up with their counterparts.
+    // Reads facePorts[side][0] (the single-edge snap default), produces
+    // a per-module bodyOffsetX/Y that both the polyline builder (via
+    // buildModulePortIndex) and the renderer (renderModuleBody) honour.
+    applyModuleAlignment(model, placement, reservation);
     const packing = packTracks(model, placement, reservation);
     // DESIGN-PHASE5-MODULES.md §4.1 — buildPolylines now lands directly
     // on internal node pixel positions for edges with `fromInternal` /

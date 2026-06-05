@@ -99,6 +99,50 @@ export function buildPolylines(
     trackByEdgeAndCorridor.set(`${t.edgeIndex}|${t.corridor}`, t);
   }
 
+  // DESIGN-PHASE5-MODULES.md §4.6 (extended) — when multiple qualified-
+  // ref edges enter (or leave) the same internal node on the same face,
+  // they all want the same face midpoint and pile on a single point.
+  // Pre-compute a fan-out map keyed by (parentId|internalName|side) →
+  // ordered list of edge indices, so each edge knows its rank among its
+  // siblings and the port resolver can offset slot positions along the
+  // face by COMB_PITCH. Order is `model.edges` declaration order, per
+  // the "declaration order is respected" rule.
+  const internalFanoutBuckets = buildInternalFanoutBuckets(model, reservation);
+  const internalFanoutRank = new Map<string, { rank: number; total: number }>();
+  for (const bucket of internalFanoutBuckets.values()) {
+    const total = bucket.length;
+    for (let i = 0; i < bucket.length; i++) {
+      internalFanoutRank.set(
+        `${bucket[i]!.edgeIndex}|${bucket[i]!.endpoint}`,
+        { rank: i, total },
+      );
+    }
+  }
+
+  // Face-to-face fan-in counts: how many module edges (no qualified
+  // ref) share a (parentModuleId, side) target. With exactly one edge
+  // on a face, the snap defaults to `facePorts[side][0]` (the closest
+  // candidate to that face by construction). That's stable under body
+  // shifts — the candidate ordering is based on the internal node's
+  // local x/y position, which doesn't change when we shift the module
+  // body inside its synthetic cell. With multiple edges, the existing
+  // axis-snap spreads them across distinct candidates.
+  const faceToFaceCount = new Map<string, number>();
+  for (const r of reservation.routes) {
+    const edge = model.edges[r.edgeIndex];
+    if (edge === undefined) continue;
+    const fromIsModule = modulePortIndex.has(edge.from);
+    const toIsModule = modulePortIndex.has(edge.to);
+    if (fromIsModule && edge.fromInternal === undefined) {
+      const key = `${edge.from}|${r.sourceSide}`;
+      faceToFaceCount.set(key, (faceToFaceCount.get(key) ?? 0) + 1);
+    }
+    if (toIsModule && edge.toInternal === undefined) {
+      const key = `${edge.to}|${r.targetSide}`;
+      faceToFaceCount.set(key, (faceToFaceCount.get(key) ?? 0) + 1);
+    }
+  }
+
   // Build orthogonal polylines first; X-junction materialisation
   // happens as a coordinated post-pass over pairs of routes.
   const orthogonalByEdge = new Map<number, Point[]>();
@@ -112,6 +156,8 @@ export function buildPolylines(
         model,
         trackByEdgeAndCorridor,
         modulePortIndex,
+        internalFanoutRank,
+        faceToFaceCount,
       ),
     );
   }
@@ -183,6 +229,52 @@ export function buildPolylines(
     width: layout.totalWidth,
     height: layout.totalHeight,
   };
+}
+
+/**
+ * Group qualified-ref endpoints by (parentModuleId, internalNodeName,
+ * face) so multiple traces landing on the same internal node face can
+ * be spread along the face instead of piling onto one point.
+ *
+ * Returns a map keyed by `parentId|internalName|side` whose value is
+ * the ordered list of (edgeIndex, endpoint) pairs sharing that target,
+ * in `model.edges` declaration order. The polyline builder uses each
+ * edge's rank in its bucket to offset its slot position along the face.
+ */
+function buildInternalFanoutBuckets(
+  model: Model,
+  reservation: Reservation,
+): Map<string, { edgeIndex: number; endpoint: "from" | "to" }[]> {
+  const buckets = new Map<
+    string,
+    { edgeIndex: number; endpoint: "from" | "to" }[]
+  >();
+  const routeByEdge = new Map<number, Route>();
+  for (const r of reservation.routes) routeByEdge.set(r.edgeIndex, r);
+  for (let i = 0; i < model.edges.length; i++) {
+    const edge = model.edges[i]!;
+    const route = routeByEdge.get(i);
+    if (route === undefined) continue;
+    if (edge.fromInternal !== undefined) {
+      const key = `${edge.from}|${edge.fromInternal}|${route.sourceSide}`;
+      let bucket = buckets.get(key);
+      if (bucket === undefined) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push({ edgeIndex: i, endpoint: "from" });
+    }
+    if (edge.toInternal !== undefined) {
+      const key = `${edge.to}|${edge.toInternal}|${route.targetSide}`;
+      let bucket = buckets.get(key);
+      if (bucket === undefined) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push({ edgeIndex: i, endpoint: "to" });
+    }
+  }
+  return buckets;
 }
 
 // --- 1. pixel layout (moved to ./pixels.ts) -------------------------------
@@ -292,39 +384,93 @@ function portPointFor(
   side: "N" | "S" | "E" | "W",
   fallback: () => Point,
   modulePortIndex: Map<string, ModulePortInfo>,
+  fanout?: { rank: number; total: number },
+  faceShareCount: number = 0,
 ): Point {
   const info = modulePortIndex.get(parentId);
   if (info === undefined) return fallback();
   if (internalName !== undefined) {
     const port = info.ports.get(internalName);
     if (port === undefined) return fallback();
-    return { x: info.originX + port.localX, y: info.originY + port.localY };
+    // §4.6 (extended) — land on the internal node's face midpoint on the
+    // side the route enters/leaves, not the centroid. That way a trace
+    // entering from above clearly terminates at the top of the internal
+    // node instead of disappearing into its body. When multiple traces
+    // hit the same face, spread them along the face by COMB_PITCH steps
+    // centered on the face midpoint.
+    const halfW = port.localWidth / 2;
+    const halfH = port.localHeight / 2;
+    const rank = fanout?.rank ?? 0;
+    const total = fanout?.total ?? 1;
+    // Offset along the face axis: for N/S the axis is x; for E/W it's y.
+    // Centered spread: rank k of n traces sits at (k - (n-1)/2) * pitch.
+    const offset = (rank - (total - 1) / 2) * COMB_PITCH;
+    // Clamp the offset so spread stays inside the node's face. Leave a
+    // half-pitch margin so the entry doesn't land on the corner.
+    const halfAxis = side === "N" || side === "S" ? halfW : halfH;
+    const margin = COMB_PITCH / 2;
+    const limit = Math.max(0, halfAxis - margin);
+    const clamped = Math.max(-limit, Math.min(limit, offset));
+    let x = info.originX + port.localX;
+    let y = info.originY + port.localY;
+    switch (side) {
+      case "N":
+        x += clamped;
+        y -= halfH;
+        break;
+      case "S":
+        x += clamped;
+        y += halfH;
+        break;
+      case "W":
+        x -= halfW;
+        y += clamped;
+        break;
+      case "E":
+        x += halfW;
+        y += clamped;
+        break;
+    }
+    return { x, y };
   }
-  // Face-to-face: snap the slot's intended pixel to the closest face
-  // port candidate. The slot's intended pixel is the cell-face slot
-  // (= fallback()); the face port candidates are at visible internal
-  // nodes' matching face midpoints. Snap by proximity along the face
-  // axis: for E/W, match by y; for N/S, match by x.
+  // Face-to-face: pick a face-port candidate at a visible internal
+  // node's matching face midpoint. The candidates list is sorted such
+  // that index 0 is the closest internal node to the face (sort key:
+  // perpendicular distance to the face, tie-break by axis position).
+  //
+  // Single edge on this (parentId, side) → use [0]. The pick is then
+  // stable under module body shifts (alignment), because the sort key
+  // depends only on the internal node's local position inside the
+  // module, not on where the module sits in the parent grid.
+  //
+  // Multiple edges on the same face → axis-snap by slot pixel so the
+  // edges spread across distinct internal-node face midpoints in
+  // spatial order matching the slot allocator. Snap by proximity along
+  // the face axis: for E/W match by y; for N/S match by x.
   const candidates = info.facePorts[side];
   if (candidates.length === 0) return fallback();
-  const slotPx = fallback();
-  // Distance along face axis to each candidate, find min.
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i]!;
-    const cx = info.originX + c.localX;
-    const cy = info.originY + c.localY;
-    const d = side === "E" || side === "W"
-      ? Math.abs(slotPx.y - cy)
-      : Math.abs(slotPx.x - cx);
-    if (d < bestDist) {
-      bestDist = d;
-      bestIdx = i;
+  let pick: { localX: number; localY: number };
+  if (faceShareCount <= 1) {
+    pick = candidates[0]!;
+  } else {
+    const slotPx = fallback();
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i]!;
+      const cx = info.originX + c.localX;
+      const cy = info.originY + c.localY;
+      const d = side === "E" || side === "W"
+        ? Math.abs(slotPx.y - cy)
+        : Math.abs(slotPx.x - cx);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
     }
+    pick = candidates[bestIdx]!;
   }
-  const fp = candidates[bestIdx]!;
-  return { x: info.originX + fp.localX, y: info.originY + fp.localY };
+  return { x: info.originX + pick.localX, y: info.originY + pick.localY };
 }
 
 function buildOrthogonalPolyline(
@@ -334,6 +480,8 @@ function buildOrthogonalPolyline(
   model: Model,
   trackLookup: Map<string, TrackAssignment>,
   modulePortIndex: Map<string, ModulePortInfo>,
+  internalFanoutRank: Map<string, { rank: number; total: number }>,
+  faceToFaceCount: Map<string, number>,
 ): Point[] {
   const edge = model.edges[route.edgeIndex]!;
   const srcCell = placement.cells.get(edge.from)!;
@@ -368,6 +516,8 @@ function buildOrthogonalPolyline(
       layout,
     ),
     modulePortIndex,
+    internalFanoutRank.get(`${route.edgeIndex}|from`),
+    faceToFaceCount.get(`${edge.from}|${route.sourceSide}`) ?? 0,
   );
   const endPoint = portPointFor(
     edge.to,
@@ -382,6 +532,8 @@ function buildOrthogonalPolyline(
       layout,
     ),
     modulePortIndex,
+    internalFanoutRank.get(`${route.edgeIndex}|to`),
+    faceToFaceCount.get(`${edge.to}|${route.targetSide}`) ?? 0,
   );
 
   // Precompute, for each corridor in the sequence:

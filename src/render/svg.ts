@@ -356,7 +356,22 @@ export function renderSVG(
     if (n.shape === "module") {
       const imported = model.imports.find((m) => m.alias === n.id);
       if (imported !== undefined && imported.body !== undefined) {
-        parts.push(renderModuleBody(imported, b, theme, opts, iconRegistry));
+        // Pass the *cell* rect — not the synthetic node's centered
+        // rect — so the body has the full cell allocation as slack to
+        // shift inside under applyModuleAlignment. The synthetic node
+        // is invisible; only the body draws.
+        const cell = placement.cells.get(n.id);
+        const cellRect = cell
+          ? {
+              x: layout.colX[cell.col]!,
+              y: layout.rowY[cell.row]!,
+              width: layout.colWidthPx[cell.col]!,
+              height: layout.rowHeightPx[cell.row]!,
+            }
+          : b;
+        parts.push(
+          renderModuleBody(imported, cellRect, theme, opts, iconRegistry),
+        );
       }
       continue;
     }
@@ -1800,13 +1815,18 @@ function renderModuleBody(
 
   // Center the module's local frame within the synthetic node's box
   // (the parent placer may have allocated a cell larger than the
-  // module's pixel footprint because ceil() rounded up).
+  // module's pixel footprint because ceil() rounded up). The cross-
+  // flow body offset (populated by applyModuleAlignment) shifts the
+  // body inside its cell so flow-axis ports line up with connected
+  // counterparts.
   const pixelWidth = imported.pixelWidth ?? body.polylines.width;
   const pixelHeight = imported.pixelHeight ?? body.polylines.height;
   const padX = Math.max(0, (parentBox.width - pixelWidth) / 2);
   const padY = Math.max(0, (parentBox.height - pixelHeight) / 2);
-  const originX = parentBox.x + padX;
-  const originY = parentBox.y + padY;
+  const offX = imported.bodyOffsetX ?? 0;
+  const offY = imported.bodyOffsetY ?? 0;
+  const originX = parentBox.x + padX + offX;
+  const originY = parentBox.y + padY + offY;
 
   // Build the sub-model's pixel layout + box bounds the same way the
   // top-level renderer does. We can't call renderSVG recursively
@@ -1914,7 +1934,18 @@ function renderModuleBody(
     if (n.shape === "module") {
       const nestedImport = subModel.imports.find((m) => m.alias === n.id);
       if (nestedImport !== undefined && nestedImport.body !== undefined) {
-        parts.push(renderModuleBody(nestedImport, b, subTheme, opts, iconRegistry));
+        const cell = body.placement.cells.get(n.id);
+        const cellRect = cell
+          ? {
+              x: subLayout.colX[cell.col]!,
+              y: subLayout.rowY[cell.row]!,
+              width: subLayout.colWidthPx[cell.col]!,
+              height: subLayout.rowHeightPx[cell.row]!,
+            }
+          : b;
+        parts.push(
+          renderModuleBody(nestedImport, cellRect, subTheme, opts, iconRegistry),
+        );
       }
       continue;
     }
