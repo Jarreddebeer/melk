@@ -1,5 +1,5 @@
 {
-  "name": "@melk/cli",
+  "name": "@jarreddebeer/melk",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"

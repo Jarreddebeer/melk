@@ -20,12 +20,18 @@ produces the same diagram.
 ## Install
 
 ```sh
-npm install -g @melk/cli
+npm install -g @jarreddebeer/melk
 ```
 
-The package is published as `@melk/cli` because the unscoped `melk`
-name is blocked by npm's similar-names check (too close to `mem`,
-`meow`, `walk`, `del`). The CLI binary is still `melk`:
+The package is published under a user scope because the unscoped
+`melk` name and the `@melk` org name are both soft-reserved on npm
+(`melk` was rejected as too close to `mem`/`meow`/`walk`/`del`; the
+`@melk` org name returned "not available" on creation). The project's
+identity remains `melk` — that's the binary name, the file
+extension, and the language name. Only the npm install path is
+scoped.
+
+The CLI binary is `melk`:
 
 ```sh
 melk render examples/01-simple.melk > out.svg
@@ -36,7 +42,7 @@ melk format   examples/01-simple.melk
 Library import (for tooling that wraps melk):
 
 ```js
-import { tokenize, parse, bind, renderSVG } from "@melk/cli";
+import { tokenize, parse, bind, renderSVG } from "@jarreddebeer/melk";
 ```
 
 Or run from a local checkout:
