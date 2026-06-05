@@ -13,5 +13,7 @@ aggregator { shape: rect, size: 1x2, label: "Aggregator" }
 fan-out work_split: scheduler -> [worker_a, worker_b, worker_c]
 bus     work_join:  [worker_a, worker_b, worker_c] -> aggregator
 
+dispatch { tags: [hot] }
+
 dispatch -> scheduler
 aggregator -> results

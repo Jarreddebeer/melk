@@ -1,5 +1,5 @@
 {
-  "name": "document-light-with-frames",
+  "name": "module-compute",
   "tokens": {
     "surface": "#fafafa",
     "surface-raised": "#ffffff",
@@ -36,11 +36,6 @@
     "arrow": { "scale": 4.5, "head-shape": "filled-triangle" }
   },
   "tags": {
-    "critical": {
-      "trace": "status-error",
-      "trace-width": 2.0,
-      "legend": "Critical observability tap"
-    },
     "hot": {
       "border": "status-warn",
       "border-width": 1.5,

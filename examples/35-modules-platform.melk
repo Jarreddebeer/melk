@@ -26,11 +26,11 @@ theme: "./themes/document-light-with-frames.json"
 title: "Platform overview"
 subtitle: "Edge · Ingest · Compute · Storage · Observability"
 
-import "./modules/edge.melk"          as edge
+import "./modules/edge.melk"          as edge          { theme: "./themes/module-edge-amber.json" }
 import "./modules/ingest.melk"        as ingest
-import "./modules/compute.melk"       as compute
+import "./modules/compute.melk"       as compute       { theme: "./themes/module-compute.json" }
 import "./modules/storage.melk"       as storage
-import "./modules/observability.melk" as observability
+import "./modules/observability.melk" as observability { theme: "./themes/module-obs-teal.json" }
 
 # Data plane spine: client request flows left-to-right across all
 # four planes. A pipeline anchors the row so the placer keeps every
@@ -44,5 +44,5 @@ pipeline data_plane: client -> edge -> ingest -> compute -> storage -> consumer
 # via qualified refs, landing on the actual `aggregator` and
 # `replica` internal nodes inside compute and storage.
 branch obs-branch:right: ingest -> observability
-compute.aggregator -> observability.signals
+compute.aggregator -> observability.signals { tags: [critical] }
 storage.replica    -> observability.signals

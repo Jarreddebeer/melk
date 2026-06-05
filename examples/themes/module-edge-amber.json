@@ -1,22 +1,22 @@
 {
-  "name": "document-light-with-frames",
+  "name": "module-edge-amber",
   "tokens": {
-    "surface": "#fafafa",
-    "surface-raised": "#ffffff",
-    "surface-sunken": "#f1f5f9",
-    "ink-primary": "#334155",
-    "ink-secondary": "#64748b",
-    "border-strong": "#334155",
-    "border-subtle": "#cbd5e1",
-    "trace-default": "#94a3b8",
-    "trace-emphasis": "#2563eb",
-    "trace-muted": "#cbd5e1",
+    "surface": "#fffbeb",
+    "surface-raised": "#fffdf5",
+    "surface-sunken": "#fef3c7",
+    "ink-primary": "#78350f",
+    "ink-secondary": "#a16207",
+    "border-strong": "#b45309",
+    "border-subtle": "#fcd34d",
+    "trace-default": "#d97706",
+    "trace-emphasis": "#b45309",
+    "trace-muted": "#fde68a",
     "status-error": "#dc2626",
     "status-warn": "#d97706",
     "status-ok": "#16a34a",
     "status-info": "#2563eb",
-    "label-halo": "#fafafa",
-    "accents": ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2"]
+    "label-halo": "#fffbeb",
+    "accents": ["#d97706", "#b45309", "#92400e", "#78350f", "#451a03", "#a16207"]
   },
   "typography": {
     "face": "Inter, -apple-system, Segoe UI, Roboto, sans-serif",
@@ -35,19 +35,7 @@
     "dash": { "frame": [4, 3], "back-edge": [5, 3] },
     "arrow": { "scale": 4.5, "head-shape": "filled-triangle" }
   },
-  "tags": {
-    "critical": {
-      "trace": "status-error",
-      "trace-width": 2.0,
-      "legend": "Critical observability tap"
-    },
-    "hot": {
-      "border": "status-warn",
-      "border-width": 1.5,
-      "fill": "#fef3c7",
-      "legend": "Hot path"
-    }
-  },
+  "tags": {},
   "modules": {
     "border": "ink-secondary",
     "border-width": 0.75,
