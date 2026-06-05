@@ -17,15 +17,38 @@ Renders to a clean orthogonal SVG with a frame, label, and tinted
 `audit_log` cylinder. No random jitter; the same source always
 produces the same diagram.
 
-## Try it
+## Install
 
 ```sh
+npm install -g @melk/cli
+```
+
+The package is published as `@melk/cli` because the unscoped `melk`
+name is blocked by npm's similar-names check (too close to `mem`,
+`meow`, `walk`, `del`). The CLI binary is still `melk`:
+
+```sh
+melk render examples/01-simple.melk > out.svg
+melk validate examples/01-simple.melk
+melk format   examples/01-simple.melk
+```
+
+Library import (for tooling that wraps melk):
+
+```js
+import { tokenize, parse, bind, renderSVG } from "@melk/cli";
+```
+
+Or run from a local checkout:
+
+```sh
+git clone <this repo> && cd melk
 npm install
 npx tsx src/cli.ts render examples/01-simple.melk > out.svg
 ```
 
-CLI subcommands: `parse`, `bind`, `render`. Run with no args for full
-usage.
+CLI subcommands: `parse`, `bind`, `validate`, `format`, `render`.
+Run with no args for full usage.
 
 ## Why
 

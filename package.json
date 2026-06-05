@@ -1,6 +1,9 @@
 {
-  "name": "melk",
+  "name": "@melk/cli",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Text-first architectural diagramming with circuit-board-style orthogonal routing.",
   "type": "module",
   "license": "MIT",
