@@ -13,3 +13,5 @@ examples/*.svg
 
 # Scratch / ad-hoc.
 tmp/
+tmp*.svg
+*.tgz

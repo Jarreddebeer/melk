@@ -767,7 +767,7 @@ function validateTokens(raw: unknown, source: string): ThemeTokens {
         `E_THEME_BAD_COLOUR: theme ${source} token '${tok}' must be a hex colour (#rrggbb or #rgb), got '${v}'`,
       );
     }
-    (out as Record<string, string | string[]>)[tok] = v;
+    (out as unknown as Record<string, string | string[]>)[tok] = v;
   }
   const accents = raw["accents"];
   if (!Array.isArray(accents)) {
@@ -1058,7 +1058,7 @@ export function classifyTagRuleSwatch(rule: TagRule): "box" | "line" {
 export function resolveColour(theme: Theme, value: string): string {
   if (value.startsWith("#")) return value;
   if (COLOUR_TOKEN_SET.has(value)) {
-    return (theme.tokens as Record<string, string | string[]>)[value] as string;
+    return (theme.tokens as unknown as Record<string, string | string[]>)[value] as string;
   }
   throw new ThemeError(
     `E_INTERNAL: resolveColour got '${value}' which is neither a hex literal nor a known token`,

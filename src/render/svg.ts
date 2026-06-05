@@ -2036,6 +2036,16 @@ function nodeShape(
       // the main render loop intercepts shape: module before calling
       // renderNode → nodeShape. Defensive empty.
       return "";
+    case "icon":
+      // Icon-as-body is rendered by renderIconAsBody, intercepted in
+      // renderNode before reaching nodeShape. Defensive empty (same
+      // reasoning as module).
+      return "";
+    default: {
+      const _exhaustive: never = shape;
+      void _exhaustive;
+      return "";
+    }
   }
 }
 

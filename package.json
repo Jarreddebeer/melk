@@ -1,26 +1,54 @@
 {
   "name": "melk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Text-first architectural diagramming with circuit-board-style orthogonal routing.",
   "type": "module",
+  "license": "MIT",
+  "author": "Jarred de Beer <jarr2000@gmail.com>",
+  "keywords": [
+    "diagram",
+    "architecture",
+    "dsl",
+    "svg",
+    "orthogonal-routing",
+    "circuit-board",
+    "diagrams-as-code",
+    "llm-friendly"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "melk": "./dist/cli.js"
   },
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "files": [
     "dist",
     "README.md",
-    "DESIGN.md"
+    "LICENSE",
+    "SYNTAX.md",
+    "EXAMPLES.md",
+    "prompts"
   ],
   "scripts": {
     "build": "tsc",
+    "clean": "rimraf dist",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "render": "tsx src/cli.ts"
+    "render": "tsx src/cli.ts",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "rimraf": "^5.0.10",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
