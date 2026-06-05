@@ -675,7 +675,8 @@ function bindBackBlock(decl: BackBlockDecl, ctx: BindCtx): void {
 function bindPipeline(decl: PipelineDecl, ctx: BindCtx): void {
   if (ctx.pipelines.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_PIPELINE: pipeline '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_PIPELINE: pipeline '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them (the name is used in error messages and as edge source attribution).`,
       decl.span,
     );
   }
@@ -695,7 +696,8 @@ function bindPipeline(decl: PipelineDecl, ctx: BindCtx): void {
 function bindBus(decl: BusDecl, ctx: BindCtx): void {
   if (ctx.buses.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_BUS: bus '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_BUS: bus '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -720,7 +722,8 @@ function bindBus(decl: BusDecl, ctx: BindCtx): void {
 function bindFanOut(decl: FanOutDecl, ctx: BindCtx): void {
   if (ctx.fanOuts.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_FAN_OUT: fan-out '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_FAN_OUT: fan-out '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -745,7 +748,8 @@ function bindFanOut(decl: FanOutDecl, ctx: BindCtx): void {
 function bindBranch(decl: BranchDecl, ctx: BindCtx): void {
   if (ctx.branches.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_BRANCH: branch '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_BRANCH: branch '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -771,7 +775,8 @@ function bindBranch(decl: BranchDecl, ctx: BindCtx): void {
 function bindNodeset(decl: NodesetDecl, ctx: BindCtx): void {
   if (ctx.nodesets.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_NODESET: nodeset '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_NODESET: nodeset '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -789,7 +794,8 @@ function bindNodeset(decl: NodesetDecl, ctx: BindCtx): void {
 function bindEdgeset(decl: EdgesetDecl, ctx: BindCtx): void {
   if (ctx.edgesets.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_EDGESET: edgeset '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_EDGESET: edgeset '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -1049,12 +1055,18 @@ function rejectHighwayEndpoints(ctx: BindCtx): void {
     const toNode = ctx.nodes.get(e.to);
     if (fromNode?.shape === "highway") {
       throw new BindError(
-        `E_HIGHWAY_AS_ENDPOINT: edge '${e.from} -> ${e.to}' uses highway '${e.from}' as a source; highways can only be routed through (via:)`,
+        `E_HIGHWAY_AS_ENDPOINT: edge '${e.from} -> ${e.to}' uses highway '${e.from}' as a source; highways can only be routed through (via:). ` +
+          `Hint: rewrite as \`<real_source> -> ${e.to} { via: ${e.from} }\`. ` +
+          `Highways are invisible bundling channels — every trace through them ` +
+          `is declared as a regular edge between real nodes with \`via: <hwy>\`.`,
       );
     }
     if (toNode?.shape === "highway") {
       throw new BindError(
-        `E_HIGHWAY_AS_ENDPOINT: edge '${e.from} -> ${e.to}' uses highway '${e.to}' as a target; highways can only be routed through (via:)`,
+        `E_HIGHWAY_AS_ENDPOINT: edge '${e.from} -> ${e.to}' uses highway '${e.to}' as a target; highways can only be routed through (via:). ` +
+          `Hint: rewrite as \`${e.from} -> <real_target> { via: ${e.to} }\`. ` +
+          `Highways are invisible bundling channels — every trace through them ` +
+          `is declared as a regular edge between real nodes with \`via: <hwy>\`.`,
       );
     }
   }
@@ -1308,7 +1320,8 @@ function findEdgeIndex(ctx: BindCtx, from: string, to: string): number {
 function bindPath(decl: PathDecl, ctx: BindCtx): void {
   if (ctx.paths.has(decl.name)) {
     throw new BindError(
-      `E_DUPLICATE_PATH: path '${decl.name}' is declared more than once`,
+      `E_DUPLICATE_PATH: path '${decl.name}' is declared more than once. ` +
+        `Hint: rename one of them.`,
       decl.span,
     );
   }
@@ -1325,7 +1338,10 @@ function bindPath(decl: PathDecl, ctx: BindCtx): void {
     const to = decl.chain[i + 1]!;
     if (!hasEdge(ctx, from, to)) {
       throw new BindError(
-        `E_PATH_MISSING_EDGE: path '${decl.name}' includes link '${from} -> ${to}' but no such edge exists`,
+        `E_PATH_MISSING_EDGE: path '${decl.name}' includes link '${from} -> ${to}' but no such edge exists. ` +
+          `Hint: a \`path\` highlights existing edges — every consecutive pair in the chain ` +
+          `must match a declared edge (forward or back). Declare the edge first, or remove ` +
+          `the link from the path.`,
         decl.span,
       );
     }
@@ -1379,9 +1395,15 @@ function resolveNodeRefId(
   }
   const innerExists = imported.model.nodes.some((n) => n.id === ref.node);
   if (!innerExists) {
+    const known = imported.model.nodes
+      .filter((n) => n.shape !== "module" && n.shape !== "highway")
+      .map((n) => n.id);
     throw new BindError(
       `E_MODULE_NODE_UNKNOWN: module '${ref.module}' has no node '${ref.node}'. ` +
-        `Check the imported file at '${imported.resolvedPath}'.`,
+        `Check the imported file at '${imported.resolvedPath}'. ` +
+        `Hint: nodes declared in that module are: ${
+          known.length > 0 ? known.join(", ") : "(none visible — module may be empty or only contain highways)"
+        }.`,
       ref.span,
     );
   }

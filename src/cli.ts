@@ -19,6 +19,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { tokenize } from "./parser/lexer.js";
 import { parse } from "./parser/parser.js";
+import { formatProgram } from "./parser/format.js";
 import { bind } from "./bind/bind.js";
 import { place } from "./layout/place.js";
 import { applyTextFit } from "./layout/text-fit.js";
@@ -40,6 +41,8 @@ function usage(): never {
   process.stderr.write("commands:\n");
   process.stderr.write("  parse                 print the parsed AST as JSON\n");
   process.stderr.write("  bind                  print the bound Model as JSON\n");
+  process.stderr.write("  validate              run the full pipeline; report errors only (no SVG output)\n");
+  process.stderr.write("  format                emit a canonical, normalized form of the .melk source\n");
   process.stderr.write("  render [-o OUT.svg] [--theme=NAME] [--legend=VALUE]\n");
   process.stderr.write("         [--title=STR] [--subtitle=STR] [--caption=STR] [--no-network]\n");
   process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
@@ -146,6 +149,22 @@ function main(): void {
 
   const filePath = resolve(fileArg!);
   const source = readFileSync(filePath, "utf8");
+
+  // `validate` and `format` need their own dispatch because they
+  // want to catch errors at any pipeline stage (parse / bind / place)
+  // and print them as clean E_CODE: message lines without a stack
+  // trace. Everything else lets exceptions bubble (which Node prints
+  // with a stack — useful when iterating on a bug, noisy when an LLM
+  // is reading the output).
+  if (command === "validate") {
+    const code = runValidate(source, filePath);
+    process.exit(code);
+  }
+  if (command === "format") {
+    const code = runFormat(source);
+    process.exit(code);
+  }
+
   const ast = parse(tokenize(source));
 
   if (command === "parse") {
@@ -223,6 +242,80 @@ function main(): void {
   }
 
   usage();
+}
+
+/**
+ * `melk validate <file>` — run the full pipeline (parse → bind → place
+ * → reserveCorridors → packTracks → buildPolylines), catching any
+ * thrown error. Prints one clean line per problem to stderr in
+ * `E_CODE: message` form (no stack trace). Returns 0 on success, 1 on
+ * any error.
+ *
+ * Fail-fast: the first failed stage stops the pipeline because
+ * downstream stages depend on it. So a `validate` run reports the
+ * *first* error, not all of them. Iterative authoring still works
+ * because fixing the surfaced error reveals the next.
+ *
+ * Why no SVG output? An LLM author wants a fast "is this source
+ * valid?" check without 16 KB of SVG noise in the response.
+ */
+function runValidate(source: string, filePath: string): number {
+  let stage = "parse";
+  try {
+    const ast = parse(tokenize(source));
+    stage = "bind";
+    const model = bind(ast, { importerPath: filePath });
+    stage = "place";
+    // Run the same pipeline `render` runs, minus the SVG emission.
+    // Use the default theme — `validate` is about structural
+    // correctness, not theme-resolution edge cases (which `render`
+    // surfaces). If you want theme errors caught too, run `render`.
+    const theme = resolveTheme(undefined, model.themeName, dirname(filePath));
+    placeModules(model, (imported) =>
+      resolveTheme(undefined, imported.model.themeName, dirname(filePath)),
+    );
+    const rawPlacement = place(model);
+    const placement = applyTextFit(rawPlacement, model, theme);
+    stage = "reserveCorridors";
+    const reservation = reserveCorridors(model, placement);
+    applyModuleAlignment(model, placement, reservation);
+    stage = "packTracks";
+    const packing = packTracks(model, placement, reservation);
+    stage = "buildPolylines";
+    buildPolylines(model, placement, reservation, packing);
+    process.stdout.write("OK\n");
+    return 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[${stage}] ${msg}\n`);
+    return 1;
+  }
+}
+
+/**
+ * `melk format <file>` — emit a canonical, normalized form of the
+ * source: stable directive order, single-space convention, no
+ * comments preserved.
+ *
+ * Use case: an LLM author edits a .melk; the user runs `melk format`
+ * before review so the diff focuses on the meaningful change instead
+ * of incidental whitespace.
+ *
+ * Not byte-stable across versions of the formatter; we don't promise
+ * the exact whitespace. We do promise idempotence: format(format(s)) =
+ * format(s).
+ */
+function runFormat(source: string): number {
+  try {
+    const ast = parse(tokenize(source));
+    const out = formatProgram(ast);
+    process.stdout.write(out);
+    return 0;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`${msg}\n`);
+    return 1;
+  }
 }
 
 main();

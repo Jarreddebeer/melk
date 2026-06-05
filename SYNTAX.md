@@ -675,12 +675,55 @@ Recap of authoring rules (full design in
 ## 9. CLI
 
 ```
-melk parse  <file.melk>                              # print AST as JSON
-melk bind   <file.melk>                              # print bound Model as JSON
-melk render <file.melk> [options]                    # render to SVG
+melk parse    <file.melk>                            # print AST as JSON
+melk bind     <file.melk>                            # print bound Model as JSON
+melk validate <file.melk>                            # run full pipeline; print errors only
+melk format   <file.melk>                            # emit canonical-form .melk
+melk render   <file.melk> [options]                  # render to SVG
 ```
 
-Render options:
+### `validate`
+
+Runs the full pipeline (parse → bind → place → reserve corridors →
+pack tracks → build polylines) and reports the first error
+encountered, if any. Prints `OK` on success.
+
+Errors print to stderr in the form
+`[<stage>] E_CODE: message. Hint: <suggested fix>.` No stack trace.
+Exits 0 on success, 1 on any error.
+
+```
+$ melk validate examples/01-simple.melk
+OK
+
+$ melk validate broken.melk
+[place] E_AMBIGUOUS_PLACEMENT: nodes 'publish' and 'audit' both placed at (row 0, col 2). Add a structured-flow constraint to disambiguate, or split the source. Hint: if 'audit' is a side-channel off a spine member, use `branch <name>:right: <spine> -> audit` (or `:left:`)...
+```
+
+Use this for fast structural checking — e.g. an LLM author iterating
+on a `.melk` without producing 16 KB of SVG noise per attempt. If
+theme-resolution edge cases matter, run `render` instead.
+
+### `format`
+
+Emits a canonical, normalized form of the source to stdout:
+
+- Stable directive order: top-level directives → `icons:` →
+  `import` → nodes → primitives → edges → annotations.
+- Declaration order *within* each category is preserved (it's
+  load-bearing for slot/lane allocation).
+- Single-space convention everywhere (`key: value`, `, ` between
+  list items, `->` with single spaces).
+- One blank line between category groups.
+- **Comments are dropped** at v1.
+
+Idempotent: `melk format $(melk format file.melk)` is a no-op.
+
+Use case: an LLM author edits a `.melk`; run `melk format` before
+diffing so the change-set focuses on meaningful edits instead of
+incidental whitespace or reordering.
+
+### `render` options:
 
 | flag                       | effect                                                                                                |
 |----------------------------|-------------------------------------------------------------------------------------------------------|

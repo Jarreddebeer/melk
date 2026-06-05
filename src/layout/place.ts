@@ -636,7 +636,12 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
       throw new PlacementError(
         `E_AMBIGUOUS_PLACEMENT: nodes '${prev}' and '${id}' both placed at ` +
           `(row ${cell.row}, col ${cell.col}). ` +
-          `Add a structured-flow constraint to disambiguate, or split the source.`,
+          `Add a structured-flow constraint to disambiguate, or split the source. ` +
+          `Hint: if '${id}' is a side-channel off a spine member, use ` +
+          `\`branch <name>:right: <spine> -> ${id}\` (or \`:left:\`) — a bare ` +
+          `edge to '${id}' makes the placer extend the spine and collide. ` +
+          `For multiple side-shoots off the same node, use \`fan-out\` instead of ` +
+          `several \`branch\`es with the same side.`,
       );
     }
     occupied.set(key, id);
