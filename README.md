@@ -58,18 +58,35 @@ melk is built to be LLM-friendly:
 - **Worked examples by feature**: [EXAMPLES.md](EXAMPLES.md) groups
   the 34 examples in [examples/](examples/) by what they demonstrate,
   with copy-pasteable recipes for common patterns.
-- **Structured errors**: every error has an `E_*` code and a clear
-  cause. An LLM seeing `E_DUPLICATE_PIPELINE` knows what to fix
-  without context.
+- **Structured errors with fix hints**: every error has an `E_*` code
+  and a `Hint:` suffix on the high-traffic ones. Seeing
+  `E_AMBIGUOUS_PLACEMENT` an LLM gets a concrete `branch :right:`
+  template to apply.
+- **Fast iterate loop**: `melk validate <file>` runs the full pipeline
+  and prints `OK` or a single error line — no SVG noise — so an LLM
+  can iterate without burning context on render output.
+- **Canonical form**: `melk format <file>` normalizes whitespace and
+  category ordering so diffs focus on meaningful change.
 
-A reasonable system prompt for an LLM author:
+### Ready-to-paste system prompt
+
+Use [prompts/melk-author.md](prompts/melk-author.md) as the system
+prompt when delegating `.melk` authoring to an LLM. It's pure
+pointers — the LLM reads SYNTAX.md and EXAMPLES.md from the project
+itself — plus the hard-won lessons LLM authors reliably miss
+(`branch` is single-member, highways are `via:`-only, bare edges off
+a spine collide, etc.).
+
+A typical LLM-driven authoring loop:
 
 ```
-You are a melk DSL author. Read SYNTAX.md and EXAMPLES.md.
-Use composition primitives (pipeline / branch / fan-out / bus /
-highway) to constrain placement — don't list edges one-by-one when a
-primitive fits. Tags drive visual style, never layout. When the user's
-description fits a known pattern in EXAMPLES.md §3, follow that recipe.
+1. User describes the architecture.
+2. LLM reads SYNTAX.md + EXAMPLES.md (first session only; subsequent
+   sessions remember the rules).
+3. LLM writes <name>.melk.
+4. Run `melk validate <name>.melk`.
+5. If non-OK, the error's Hint: tells the LLM what to fix. Iterate.
+6. Once OK, `melk render <name>.melk -o <name>.svg`.
 ```
 
 ## Features
