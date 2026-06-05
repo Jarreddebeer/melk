@@ -12,7 +12,7 @@ The five inversions:
 2. **The grid is the layout IR** — node positions are `(row, col)`, not pixels.
 3. **45° routing is allowed** — the router uses diagonals freely when they help.
 4. **The compiler is strict** — circuit-board violations are hard errors, day one.
-5. **One coherent algorithm** — parse → bind → place → reserve corridors → pack tracks → render. No patches.
+5. **One coherent algorithm** — parse → bind → place → route channels → render. No patches.
 
 This document is the specification.
 
@@ -149,287 +149,99 @@ Because anchoring forms a DAG (each node is placed by exactly one primitive), th
 
 ---
 
-## 3. Corridor reservation
+## 3. Channels
 
-Step 5 in the implementation plan. Inputs: the bound `Model` and the `Placement` from §2. Output: a `Reservation` carrying (a) for each edge, a side assignment + slot index at source and target, and a corridor sequence; (b) for each corridor, its trace demand; (c) widened `rowUnits` / `colUnits` reflecting that demand.
+Steps 5+6 in the implementation plan, collapsed. Inputs: bound `Model` and the `Placement` from §2. Output: a `Routing` carrying, per edge, a polyline of cell-anchored segments — the cell-path the renderer will draw.
 
-Step 5 *does not* materialise crossings or pack tracks within corridors — that's Step 6 (§4). Step 5's job is to make every box side aware of its slot demand and every row/col aware of its corridor demand, then widen accordingly.
+The legacy model (corridors-in-gutters + track packing) is replaced. There are no gutter rows or cols in the layout. Cells are either occupied by a node footprint or empty, and **traces hop through empty cells**.
 
-### 3.1 Corridor model
+### 3.1 Cells
 
-The space between two adjacent cells along a flow axis is a **corridor**. Corridors come in three flavours:
+The grid is the same `(row, col)` grid the placer produced (§2). After placement, the grid partitions into:
 
-- **Horizontal corridor** `H(r)` between rows `r-1` and `r`. Runs east-west. There are `nRows + 1` horizontal corridors per layout (including a north margin above row 0 and a south margin below the last row).
-- **Vertical corridor** `V(c)` between cols `c-1` and `c`. Runs north-south. `nCols + 1` of them.
-- **Diagonal corridor** `D(r, c, dir)` rooted at the grid intersection on the NW corner of cell `(r, c)`, running in `dir ∈ {NE, SE, SW, NW}`. A diagonal corridor occupies the inside of a single cell when fully extended; the router treats each diagonal segment as a separate corridor for demand counting, since segments don't share comb pitch with their neighbours.
+- **Occupied cells**: cells inside some node's footprint.
+- **Empty cells**: everything else. These are where traces live.
 
-Each corridor has a long axis (the direction traces flow through it) and a perpendicular axis (along which traces stack). Traces in a horizontal corridor stack on the y-axis at the **global comb pitch** (`COMB_PITCH` = 8 px); traces in a vertical corridor stack on the x-axis at the same pitch.
+There are no "gutters" between rows or cols. Spacing between unrelated nodes shows up as empty cell rows/cols the placer left between them (e.g. `MEMBER_GAP = 1` cell between consecutive bus producers). Empty cells are first-class layout citizens — they exist to carry traces.
 
-A corridor's **capacity** is the number of traces it can carry without crossings. It equals the corridor's perpendicular extent in comb-pitch units. Step 5 *widens* corridors that exceed their initial capacity — see §3.5.
+### 3.2 Channels
 
-### 3.2 The corridor graph
+A **V-channel** is a maximal vertical run of empty cells in a single column. An **H-channel** is a maximal horizontal run of empty cells in a single row. A column may have multiple V-channel segments separated by node footprints; same for rows.
 
-Corridors are connected at grid intersections:
+A channel is 1 cell wide along its perpendicular axis at minimum. It **grows lazily** when multiple traces want to share it: a channel carrying `k` parallel traces along its long axis at the same long-axis range occupies `k` adjacent cells perpendicular. Growth never enters an occupied cell — if the adjacent perpendicular cell is filled, the trace reroutes through a different channel.
 
-- A horizontal corridor `H(r)` meets vertical corridors `V(c)` for every column index `c ∈ [0, nCols]`.
-- A horizontal corridor `H(r)` meets diagonal corridors `D(r-1, c, SE)`, `D(r-1, c, SW)`, `D(r, c, NE)`, `D(r, c, NW)` at each (r, c) intersection that has them.
-- A vertical corridor `V(c)` meets diagonal corridors at the analogous intersections.
+### 3.3 Bend cells
 
-The **corridor graph** is the undirected graph with corridors as nodes and these intersections as edges. The router walks this graph to compute a trace's corridor sequence.
+A V-channel and an H-channel meet at an empty cell that belongs to both. That cell is a **bend cell** — a trace flowing through one channel can turn into the other there.
 
-### 3.3 Side assignment
+**One trace per bend cell.** If two traces both want to bend at the same `(row, col)`, the second-comer reroutes to a different bend cell — even if that means a longer path. Two traces never share a bend.
 
-Every trace enters and exits a box through one of its four sides (N/E/S/W). Step 5 decides which side, per edge endpoint, using the **edge-forward rule**:
+### 3.4 Routing a single edge
 
-For an edge with forward direction `F` (one of N/E/S/W; see §2.5) and placement cells `(rA, cA)` and `(rB, cB)`:
+For each non-back edge with placed source `A` at cell `(rA, cA)` and target `B` at cell `(rB, cB)`:
 
-| Edge-forward `F` | Cell alignment of A → B | Source side (on A) | Target side (on B) |
-|---|---|---|---|
-| E | same row | E | W |
-| W | same row | W | E |
-| S | same col | S | N |
-| N | same col | N | S |
-| E | diagonal (any) | E | W |
-| W | diagonal (any) | W | E |
-| S | diagonal (any) | S | N |
-| N | diagonal (any) | N | S |
+1. **Side assignment** (unchanged from legacy edge-forward rule, see §6.4): the trace exits side `S_A` on `A` and enters side `S_B` on `B`.
+2. **Slot assignment** (unchanged from legacy slot allocator): the trace gets a slot index on each face.
+3. **Greedy/closest channel routing**:
+   - Exit `A`'s face at the slot's pixel position. The first empty cell immediately outside that slot is the trace's **entry cell**.
+   - Walk forward through the entry cell's channel. For a face exit on E/W, the channel is the V-channel of the column immediately east/west of `A`; for N/S, it's the H-channel of the row immediately north/south.
+   - When the channel reaches `B`'s row (for H-target) or col (for V-target), turn at the **nearest available bend cell** — the bend cell with the smallest forward distance from the entry. "Available" = no other trace has claimed it.
+   - Walk the perpendicular channel to `B`'s entry cell (immediately outside `S_B`'s slot). Enter `S_B`'s slot.
 
-In short: **the source exits in the edge-forward direction; the target enters from its rear-of-forward face.** The perpendicular component of a diagonal trace is consumed inside corridors by walking through one cross-axis corridor along the way — corner exits are never used (§1.3).
+Common shapes:
 
-Aligned cases (same row/col) require the source-target direction to match `F`. Diagonal cases require `F` to be the long-axis component of `(rB-rA, cB-cA)` — i.e., it must point toward the target. An edge whose endpoints contradict its declared/inferred forward is a `E_EDGE_FORWARD_MISMATCH` (typically surfaces only when a `branch` member is misplaced).
+- **Straight** (same row or same col): entry == exit, no bend.
+- **L-shape** (different row AND different col): one bend cell.
+- **Z-shape or detour**: two or more bend cells, taken when the greedy bend cell is already claimed.
 
-Back-edges (§6.5) take forward `F = opposite(forwardAt[source])`. The rule above then assigns rear-of-forward sides for both endpoints. Under an east-flowing parent the back-edge's forward is W, so the source's W face exits and the target's E face enters; the corridor sequence wraps around the bounding box (§3.4).
+### 3.5 Lazy channel growth
 
-### 3.4 Corridor sequences
+When the router places the first trace in a channel, the trace occupies the 1-cell-wide channel strip. When a second trace wants the same channel:
 
-For each edge, the corridor sequence is computed as a deterministic shortest path on the corridor graph from the **entry corridor** (the corridor immediately outside the source's chosen side) to the **exit corridor** (the corridor immediately outside the target's chosen side).
+- If the second trace's segment doesn't overlap the first's along the channel's long axis, both share the 1-cell strip at different long-axis positions. Done.
+- If they overlap, the channel **grows by 1 cell** on the perpendicular axis, and the second trace runs in the new sub-strip beside the first.
 
-Forward edges, orthogonal first pass:
+Growth requires that the adjacent column/row of empty cells exists and is itself unoccupied at the overlapping long-axis range. If not, the trace reroutes through the next-best channel.
 
-1. Compute entry corridor: e.g. if source side = E and source is at col cA, entry corridor = `V(cA + 1)`.
-2. Compute exit corridor: e.g. target side = W and target is at col cB, exit corridor = `V(cB)`. For same-row east-west routes, entry and exit are the *same* vertical corridor — the trace runs entirely within it.
-3. For non-same-row routes, the trace must also traverse a horizontal corridor `H(r*)` to change rows, where `r*` is chosen as the row immediately south of the source if `rB > rA`, north of the source if `rB < rA`. The corridor sequence becomes: `V(cA+1) → H(r*) → V(cB)`.
-4. Multi-cell row changes use a single horizontal corridor; the trace turns once entering it and once leaving.
+### 3.6 Determinism
 
-This produces an L- or U-shape in the orthogonal case, with at most two bends.
+Trace routing is fully deterministic given the placement:
 
-**Diagonal upgrade** (per §4.2, decided during Step 5 since corridors are introduced here): after the orthogonal sequence is computed, the router checks whether a diagonal corridor between (rA, cA) and (rB, cB) gives **strictly fewer bends** without inflating any corridor's demand past the crossing budget. If so, replace the H-segment of the sequence with the diagonal. Diagonal segments must still terminate at a vertical or horizontal corridor adjacent to the target's chosen side — diagonals are used in the *middle* of a route, not at endpoints (§1.3).
+1. Edges are routed in declaration order.
+2. Within each edge, bends are chosen greedily by minimal forward distance from the entry.
+3. Channel growth proceeds in declaration order of the traces; trace `k+1` always grows into the cell adjacent to trace `k`.
 
-In practice this means: a diagonal upgrade is taken only when the orthogonal route has two bends and the diagonal route has one. For Step 5 / Step 6, the conservative default is **diagonals off unless explicitly enabled**; the cost function is wired but the threshold defaults so high that no orthogonal route is replaced. This lets us land Step 5 with deterministic Manhattan routing and turn on diagonals as a separate eyeball checkpoint.
+The same `Model` always produces the same `Routing`.
 
-Back-edges traverse the rear-face corridors as described in §3.3, then wrap through the row immediately above (or below) the bounding box of the two cells. The sequence has at most three bends.
+### 3.7 Pixel layout
 
-### 3.5 Slot-index assignment
-
-Each box side has a finite capacity: with `CELL_PX = COMB_PITCH = 8 px`, a 1-cell-tall east face has exactly 1 slot. A box of cell-height H has `H` slots per east/west face; a box of cell-width W has `W` slots per north/south face. The default `5x5` box has 5 slots per face.
-
-Step 5 assigns each incident trace on a box side a **slot index** ∈ `[0, capacity)`. The assignment is deterministic and follows the **uniform-flux rule** from `feedback-uniform-flux-rule.md`:
-
-1. Group traces on a side by their **destination corridor**. Traces heading to the same H corridor (or to the same V corridor, for north/south sides) are adjacent in the slot order.
-2. Within a group, order by the **declaration order** of the edges (`feedback-declaration-order-respected.md`).
-3. Across groups on a side, order by the corridor's perpendicular coord ascending — northmost group first, on east/west faces; westmost first, on north/south faces.
-4. Pack from slot 0 upward.
-
-This rule produces clean comb teeth in the common case (a bus's producers all enter the shared node's west face in source-declaration order; a fan-out's consumers all exit in declared order). It also avoids zigzag fan-in/fan-out by keeping co-corridor traces contiguous.
-
-If a side's slot demand exceeds its capacity, raise **`E_SIDE_OVERSUBSCRIBED`** with the side, the box, the declared size in cells, and the count of edges on that side. The user fixes the source per §5.1.
-
-### 3.6 Demand counting and widening
-
-After every edge has its corridor sequence, count the **demand** per corridor:
-
-- For a horizontal corridor `H(r)`, demand = number of distinct traces with `H(r)` in their corridor sequence.
-- For a vertical corridor `V(c)`, demand = same per-trace count.
-- Diagonal corridors are scored per segment but always at demand 1 in Step 5 (since diagonal upgrades are off by default).
-
-The grid has rows and cols (the boxes) *and* **gutters** (the inter-row and inter-col channels the router uses). There are `nRows + 1` row gutters (north margin, gutters between rows, south margin) and `nCols + 1` column gutters. Each gutter has a width measured in cell-units:
+The grid is laid out at pixel `CELL_PX` per cell, with no gutter widening:
 
 ```
-rowGutterUnits[g] = ceil(demand(H(g)) / TRACES_PER_CELL_UNIT)
-colGutterUnits[g] = ceil(demand(V(g)) / TRACES_PER_CELL_UNIT)
+colX[c] = sum(colUnits[0..c-1]) * CELL_PX
+rowY[r] = sum(rowUnits[0..r-1]) * CELL_PX
 ```
 
-where `TRACES_PER_CELL_UNIT = max(1, floor(CELL_PX / COMB_PITCH) - 1) = 1` at the current `CELL_PX = COMB_PITCH = 8` defaults. (The historical formula reserved a margin slot per cell. With cells equal to slots there is no margin to reserve; the floor keeps it at 1.)
-
-A gutter of width 0 means "boxes are immediately adjacent on that edge". A gutter of width 1 means "one cell-unit of inter-row space" = 8 px at defaults, holding up to 1 trace. Wider gutters scale linearly: width 2 holds up to 2 traces, width 3 holds 3, etc.
-
-**Multi-cell aware floor.** The widen pass applies a 1-cell-unit floor to interior gutters between distinct nodes' footprints, but **skips gutters inside a single node's own footprint** (the cells between, say, col 1 and col 2 of a 5-cell-wide node). Without this, every interior cell of a multi-cell box would inflate the rendered layout by an extra slot pitch per cell.
-
-The renderer (Step 8) translates to pixels by adding gutter widths between the box rows/cols:
-
-```
-col c's left x = sum(colUnits[0..c-1]) * CELL_PX
-                 + sum(colGutterUnits[0..c]) * CELL_PX
-```
-
-Step 5 emits both `rowUnits`/`colUnits` (carried unchanged from `Placement`) and `rowGutterUnits`/`colGutterUnits` (newly computed). The renderer composes them. This split keeps the box geometry separate from the gutter geometry — handy when the user resizes a single box at render time without re-running the router.
-
-If demand still cannot fit after widening (because a corridor is structurally over-saturated — e.g., a bus with 100 producers all hitting one cell-tall shared node, so `E_SIDE_OVERSUBSCRIBED` already fired), Step 5 raises **`E_UNROUTABLE`** with the offending corridor and the source constructs implicated. In practice this is rare at Step 5 — gutters grow unboundedly, so it'll mostly fire once crossings and diagonals (Step 6+) constrain widening further.
-
----
-
-## 4. Routing within a corridor (track packing)
-
-Step 6 in the implementation plan. Inputs: `Model + Placement + Reservation`. Output: a `Packing` carrying, per (corridor, trace) pair, a **track index** within the corridor, plus a list of **crossings** the router has to materialise.
-
-Step 6 *consumes* the per-trace `sourceSlot` / `targetSlot` that Step 5 already assigned and *produces* the within-corridor track index that Step 7 (polyline emission) needs to draw segments.
-
-### 4.1 Track assignment
-
-A corridor's **tracks** are the distinct perpendicular positions traces can occupy as they traverse it. For a horizontal corridor (long axis = east-west), tracks are y-values. For a vertical corridor, x-values.
-
-Track indices are **ordinal** (1, 2, 3, …) — not pixel coords. Step 7/8 multiplies by `COMB_PITCH` at render time. This keeps Step 6 pixel-free and easy to test.
-
-Track assignment is greedy and deterministic:
-
-1. For each corridor, gather every route that includes it in its `corridorSequence`. Order by declaration index of the originating edge.
-2. For each trace t in declaration order, compute its **boundary perp coords** within the corridor:
-   - **entryPerp** = perp coord at the trace's entry into the corridor. If the trace is entering from an adjacent corridor C', entryPerp = trace's track in C' (recursively). If the corridor is the trace's *first* corridor, entryPerp = the source slot index (which already lives in the right perp-coord space, since slots and tracks share the comb-pitch grid).
-   - **exitPerp** = perp coord at the trace's exit from the corridor. If exiting to C'', exitPerp = trace's track in C''. If this is the trace's *last* corridor, exitPerp = the target slot index.
-3. Each trace is assigned a track equal to its entryPerp. If two traces share the same entryPerp, declaration order wins the lower track number. Crossings (§4.4) handle the cases where exitPerp orderings don't match entryPerp orderings.
-
-Because Step 5 already widened the gutter to fit the (conservative) union-count demand, the available track count comfortably exceeds the maximum cross-section in practice. Step 6 doesn't need to widen further.
-
-The chained-track recursion in step 2 is acyclic — `corridorSequence` is a list, not a graph, so each (trace, corridor) pair has at most one prev/next. Track resolution walks the trace's sequence in order, propagating entryPerp from one corridor's exitPerp to the next corridor's entryPerp.
-
-### 4.2 Crossings
-
-Two traces in the same corridor **cross** iff their boundary perp orderings are non-monotone: trace a enters at lower perp than b but exits at higher perp than b (or vice versa).
-
-Per corridor, count crossings as **inversions** in the sequence of exitPerps when traces are sorted by entryPerp ascending (tiebreak: declaration order). Each inversion = one X-junction.
-
-The X-junction is materialised at the corridor's **long-axis midpoint**. Geometrically: in an H corridor running from x_left to x_right at y in [y_lo, y_hi], the X sits at ((x_left + x_right) / 2, y in [y_lo, y_hi] determined by the average of the two traces' tracks). Step 6 emits only the corridor + the trace pair + the (mid-long-axis, mid-perp) coords as ordinals; Step 7/8 resolves to pixels.
-
-Total crossings = sum over corridors. If total > `model.crossingsBudget` (default 0), raise **`E_CROSSINGS_OVER_BUDGET`** naming the corridor with the most crossings and the source constructs implicated.
-
-### 4.3 Diagonal routes
-
-A trace whose source and target are in non-adjacent cells along both row and col axes *may* use a diagonal corridor. The router prefers diagonals when:
-
-- The path through diagonals has strictly fewer bends than the orthogonal alternative.
-- The diagonal corridor's demand is not over budget.
-
-When neither holds, the router defaults to orthogonal. Diagonals are a *freedom*, not a default.
-
-**Status at Step 6 and Step 7:** diagonals stay off. The corridor sequences are still Manhattan. The diagonal-upgrade cost function is wired into the corridor type but not exercised. Diagonals come on as a follow-up after Step 8's render integration so the user can eyeball orthogonal polylines first.
-
-### 4.4 Polyline emission
-
-Step 7 in the implementation plan. Inputs: `Model + Placement + Reservation + Packing`. Output: a `Polylines` collection — for each edge, a list of `(x, y)` pixel waypoints + the crossing markers it participates in.
-
-This is the first stage that produces **pixel coordinates**. All upstream passes work in cell-coord / ordinal-track / ordinal-slot space; Step 7 multiplies through `CELL_PX` and `COMB_PITCH` to land pixels. Box and grid geometry is computed once at the start as a `PixelLayout`, then the per-edge polylines use it.
-
-#### 4.4.1 Pixel layout
-
-The `PixelLayout` resolves cell-coord positions to pixel coords:
-
-```
-colX[c]  = sum(colUnits[0..c-1]) * CELL_PX + sum(colGutterUnits[0..c]) * CELL_PX
-rowY[r]  = sum(rowUnits[0..r-1]) * CELL_PX + sum(rowGutterUnits[0..r]) * CELL_PX
-```
-
-(The cumulative sums account for box widths/heights plus all gutters up to and including the one just west/north of col c / row r.)
-
-For a node at cell (r, c) of size W × H, its bounding box is:
-- left   = colX[c]
-- top    = rowY[r]
-- right  = colX[c] + W * CELL_PX
-- bottom = rowY[r] + H * CELL_PX
+For a node at `(r, c)` of size `W × H`:
+- left   = `colX[c]`
+- top    = `rowY[r]`
+- right  = `colX[c] + W * CELL_PX`
+- bottom = `rowY[r] + H * CELL_PX`
 
 Slot positions on each face:
-- **W face** at slot s of a box of height H: `(left, top + s * COMB_PITCH + COMB_PITCH/2)` for `s ∈ [0, 3*H)`.
+- **W face** at slot `s` of a box of height `H`: `(left, top + s * COMB_PITCH + COMB_PITCH/2)` for `s ∈ [0, H)`.
 - **E face** mirrors W.
-- **N face** at slot s of a box of width W: `(left + s * COMB_PITCH + COMB_PITCH/2, top)` for `s ∈ [0, 3*W)`.
+- **N face** at slot `s` of a box of width `W`: `(left + s * COMB_PITCH + COMB_PITCH/2, top)` for `s ∈ [0, W)`.
 - **S face** mirrors N.
 
-The +`COMB_PITCH/2` offset centers the slot in its comb-tooth cell.
+Trace polylines are emitted by walking the per-edge cell-path: each segment is a straight run through one channel (a V-channel emits a vertical segment, an H-channel emits a horizontal segment). Bends at bend cells become 45° chamfers at render time, radius `COMB_PITCH / 2`.
 
-Corridor centerlines:
-- **H corridor `H(r)`** runs east-west at y = (rowY[r-1] + rowUnits[r-1]*CELL_PX + rowY[r]) / 2 — the midpoint of the gutter between rows r-1 and r. For r=0 (north margin) or r=nRows (south margin) the corridor sits in the margin gutter.
-- **V corridor `V(c)`** runs north-south at x = (colX[c-1] + colUnits[c-1]*CELL_PX + colX[c]) / 2.
+### 3.8 Errors
 
-The **track perp offset** is `track * COMB_PITCH`, measured from the corridor centerline. Tracks are 1-indexed (Step 6), so track 1 sits one pitch off-center. For an H corridor at y = y_corridor, track t's actual y = y_corridor + (t - (demand + 1) / 2) * COMB_PITCH — centered around the corridor midline.
-
-Actually that's overthinking. Simpler: emit each track at y = y_corridor_start + t * COMB_PITCH, where y_corridor_start is the top of the gutter. The corridor doesn't have a "center" the user perceives; what they see is a clean comb arrangement.
-
-#### 4.4.2 Polyline construction
-
-For each route, build the polyline by emitting waypoints in order:
-
-1. **Start point**: source box's slot port pixel position (from `sourceSide`, `sourceSlot`, source cell).
-2. **For each corridor in `corridorSequence`**:
-   - On entering the corridor, **turn** to align with the corridor's long axis.
-   - At the corridor's perp axis, the trace sits at its assigned **track** (from `Packing.tracks`).
-   - On exiting, **turn** to continue toward the next corridor or the target slot.
-3. **End point**: target box's slot port pixel position.
-
-Each turn is a polyline corner. The intermediate waypoints depend on the corridor's geometry:
-- **Entry waypoint**: pixel position where the trace crosses the corridor's boundary into the corridor's interior, at the trace's track.
-- **Exit waypoint**: pixel position where the trace crosses the corridor's boundary out of the corridor, at the trace's track (which may differ from the entry track if the trace has a within-corridor jog).
-
-For a same-row LR edge through a single V corridor:
-- Source slot at (boxR, slot_y_in_box)
-- Entry to V(c): (colX[c], slot_y_in_box) — the slot's y carries straight east
-- Inside V(c) at track t: (corridor_centerline_x_plus_t_offset, slot_y_in_box) ... wait, but the trace is *horizontal* in this case. So there's no track usage in the perp axis; the trace just runs at constant y.
-
-Hmm. Re-thinking: the **track** matters when the trace runs *along* the corridor's long axis. For a horizontal trace through a V corridor (which has long axis = y), the trace is perpendicular to the corridor's long axis — it just crosses through at constant y. There's no track-position to apply.
-
-So actually the track only matters when the trace's segment in the corridor IS along the long axis. For traces that pass through perpendicular to the long axis (single-corridor same-row routes), the track is irrelevant and the polyline is a simple straight line.
-
-For traces that turn inside a corridor (e.g., V→H→V), the trace runs along H's long axis (east-west) at H's track y, then turns to run along V's long axis (north-south) at V's track x. The chamfered bend at the V/H intersection happens at (V_center_x + track_V_offset, H_center_y + track_H_offset).
-
-OK the geometry is intricate but manageable. Step 7 will compute it route-by-route.
-
-#### 4.4.3 Chamfering
-
-After the orthogonal waypoint list is built, a chamfering pass replaces each 90° bend with a 45° cut:
-
-For a bend at point P, with incoming direction d_in and outgoing direction d_out:
-- The chamfer radius is `r = COMB_PITCH / 2` (4 px at defaults), clamped to half the shorter adjacent segment length.
-- Replace the bend's single waypoint P with two waypoints: `P - r * d_in` and `P + r * d_out`.
-- The connecting segment is at 45°.
-
-The result is a polyline whose segments are at 0°, 45°, 90°, 135° (mod 180°), satisfying §1.2.
-
-For consecutive bends close together (a tight zigzag), the chamfer cuts may overlap. The implementation clamps the chamfer radius to half the adjacent segment length so each chamfer is at most half the segment, preventing overlap.
-
-#### 4.4.4 Crossing markers
-
-Each `Crossing` in `Packing.crossings` is materialised as a `CrossingMarker` with:
-- `corridor`: the corridor key.
-- `x`, `y`: pixel position at the corridor's long-axis midpoint, perp coord at the average of the two traces' tracks.
-- `edgeIndexA`, `edgeIndexB`: the two edges that cross.
-
-The renderer (Step 8) draws crossings on top of the polylines as a visual confirmation that the X is intentional. No special widget — the two polylines already pass through this point on intersecting tracks; the marker is a hint to the renderer that this intersection is meaningful (vs. an incidental segment overlap).
-
-#### 4.4.5 Output
-
-```ts
-interface Polyline {
-  edgeIndex: number;
-  points: Array<{ x: number; y: number }>;
-  /** Indices into the Polylines.crossings list this edge participates in. */
-  crossingIndices: number[];
-}
-
-interface CrossingMarker {
-  corridor: string;
-  x: number;
-  y: number;
-  edgeIndexA: number;
-  edgeIndexB: number;
-}
-
-interface Polylines {
-  polylines: Polyline[];
-  crossings: CrossingMarker[];
-  /** Total pixel width and height of the diagram. */
-  width: number;
-  height: number;
-}
-```
-
-Step 8 takes `Polylines` and emits SVG.
+| Code | Trigger | What the user does |
+|---|---|---|
+| `E_NO_CHANNEL` | The cell immediately outside a slot is occupied (slot exits into a wall — node placed flush against another node, no empty cell to enter). | Insert an empty row/col between the nodes (grow `MEMBER_GAP`, resize a neighbour, restructure). |
+| `E_UNROUTABLE` | A channel needs more parallel traces than the available adjacent empty cells can host, OR every viable bend cell along a channel is already claimed. | Restructure: split the source/target, grow node sizes so more slots fit on different rows, or rearrange the placement to free up a channel. |
 
 ---
 
@@ -441,7 +253,8 @@ The compiler refuses to render diagrams that violate circuit-board principles. T
 
 | Code | Trigger | What the user does |
 |---|---|---|
-| `E_UNROUTABLE` | The corridor reservation pass cannot fit all required traces at any feasible widening. | Restructure topology (split node, group consumers behind intermediate). |
+| `E_NO_CHANNEL` | The cell immediately outside a slot is occupied (no empty cell for the trace to enter). | Insert an empty row/col between the nodes (grow `MEMBER_GAP`, resize a neighbour, restructure). |
+| `E_UNROUTABLE` | A channel needs more parallel traces than the adjacent empty cells can host, or every viable bend cell along a channel is already claimed. | Restructure: split source/target, grow node sizes so slots distribute, or rearrange placement to free up a channel. |
 | `E_UNDECLARED_BACK_EDGE` | An edge whose source is forward of its target along the flow axis, but isn't marked with `>-` or under a `back:` declaration. | Mark the edge as a back-edge or reverse the declared flow. |
 | `E_SIDE_OVERSUBSCRIBED` | A node has more incident edges on one side than fit at the comb pitch within the side's length. | Use a larger T-shirt size, split the node, or rearrange so edges distribute to other sides. |
 | `E_AMBIGUOUS_PLACEMENT` | Two nodes are placed in the same grid cell after all passes. | Add an explicit position constraint or restructure the connections. |
@@ -587,9 +400,9 @@ Phase 5 removes the deprecation handling.
 The full pipeline:
 
 ```
-source → lexer → parser → bind → place → reserve corridors → pack tracks → emit polylines → render SVG
-        ↓        ↓        ↓       ↓         ↓                  ↓               ↓                 ↓
-       AST      Tags    Model   Placement Corridors          Routes          Polylines        SVG string
+source → lexer → parser → bind → place → route channels → render SVG
+        ↓        ↓        ↓       ↓         ↓                ↓
+       AST      Tags    Model   Placement Routing         SVG string
 ```
 
 No back-tracking. No iterative refinement. Each stage's output is the next stage's input.
@@ -599,9 +412,7 @@ No back-tracking. No iterative refinement. Each stage's output is the next stage
 - **AST** — the parsed source, with nodes, edges, declarations.
 - **Model** — bound AST: nodes (with cell size), edges (with provenance: explicit, back-edge, pipeline-implied, bus-implied, fan-out-implied), structured-flow constraints (pipelines / buses / fanOuts as placement directives), and annotations (nodesets / paths) attached for later rendering. Deprecation errors and reference-validation errors (`E_NODESET_UNKNOWN_NODE`, `E_PATH_MISSING_EDGE`) fire here.
 - **Placement** — `Map<NodeId, (row, col)>`, row/col unit sizes, lists of placement errors.
-- **Corridors** — for each pair of adjacent rows/cols/diagonals, the list of traces using it.
-- **Routes** — for each edge, its corridor sequence plus track within each corridor plus crossing points.
-- **Polylines** — for each edge, the pixel polyline ready for SVG emission.
+- **Routing** — per edge, a polyline of cell-anchored segments produced by the channel router (§3). The renderer translates segments into pixel polylines at SVG-emit time.
 
 ### 7.2 Determinism
 
@@ -661,10 +472,9 @@ Approximate work order. Each step is a session of focused work with eyeball chec
 2. **Grammar additions.** `pipeline`, `bus`, `fan-out`, `back`, `nodeset`, `path`, `crossings` directives in the lexer/parser/AST.
 3. **Bind to Phase 4 model.** Convert AST into the new Model with placement directives and annotations.
 4. **The placer.** Grid placement with anchor → flow → conflict-resolution passes. Emits Placement + errors.
-5. **Corridor reservation.** Compute corridor graph, count demand, widen rows/cols.
-6. **Track packing.** Within each corridor, assign tracks. Materialise crossings.
-7. **Polyline emission.** Walk routes, emit pixel polylines.
-8. **Render integration.** SVG renderer takes the new polyline format. Annotations (nodeset rectangles, path highlights) render last on top of the routed edges.
+5. **Channel routing.** For each edge, find an empty-cell entry, walk the V/H channels greedily, pick a bend cell, exit at the target slot. Lazy channel growth on collision; deterministic by declaration order.
+6. **Polyline emission.** Translate each edge's cell-path into a pixel polyline. Bends at bend cells become 45° chamfers radius `COMB_PITCH / 2`.
+7. **Render integration.** SVG renderer takes the polyline list. Annotations (nodeset rectangles, path highlights) render last on top of the routed edges.
 9. **Migrate existing examples.** Edit `examples/*.melk` to use new primitives. Regenerate goldens. (During Step 9 the `branch` anchor primitive was added to handle perpendicular side-shoots that `pipeline + fan-out` cannot express — see §6.4 and §11.5. The first eyeball checkpoint on a branched example surfaced an axis-bias bug in `corridorSequence`, which triggered a deeper refactor: primitives now use **local forward direction** rather than the global flow axis, restoring isometry under inheritance — see §2.5, §3.3 rewrite, and §11.6.)
 10. **Phase 4 example set.** Author new examples that exercise `bus`, `fan-out`, diagonals, tags, error paths.
 
