@@ -73,7 +73,7 @@ These identifiers cannot be node IDs because they introduce
 directives or primitives:
 
 ```
-back        bus        branch     caption    crossings
+bus         branch     caption    crossings
 fan-out     icons      import     intersect  layout
 legend      legend-position
 nodeset     path       pipeline   subtitle   theme       title
@@ -315,6 +315,81 @@ use slot order matching their declaration order in the source instead
 of the layout-derived spatial order. Lets you hand-tune fan-out
 ordering when the geometry-derived default isn't what you want.
 
+### 3.10 Placement model — how nodes get cells
+
+This is the mental model every author needs. It's why
+`E_AMBIGUOUS_PLACEMENT` exists, why `branch` has a `:side`, and why
+"just connect them" sometimes doesn't work.
+
+**The grid.** Layout is a uniform grid of cells indexed by `(row,
+col)`. Every node occupies at least one cell (more for nodes with
+`size: WxH`). In `layout: lr`, `col` advances along the flow; in
+`layout: tb`, `row` does.
+
+**Cells come from constraints, not from edges.** A bare edge
+`a -> b` is *unconstrained placement*. The placer's rule for it is
+"extend the source's row forward by one column" — `b` lands at
+`(row_of_a, col_of_a + 1)`. That's a side-effect of how the placer
+fills in the gaps, not an intentional design choice you made.
+
+**Composition primitives are anchored placement.** Each one says
+*where its members go*:
+
+| primitive | what it anchors |
+|-----------|-----------------|
+| `pipeline a -> b -> c` | all on the same row, consecutive columns |
+| `bus [a, b, c] -> sink` | producers stacked in one column; `sink` one column further, at the median row |
+| `fan-out src -> [a, b, c]` | targets stacked in one column, one past `src` |
+| `branch :side: spine -> m` | `m` placed perpendicular to spine (one cell up for default `:left`, one down for `:right` in LR layout) |
+| `intersect h1, h2` | the listed highways meet at one shared cell |
+
+**Two constraints can collide on the same cell.** This is the
+error you'll hit most. Common shapes:
+
+- Two `branch`es to the same side of the same spine node → both
+  members land at the same perpendicular cell.
+- A `bus` and a `fan-out` both terminating one column past the same
+  row → both sinks claim that cell.
+- A `branch` member and the next pipeline node both want to occupy
+  the column adjacent to the branched node.
+- A bare `a -> b` extends `a`'s row, but the next column already
+  belongs to a primitive's anchored target.
+
+The placer refuses to guess — it throws `E_AMBIGUOUS_PLACEMENT` and
+asks you to be more explicit.
+
+**How to fix a collision.** Six recipes cover ~95% of cases:
+
+1. **Two side-shoots off the same spine node** — change to one
+   `fan-out` rooted on the spine node.
+2. **Two side-shoots on opposite sides** — use one `:left` and one
+   `:right` branch.
+3. **A bare edge to a "side-channel" node** — wrap it in
+   `branch <name>:right: <spine-node> -> <side-channel>` so the
+   placer knows the destination is off-axis.
+4. **A shared backing service (DB / cache / queue) reached from
+   many producers** — pick *one* anchoring construct (typically a
+   `bus`) and let the rest reach it via plain edges. The plain
+   edges find the already-placed target and don't try to anchor it
+   again.
+5. **A node downstream of a primitive that the next pipeline step
+   also wants** — drop the bare edge, or split the spine into two
+   shorter pipelines and let the shared node sit between them.
+6. **Many things off one branch** — root a `pipeline` or `fan-out`
+   on the branched node; one chained construct beats N branches.
+
+**Why the placer is strict.** Determinism. The same source always
+produces the same diagram. Auto-resolving collisions would mean
+guessing which constraint to honour, and that guess would change
+when surrounding code changed. Better to surface the ambiguity once
+than to ship a layout that quietly drifts when the author edits an
+unrelated line.
+
+For copy-pasteable collision recipes, see EXAMPLES.md §3
+("Shared backing service", "Side-channel off a spine", etc.)
+and §5 (placement errors keyed by the source shape that triggers
+each one).
+
 ---
 
 ## 4. Edges
@@ -336,26 +411,22 @@ gateway:auth -> backend { tags: [critical] }
 
 ### 4.2 Back edges
 
-Two forms — both produce edges flagged `isBackEdge: true`, routed
-through a rear-facing corridor lane.
-
-Inline:
-
 ```melk
-publish >- ingest    # right-arrow flipped: B from A
+publish >- ingest    # back-edge: ingest <- publish
 ```
 
-Block form (groups multiple back edges):
+The `>-` operator is the flipped `->`. Both endpoints are *node
+references* (§4.4). Back-edges route through a rear-facing
+corridor lane so they don't tangle with forward flow.
+
+Attributes work the same way as forward edges:
 
 ```melk
-back: {
-  publish -> ingest
-  archive -> ingest
-}
-
-# Single-line variant for one edge:
-back: publish -> ingest
+publish >- ingest { label: "retry", tags: [deprecated] }
 ```
+
+For grouped return paths, put consecutive `>-` lines together with
+a comment header — there is no block form.
 
 ### 4.3 Edge attributes
 
@@ -474,11 +545,6 @@ control_bus { shape: highway, orient: horizontal }
 data_bus    { shape: highway, orient: vertical }
 intersect control_bus, data_bus
 ```
-
-### 5.6 `back:` block
-
-See §4.2. Counts as a primitive for naming purposes (source
-attribution `back-block`).
 
 ---
 

@@ -1,0 +1,49 @@
+layout: lr
+title: "OTC interest-rate swap lifecycle"
+subtitle: "Execution through novation — with regulatory reporting and CCP clearing branches"
+caption: "Source: examples/37-otc-swap-lifecycle.melk"
+legend: on
+
+# An OTC IRS (interest-rate swap) lifecycle modelled after the FpML
+# process view. Trade flows left to right along the data spine:
+#
+#   execution  -> two counterparties agree economics (rate, tenor,
+#                 notional, schedule).
+#   confirm    -> bilateral confirmation matched on a platform
+#                 (MarkitWire, MarkitServ, etc.).
+#   clearing   -> trade submitted to a CCP (LCH SwapClear, CME, EUREX)
+#                 for novation.
+#   settlement -> periodic coupon exchange + margin movement until
+#                 maturity.
+#
+# Two branches model the regulated side-effects:
+#
+#   - `report` (down branch) — trade is reported to a trade repository
+#     (DTCC GTR, REGIS-TR) per Dodd-Frank / EMIR / MiFIR. This fires
+#     regardless of whether the trade clears.
+#   - `bilateral` (up branch) — uncleared trades that fail the
+#     clearing threshold or asset-class mandate stay bilateral and
+#     post initial margin under UMR. Tagged `future` because UMR
+#     phase-in scope still expands; tagged `critical` because UMR
+#     non-compliance carries regulatory penalties.
+
+execution  { shape: rect,      label: "execution\n(voice / SEF)" }
+confirm    { shape: rect,      label: "confirmation\n(MarkitWire)" }
+clearing   { shape: diamond,   label: "clearing\neligibility?" }
+ccp        { shape: rect,      label: "CCP novation\n(LCH SwapClear)" }
+settlement { shape: cylinder,  label: "settlement\n+ margin" }
+maturity   { shape: roundrect, label: "maturity\n/ termination" }
+
+report     { shape: roundrect, label: "trade repository\n(DTCC GTR)" }
+bilateral  { shape: roundrect, label: "bilateral\n+ UMR margin", tags: [critical] }
+
+pipeline trade_flow: execution -> confirm -> clearing -> ccp -> settlement -> maturity
+
+# Regulatory reporting fires off the confirmation step — every trade,
+# cleared or not, gets reported within the T+1 window.
+branch reg-report:right: confirm -> report
+
+# Uncleared path — trade fails the clearing-eligibility check and
+# stays bilateral. Up-branch so cleared (down) and bilateral (up)
+# read as the two possible outcomes of the diamond.
+branch uncleared:left: clearing -> bilateral

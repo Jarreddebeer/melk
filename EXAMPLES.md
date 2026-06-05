@@ -1,6 +1,6 @@
 # melk examples cookbook
 
-34 worked examples in [examples/](examples/), indexed two ways:
+39 worked examples in [examples/](examples/), indexed two ways:
 
 - **§1 — By feature**: "I want to demonstrate X, which example shows it?"
 - **§2 — By number**: the canonical numbered list with one-line summaries.
@@ -31,13 +31,16 @@ produces.
 
 ### Back edges
 
+Use the inline `>-` form. Every example below uses it.
+
 - [01-simple.melk](examples/01-simple.melk) — inline `A >- B` back arrow.
 - [02-back-edge.melk](examples/02-back-edge.melk) — fan-out plus a
   retry back-edge.
 - [23-highway-with-backedge.melk](examples/23-highway-with-backedge.melk)
   — back-edge alongside a highway bundle.
-- For a multi-edge back block (`back: { ... }`), grep examples for
-  `back:`.
+- [36-fix-order-lifecycle.melk](examples/36-fix-order-lifecycle.melk)
+  — multiple back-edges (amend, cancel) sharing one source/target,
+  showing how declaration order pins their slot stagger.
 
 ### Composition primitives
 
@@ -141,9 +144,29 @@ produces.
 Imported module bodies live in
 [examples/modules/](examples/modules/).
 
+### Real-world architectures
+
+Examples drawn from well-known domains. Read these for the *shape*
+of how real diagrams compose, not just the language surface.
+
+- [36-fix-order-lifecycle.melk](examples/36-fix-order-lifecycle.melk)
+  — FIX 4.x order flow (`NewOrderSingle` → execution reports), with
+  a rejected branch off pre-trade risk and amend/cancel back-edges.
+- [37-otc-swap-lifecycle.melk](examples/37-otc-swap-lifecycle.melk)
+  — FpML-shaped OTC interest-rate swap (execution → confirm →
+  clearing → CCP → settlement) with regulatory-reporting and
+  UMR-bilateral branches.
+- [38-twelve-factor-web.melk](examples/38-twelve-factor-web.melk)
+  — Heroku-style Twelve-Factor topology: LB → web tier → queue →
+  workers → Postgres / Redis. Demonstrates the "shared backing
+  service" pattern.
+- [39-kubernetes-request-path.melk](examples/39-kubernetes-request-path.melk)
+  — `kubectl apply` becoming a running pod: API server → auth →
+  kubelet → runtime → pod, with etcd up and scheduler down.
+
 ---
 
-## §2 — All 34 examples
+## §2 — All 39 examples
 
 Numbered list. Each row: filename → one-line description → primary
 features demonstrated.
@@ -185,6 +208,10 @@ features demonstrated.
 | 33  | [33-modules-basic.melk](examples/33-modules-basic.melk)                                         | Three imported `.melk` modules wired together.                         | modules |
 | 34  | [34-modules-framed.melk](examples/34-modules-framed.melk)                                       | Module imports with dashed frame chrome enabled.                       | modules, theming |
 | 35  | [35-modules-platform.melk](examples/35-modules-platform.melk)                                   | Five-plane platform: per-module themes, qualified refs, tagged edges.  | modules, qualified refs, per-module theme, tags |
+| 36  | [36-fix-order-lifecycle.melk](examples/36-fix-order-lifecycle.melk)                             | FIX 4.x order lifecycle with reject branch and amend/cancel back-edges. | pipeline, branch, back-edges, tags, legend |
+| 37  | [37-otc-swap-lifecycle.melk](examples/37-otc-swap-lifecycle.melk)                               | FpML-shaped OTC IRS lifecycle with regulatory + UMR branches.          | pipeline, branch (both sides), tags, legend |
+| 38  | [38-twelve-factor-web.melk](examples/38-twelve-factor-web.melk)                                 | Twelve-Factor web app: LB → web → queue → workers → DB + cache.        | fan-out, bus, branch, shared-backing |
+| 39  | [39-kubernetes-request-path.melk](examples/39-kubernetes-request-path.melk)                     | `kubectl apply` flow: API server → kubelet → pod, with etcd + scheduler. | pipeline, branch (both sides), tags, legend |
 
 (Number 26 was removed mid-project; the numbering is sparse on purpose.)
 
@@ -237,6 +264,70 @@ fan-out work: scheduler -> [worker_a, worker_b, worker_c]
 bus     join: [worker_a, worker_b, worker_c] -> aggregator
 aggregator -> results
 ```
+
+### Shared backing service (DB, cache, queue) reached from many producers
+
+This is the pattern that catches almost everyone. The instinct is
+to write *two* busses — one per backing service — but only one of
+them can anchor the consumer's position.
+
+**Wrong** — two anchoring busses fight over the column past the
+producers:
+
+```melk
+bus cache-reads: [web1, web2, web3] -> cache    # cache lands at col N+1
+bus db-writes:   [web1, web2, web3] -> db       # db wants col N+1 too — collision!
+```
+
+Triggers `E_ANCHOR_CONFLICT` or `E_AMBIGUOUS_PLACEMENT`.
+
+**Right** — pick *one* anchoring construct, let plain edges reach
+the other shared targets:
+
+```melk
+# `queue` is the structural sink — the async backbone — so the bus
+# anchors it. cache and db hang off the worker tier as ordinary
+# edges from already-placed nodes.
+bus enqueue: [web1, web2, web3] -> queue
+
+fan-out workers:   queue -> [worker1, worker2]
+bus db-writes:     [worker1, worker2] -> db
+branch cache-warm:right: worker2 -> cache
+```
+
+The rule: **at most one anchoring primitive per shared target.**
+Other connections to the same target use plain edges, which find
+the already-placed node instead of trying to position it again.
+See [38-twelve-factor-web.melk](examples/38-twelve-factor-web.melk)
+for a complete worked example.
+
+### Side-channel off a spine — bare edges collide
+
+The single most common collision. A bare `spine_node -> side_node`
+extends the spine, so the side-node lands at the next spine
+column — and collides with whatever the pipeline is already
+placing there.
+
+**Wrong**:
+
+```melk
+pipeline main: ingest -> transform -> publish
+transform -> audit_log    # audit_log lands at (row_of_transform, col_of_publish)
+                          # → collides with publish: E_AMBIGUOUS_PLACEMENT
+```
+
+**Right** — wrap in a `branch` so the placer puts the side-node
+*perpendicular* to the spine:
+
+```melk
+pipeline main: ingest -> transform -> publish
+branch audit-out:right: transform -> audit_log    # one row below `transform` in LR
+```
+
+If you have two side-channels off the same spine node, put one
+`:right` and one `:left`. If you have three or more, root a
+`fan-out` on the spine node instead of declaring multiple
+branches.
 
 ### Lanes (parallel pipelines)
 
@@ -366,3 +457,115 @@ side automatically (or the qualified ref's exact internal node).
 - **Don't hand-write `shape: module`.** That's reserved for the
   parser-injected synthetic node behind `import "..."`. Use `import`
   instead.
+
+---
+
+## §5 — Placement errors and what they mean
+
+The placer is strict — it refuses to guess which constraint to
+honour when two compete. Every error below is the placer telling
+you "your source is structurally ambiguous; pick one shape." See
+also SYNTAX.md §3.10 for the underlying model.
+
+### `E_AMBIGUOUS_PLACEMENT`
+
+Two nodes resolved to the same `(row, col)`. The error message
+names both. Five common shapes trigger it:
+
+**Shape A — bare edge from a spine to a side-channel.**
+
+```melk
+pipeline main: a -> b -> c
+b -> side          # side lands at (row_of_b, col_of_c) — collides with c
+```
+
+Fix: wrap in a `branch`. `branch s:right: b -> side` places `side`
+perpendicular to the spine instead of extending it.
+
+**Shape B — two branches on the same side of one spine node.**
+
+```melk
+branch x:right: b -> side1
+branch y:right: b -> side2    # both want the same perpendicular cell
+```
+
+Fix: one `:right` plus one `:left`, or replace with a single
+`fan-out` rooted on `b`.
+
+**Shape C — fan-out collides with the next pipeline node.**
+
+```melk
+pipeline main: a -> b -> c
+fan-out f: b -> [x, y]    # x and y land in col_of_c — collides
+```
+
+Fix: shorten the pipeline (let `b` be the terminus), or move the
+fan-out's source.
+
+**Shape D — two anchoring primitives to the same shared sink.**
+
+```melk
+bus reads:  [w1, w2, w3] -> cache    # cache wants col N+1
+bus writes: [w1, w2, w3] -> db       # db wants col N+1 too
+```
+
+Fix: pick *one* anchoring construct; reach the other shared sink
+via plain edges. See §3 "Shared backing service".
+
+**Shape E — branch member colliding with a fan-out target.**
+
+```melk
+fan-out workers: queue -> [worker1, worker2]
+branch cache-warm:right: worker1 -> cache    # cache lands at row_of_worker2
+```
+
+Fix: branch off the *other* member (`worker2` here), or use a
+plain edge from whichever worker is structurally appropriate.
+
+### `E_ANCHOR_CONFLICT`
+
+One node is named as a sink by two anchoring busses (or by a bus
+and a fan-out). The placer can't put it in two columns at once.
+
+```melk
+bus a: [w1, w2] -> db
+bus b: [w3, w4] -> db    # db is already anchored by bus a
+```
+
+Fix: keep `db` in one bus. The other producers reach it via plain
+edges (`w3 -> db`).
+
+### `E_CROSSINGS_OVER_BUDGET`
+
+The router needs more orthogonal crossings than the default budget
+allows. Common in spines with multiple branches that cross
+back-edges.
+
+Fix: raise the budget at the top of the file:
+
+```melk
+crossings: 6
+```
+
+This isn't a topology problem; it's a routing budget. The default
+is conservative.
+
+### `E_HIGHWAY_AS_ENDPOINT`
+
+A highway node was used as an edge endpoint directly. Highways are
+*invisible bundlers* — sources and sinks are real nodes; the
+highway appears via `via:`.
+
+```melk
+hwy { shape: highway }
+src -> hwy           # WRONG — E_HIGHWAY_AS_ENDPOINT
+src -> sink { via: hwy }   # right
+```
+
+### Why these errors exist
+
+melk's layout is deterministic — the same source always produces
+the same diagram. Auto-resolving collisions would mean guessing
+which constraint to honour, and the guess would silently change
+when surrounding code changed. The placer makes the ambiguity loud
+once instead.

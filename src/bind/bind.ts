@@ -6,8 +6,7 @@
  *
  *   - node decl              → ModelNode
  *   - edge (`a -> b`)        → ModelEdge { source: "explicit" }
- *   - back-edge (`a >- b`)   → ModelEdge { source: "back-block", isBackEdge }
- *   - back-block (`back: …`) → ModelEdge[] with source: "back-block"
+ *   - back-edge (`a >- b`)   → ModelEdge { source: "back-edge", isBackEdge }
  *   - pipeline               → Pipeline + N-1 ModelEdges (source: "pipeline")
  *   - bus                    → Bus + N ModelEdges (source: "bus")
  *   - fan-out                → FanOut + N ModelEdges (source: "fan-out")
@@ -32,7 +31,6 @@
  */
 import type {
   AvoidRef,
-  BackBlockDecl,
   BackEdgeDecl,
   BranchDecl,
   BusDecl,
@@ -255,10 +253,7 @@ export function bind(program: Program, options: BindOptions = {}): Model {
         bindEdge(stmt, ctx, "explicit", false);
         break;
       case "back-edge":
-        bindEdge(stmt, ctx, "back-block", true);
-        break;
-      case "back-block":
-        bindBackBlock(stmt, ctx);
+        bindEdge(stmt, ctx, "back-edge", true);
         break;
       case "layout":
         ctx.layoutMode = stmt.mode;
@@ -649,24 +644,6 @@ function bindEdge(
       items: viaItems,
       declSpan: decl.span,
     });
-  }
-}
-
-function bindBackBlock(decl: BackBlockDecl, ctx: BindCtx): void {
-  for (const e of decl.edges) {
-    const fromRes = resolveNodeRefId(e.from, ctx);
-    const toRes = resolveNodeRefId(e.to, ctx);
-    const edge: ModelEdge = {
-      from: fromRes.id,
-      to: toRes.id,
-      source: "back-block",
-      isBackEdge: true,
-    };
-    if (fromRes.internal !== undefined) edge.fromInternal = fromRes.internal;
-    if (toRes.internal !== undefined) edge.toInternal = toRes.internal;
-    if (e.from.port !== undefined) edge.fromPort = e.from.port;
-    if (e.to.port !== undefined) edge.toPort = e.to.port;
-    ctx.edges.push(edge);
   }
 }
 

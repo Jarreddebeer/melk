@@ -56,7 +56,10 @@ npx tsx src/cli.ts render examples/01-simple.melk > out.svg
   source stay terse — a four-node flow is a single `pipeline` line.
 - **Global-grid placement** snaps every box, port, and label to a
   uniform pitch. Layout is deterministic — the same source always
-  produces the same diagram.
+  produces the same diagram. Composition primitives *anchor* nodes
+  to specific cells; the placer refuses to guess when two
+  constraints collide. See SYNTAX.md §3.10 and EXAMPLES.md §5 for
+  the mental model and the common error shapes.
 - **Orthogonal Manhattan routing** with bend, crossing, and overlap
   penalties produces clean engineered-looking traces, with dedicated
   channels for back-edges, fan-outs, and shared buses.
@@ -72,7 +75,7 @@ melk is built to be LLM-friendly:
   and self-contained. Every directive, attribute, shape, tag property,
   and error code is documented in one place.
 - **Worked examples by feature**: [EXAMPLES.md](EXAMPLES.md) groups
-  the 34 examples in [examples/](examples/) by what they demonstrate,
+  the 39 examples in [examples/](examples/) by what they demonstrate,
   with copy-pasteable recipes for common patterns.
 - **Structured errors with fix hints**: every error has an `E_*` code
   and a `Hint:` suffix on the high-traffic ones, so seeing
@@ -109,7 +112,7 @@ A typical LLM-driven authoring loop:
 
 ### Topology
 
-- Forward and back edges, with inline (`>-`) and block (`back:`) forms.
+- Forward edges (`->`) and back edges (`>-`).
 - Pipelines, branches, fan-outs, buses, highways, intersect crossings.
 - Module imports — compose multiple `.melk` files into one canvas;
   cross-module references and per-module themes.
@@ -147,7 +150,7 @@ A typical LLM-driven authoring loop:
 ## Project status
 
 v1.0-prep — Phase 5 (modules + alignment + themes) is functionally
-complete. 536 unit tests pass. 34 example renders cover the language
+complete. 536 unit tests pass. 39 example renders cover the language
 surface. The active architecture spec is split across phase docs in
 the project root.
 

@@ -595,7 +595,7 @@ No back-tracking. No iterative refinement. Each stage's output is the next stage
 ### 7.1 Stage outputs
 
 - **AST** — the parsed source, with nodes, edges, declarations.
-- **Model** — bound AST: nodes (with cell size), edges (with provenance: explicit, pipeline-implied, bus-implied, fan-out-implied, back-block), structured-flow constraints (pipelines / buses / fanOuts as placement directives), and annotations (nodesets / paths) attached for later rendering. Deprecation errors and reference-validation errors (`E_NODESET_UNKNOWN_NODE`, `E_PATH_MISSING_EDGE`) fire here.
+- **Model** — bound AST: nodes (with cell size), edges (with provenance: explicit, back-edge, pipeline-implied, bus-implied, fan-out-implied), structured-flow constraints (pipelines / buses / fanOuts as placement directives), and annotations (nodesets / paths) attached for later rendering. Deprecation errors and reference-validation errors (`E_NODESET_UNKNOWN_NODE`, `E_PATH_MISSING_EDGE`) fire here.
 - **Placement** — `Map<NodeId, (row, col)>`, row/col unit sizes, lists of placement errors.
 - **Corridors** — for each pair of adjacent rows/cols/diagonals, the list of traces using it.
 - **Routes** — for each edge, its corridor sequence plus track within each corridor plus crossing points.

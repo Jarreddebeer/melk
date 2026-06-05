@@ -1,0 +1,47 @@
+layout: lr
+title: "Twelve-Factor web app"
+subtitle: "Stateless web tier, async workers, attached backing services"
+caption: "Source: examples/38-twelve-factor-web.melk"
+
+# A canonical Heroku / Twelve-Factor topology. The web tier is
+# horizontally scaled and stateless (factor VI, processes); long
+# work is offloaded to async workers via a queue (factor VIII,
+# concurrency); state lives entirely in attached backing services
+# (factor IV).
+#
+# Read structure left-to-right:
+#
+#   client -> load balancer -> three web dynos (fan-out)
+#                           -> shared queue (bus aggregator)
+#                           -> two workers (fan-out)
+#                           -> Postgres + Redis (workers branch out
+#                              to backing services)
+#
+# Backing services are drawn as cylinders to read as durable state;
+# dyno-tier nodes are roundrects to read as stateless processes.
+
+lb       { shape: rect,      label: "load balancer" }
+queue    { shape: roundrect, label: "queue\n(broker)" }
+db       { shape: cylinder,  label: "PostgreSQL\n(primary)" }
+cache    { shape: cylinder,  label: "Redis\n(cache)" }
+
+web1     { shape: roundrect, label: "web.1" }
+web2     { shape: roundrect, label: "web.2" }
+web3     { shape: roundrect, label: "web.3" }
+
+worker1  { shape: roundrect, label: "worker.1" }
+worker2  { shape: roundrect, label: "worker.2" }
+
+# Frontline path: client -> LB -> three stateless web dynos -> queue.
+# Bus structure: web tier funnels onto the shared broker.
+client -> lb
+fan-out web-tier: lb -> [web1, web2, web3]
+bus enqueue:      [web1, web2, web3] -> queue
+
+# Async work hand-off: two workers consume; the worker tier writes
+# canonical state to Postgres and warms the read cache (cache-warm
+# branch off worker1 — worker2's writes go to the same cache via
+# read-through, not modelled here).
+fan-out workers:    queue -> [worker1, worker2]
+bus db-writes:      [worker1, worker2] -> db
+branch cache-warm:right: worker2 -> cache

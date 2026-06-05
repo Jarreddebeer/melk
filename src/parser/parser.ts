@@ -7,8 +7,7 @@
  *
  *   - node declaration:           `foo { shape: rect, size: 2x1 }`
  *   - forward edge:               `a -> b { label: "x" }`
- *   - back-edge (inline):         `a >- b`
- *   - back-edge block:            `back: a -> b`
+ *   - back-edge:                  `a >- b`
  *   - layout directive:           `layout: lr`
  *   - crossings directive:        `crossings: 0`
  *   - pipeline:                   `pipeline name: a -> b -> c`
@@ -22,7 +21,6 @@
  */
 import type {
   AvoidRef,
-  BackBlockDecl,
   BackEdgeDecl,
   BranchDecl,
   BranchSide,
@@ -143,10 +141,6 @@ class Parser {
       // Keyword: `branch <name>[:side]: spine -> member | [m1, m2, ...]`
       if (tok.value === "branch" && next.kind === "ident") {
         return this.branchDecl();
-      }
-      // Keyword: `back: ...`
-      if (tok.value === "back" && next.kind === "colon") {
-        return this.backBlockDecl();
       }
       // Keyword: `nodeset <name>: a, b, c`
       if (tok.value === "nodeset" && next.kind === "ident") {
@@ -557,53 +551,6 @@ class Parser {
       spine: spineTok.value,
       member: memberTok.value,
       span: { start: start.span.start, end: memberTok.span.end },
-    };
-  }
-
-  // --- back-edges -----------------------------------------------------
-
-  private backBlockDecl(): BackBlockDecl {
-    // Two forms inside `back:`:
-    //   single-line:  back: a -> b
-    //   block:        back: { a -> b; c -> d }
-    const start = this.expect("ident"); // 'back'
-    this.expect("colon");
-    const edges: { from: NodeRef; to: NodeRef; span: SourceSpan }[] = [];
-
-    if (this.peek().kind === "lbrace") {
-      this.advance();
-      this.skipNewlines();
-      while (this.peek().kind !== "rbrace" && !this.isAtEnd()) {
-        const from = this.nodeRef();
-        this.expect("arrow");
-        const to = this.nodeRef();
-        edges.push({
-          from,
-          to,
-          span: { start: from.span.start, end: to.span.end },
-        });
-        this.skipSeparators();
-      }
-      const end = this.expect("rbrace");
-      return {
-        kind: "back-block",
-        edges,
-        span: { start: start.span.start, end: end.span.end },
-      };
-    }
-
-    const from = this.nodeRef();
-    this.expect("arrow");
-    const to = this.nodeRef();
-    edges.push({
-      from,
-      to,
-      span: { start: from.span.start, end: to.span.end },
-    });
-    return {
-      kind: "back-block",
-      edges,
-      span: { start: start.span.start, end: to.span.end },
     };
   }
 

@@ -146,12 +146,13 @@ export interface EdgeDecl {
 }
 
 /**
- * An explicit back-edge declared inline with the `>-` operator.
+ * A back-edge declared with the `>-` operator.
  *
  *     sink >- source
  *
- * The semantics are identical to wrapping the edge in a `back:` block;
- * the inline form is offered for ergonomics on single edges.
+ * Semantically equivalent to a forward edge with `isBackEdge: true`;
+ * routed through the rear-facing corridor so back-edges don't tangle
+ * with forward flow.
  */
 export interface BackEdgeDecl {
   kind: "back-edge";
@@ -414,18 +415,6 @@ export interface BranchDecl {
 }
 
 /**
- * Explicit back-edge block. Inside, the contained edge declarations are
- * routed through the rear-facing corridor.
- *
- *     back: sink -> source
- */
-export interface BackBlockDecl {
-  kind: "back-block";
-  edges: { from: NodeRef; to: NodeRef; span: SourceSpan }[];
-  span: SourceSpan;
-}
-
-/**
  * A nodeset — pure annotation, comma-separated members. Renders as a
  * dashed bounding rectangle around the named members after routing.
  *
@@ -539,7 +528,6 @@ export type Statement =
   | BusDecl
   | FanOutDecl
   | BranchDecl
-  | BackBlockDecl
   | NodesetDecl
   | PathDecl
   | EdgesetDecl

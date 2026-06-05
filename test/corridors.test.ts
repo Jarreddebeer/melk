@@ -79,7 +79,7 @@ describe("corridors — side assignment", () => {
 
   it("back-edges take rear faces", () => {
     const { model, reservation } = reserve(
-      "pipeline p: a -> b -> c\nback: c -> a",
+      "pipeline p: a -> b -> c\nc >- a",
     );
     const cToA = routeFor(reservation.routes, model.edges, "c", "a");
     expect(cToA.sourceSide).toBe("W");

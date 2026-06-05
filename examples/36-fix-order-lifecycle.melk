@@ -1,0 +1,41 @@
+layout: lr
+crossings: 4
+title: "FIX order lifecycle"
+subtitle: "NewOrderSingle through Fill — with amend, cancel, and reject paths"
+caption: "Source: examples/36-fix-order-lifecycle.melk"
+legend: on
+
+# A buy-side OMS sends NewOrderSingle (35=D) to the broker's FIX gateway.
+# The exchange acknowledges with ExecutionReport(New) (35=8, 150=0),
+# returns one or more partial fills (150=1), and finally a complete
+# fill (150=2). The OMS keeps the order open for amend/cancel until
+# the terminal state.
+#
+# Three back-edges show the lifecycle "loops":
+#
+#   - amend (35=G) — OrderCancelReplaceRequest from OMS back to gateway
+#   - cancel (35=F) — OrderCancelRequest from OMS back to gateway
+#   - reject (35=8, 150=8) — ExecutionReport(Rejected) from gateway
+#     back to OMS
+#
+# `rejected` is tagged `critical` so it stands out as the terminal
+# error state; `fill` is the happy-path terminal and stays plain.
+
+oms          { shape: rect,      label: "OMS\n(NewOrderSingle)" }
+gateway      { shape: rect,      label: "FIX gateway" }
+risk         { shape: diamond,   label: "pre-trade\nrisk" }
+exchange     { shape: rect,      label: "exchange\nmatching" }
+ack          { shape: roundrect, label: "Exec(New)\n150=0" }
+partial      { shape: roundrect, label: "Exec(Partial)\n150=1" }
+fill         { shape: roundrect, label: "Exec(Fill)\n150=2" }
+rejected     { shape: roundrect, label: "Exec(Rejected)\n150=8", tags: [critical] }
+
+pipeline order_flow: oms -> gateway -> risk -> exchange -> ack -> partial -> fill
+
+# Reject path off the risk check (35=8 with OrdStatus=Rejected).
+branch reject-path:right: risk -> rejected
+
+# Amend and cancel loops back to the gateway. Two back-edges share the
+# OMS source — declaration order pins their relative slot positions.
+oms >- gateway { label: "amend (35=G)" }
+oms >- gateway { label: "cancel (35=F)" }

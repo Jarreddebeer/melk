@@ -22,7 +22,6 @@
  */
 import type {
   AvoidRef,
-  BackBlockDecl,
   BranchDecl,
   BusDecl,
   CaptionDirective,
@@ -76,7 +75,6 @@ const CATEGORY: Record<Statement["kind"], number> = {
   intersect: 4,
   edge: 5,
   "back-edge": 5,
-  "back-block": 5,
   nodeset: 6,
   path: 6,
   edgeset: 6,
@@ -145,8 +143,6 @@ function formatStatement(stmt: Statement): string {
       return formatEdge(stmt);
     case "back-edge":
       return formatBackEdge(stmt);
-    case "back-block":
-      return formatBackBlock(stmt);
     case "nodeset":
       return formatNodeset(stmt);
     case "path":
@@ -237,18 +233,6 @@ function formatBackEdge(s: BackEdgeDecl): string {
     out += ` { ${s.properties.map(formatProperty).join(", ")} }`;
   }
   return out;
-}
-
-function formatBackBlock(s: BackBlockDecl): string {
-  if (s.edges.length === 0) return "back: {}";
-  if (s.edges.length === 1) {
-    const e = s.edges[0]!;
-    return `back: ${formatNodeRef(e.from)} -> ${formatNodeRef(e.to)}`;
-  }
-  const lines = s.edges.map(
-    (e) => `  ${formatNodeRef(e.from)} -> ${formatNodeRef(e.to)}`,
-  );
-  return `back: {\n${lines.join("\n")}\n}`;
 }
 
 // --- primitives ---------------------------------------------------

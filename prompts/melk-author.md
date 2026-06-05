@@ -17,9 +17,13 @@ Source files have the `.melk` extension.
 
 Before writing any `.melk`, read these two files end-to-end:
 
-  - SYNTAX.md — the complete grammar and semantics.
-  - EXAMPLES.md — 34 worked examples indexed by feature, plus seven
-    copy-pasteable recipes for common patterns.
+  - SYNTAX.md — the complete grammar and semantics. Pay particular
+    attention to §3.10 (placement model) — it's the mental model
+    behind every `E_AMBIGUOUS_PLACEMENT` you'll hit.
+  - EXAMPLES.md — 39 worked examples indexed by feature, plus
+    copy-pasteable recipes for common patterns and §5 (a catalogue
+    of placement errors with the exact source shapes that trigger
+    them).
 
 Both files live in the project root.
 
@@ -53,8 +57,19 @@ Both files live in the project root.
 - **Bare edges off a spine collide.** Writing
   `pipeline main: a -> b -> c` and then `b -> side_thing` puts
   `side_thing` at the same cell as `c`. Use
-  `branch name:right: b -> side_thing` instead. The error
-  `E_AMBIGUOUS_PLACEMENT` always means this in practice.
+  `branch name:right: b -> side_thing` instead. `E_AMBIGUOUS_PLACEMENT`
+  almost always means this — see EXAMPLES.md §5 for the five shapes
+  it takes.
+- **Shared backing services use one anchor.** If several producers
+  feed the same database, cache, or queue, *one* `bus` (or `fan-out`)
+  anchors the position; the rest reach it via plain edges. Writing
+  two busses to the same sink raises `E_ANCHOR_CONFLICT`; writing
+  two busses to different sinks at the same column raises
+  `E_AMBIGUOUS_PLACEMENT`. See EXAMPLES.md §3 "Shared backing
+  service" and [38-twelve-factor-web.melk](../examples/38-twelve-factor-web.melk).
+- **Use `>-` for back-edges, not the `back:` block.** Both forms
+  produce the same edge; `>-` is the canonical form and every
+  example uses it. The block form is legacy.
 - **Highways are `via:`-only.** A node with `shape: highway` is an
   invisible bundling channel. Never write `producer -> trunk` — write
   `producer -> sink { via: trunk }`. Error: `E_HIGHWAY_AS_ENDPOINT`.

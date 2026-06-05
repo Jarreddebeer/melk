@@ -11,7 +11,7 @@
  *   - structured-flow declarations (pipelines / buses / fan-outs) are
  *     retained as placement constraints; the placer (Step 4) reads them
  *     directly rather than re-traversing the AST
- *   - back-block declarations are dissolved into edges with isBackEdge
+ *   - back-edges (`a >- b`) are dissolved into edges with isBackEdge
  *     set; the block as a unit does not survive into the model
  *   - annotations (nodesets, paths) attach decoration metadata for the
  *     renderer (Step 8); they have no effect on placement or routing
@@ -117,18 +117,18 @@ export interface ModelNode {
  * declaration, and lets diagnostics blame the right source construct.
  *
  *   - "explicit"    : user wrote `a -> b`
- *   - "back-block"  : user wrote `a >- b` (inline back-edge) or `back: ...`
+ *   - "back-edge"   : user wrote `a >- b`
  *   - "pipeline"    : implied by `pipeline NAME: a -> b -> ...`
  *   - "bus"         : implied by `bus NAME: [a, b, ...] -> shared`
  *   - "fan-out"     : implied by `fan-out NAME: shared -> [a, b, ...]`
  *
  * `sourceName` carries the name of the implying construct, when present.
- * It is undefined for "explicit" and "back-block" edges (the back-block
- * keyword is anonymous in Phase 4).
+ * It is undefined for "explicit" and "back-edge" edges (neither carries
+ * an anonymous-construct name).
  */
 export type EdgeSource =
   | "explicit"
-  | "back-block"
+  | "back-edge"
   | "pipeline"
   | "bus"
   | "fan-out"

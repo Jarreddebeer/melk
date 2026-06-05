@@ -1,9 +1,9 @@
 /**
  * Phase 4 parser + bind tests.
  *
- * Covers the new grammar: cell sizing (`WxH`), back-edges (`>-` and
- * `back:` block), structured flow (`pipeline`, `bus`, `fan-out`), tags,
- * the `crossings:` directive, and deprecation errors for the removed
+ * Covers the new grammar: cell sizing (`WxH`), back-edges (`>-`),
+ * structured flow (`pipeline`, `bus`, `fan-out`), tags, the
+ * `crossings:` directive, and deprecation errors for the removed
  * `lane` and `group` keywords.
  */
 import { describe, it, expect } from "vitest";
@@ -206,23 +206,13 @@ describe("parser — structured flow", () => {
     }
   });
 
-  it("parses an inline back: block", () => {
-    const tree = ast("back: a -> b");
+  it("parses `back` as a regular node id (no longer reserved)", () => {
+    const tree = ast("back -> next");
     const stmt = tree.statements[0]!;
-    expect(stmt.kind).toBe("back-block");
-    if (stmt.kind === "back-block") {
-      expect(stmt.edges).toHaveLength(1);
-      expect(stmt.edges[0]!.from.node).toBe("a");
-    }
-  });
-
-  it("parses a multi-line back: block", () => {
-    const tree = ast("back: { a -> b\nc -> d }");
-    const stmt = tree.statements[0]!;
-    if (stmt.kind === "back-block") {
-      expect(stmt.edges).toHaveLength(2);
-    } else {
-      throw new Error("expected back-block");
+    expect(stmt.kind).toBe("edge");
+    if (stmt.kind === "edge") {
+      expect(stmt.from.node).toBe("back");
+      expect(stmt.to.node).toBe("next");
     }
   });
 });
@@ -405,33 +395,23 @@ describe("bind — branch projection", () => {
   });
 });
 
-describe("bind — back-block projection", () => {
-  it("dissolves a single-line back-block into one back-edge", () => {
-    const model = run("back: sink -> source");
+describe("bind — back-edge projection", () => {
+  it("tags `>-` back-edges as source 'back-edge'", () => {
+    const model = run("sink >- source");
     expect(model.edges).toHaveLength(1);
     expect(model.edges[0]).toMatchObject({
       from: "sink",
       to: "source",
-      source: "back-block",
+      source: "back-edge",
       isBackEdge: true,
     });
   });
 
-  it("dissolves a multi-line back-block into N back-edges", () => {
-    const model = run("back: { a -> b\nc -> d }");
+  it("supports multiple `>-` edges in one source", () => {
+    const model = run("a >- b\nc >- d");
     expect(model.edges).toHaveLength(2);
-    expect(model.edges.every((e) => e.isBackEdge && e.source === "back-block"))
+    expect(model.edges.every((e) => e.isBackEdge && e.source === "back-edge"))
       .toBe(true);
-  });
-
-  it("tags inline back-edges as source 'back-block'", () => {
-    const model = run("sink >- source");
-    expect(model.edges[0]).toMatchObject({
-      from: "sink",
-      to: "source",
-      source: "back-block",
-      isBackEdge: true,
-    });
   });
 });
 

@@ -1,0 +1,44 @@
+layout: lr
+crossings: 4
+title: "Kubernetes request path"
+subtitle: "kubectl apply through running pod — control plane decides, kubelet executes"
+caption: "Source: examples/39-kubernetes-request-path.melk"
+legend: on
+
+# How `kubectl apply` becomes a running pod:
+#
+#   1. kubectl POSTs the desired state to kube-apiserver.
+#   2. The API server authenticates and authorises (RBAC).
+#   3. State is persisted to etcd — every read and write goes
+#      through it; it's the single source of truth.
+#   4. The scheduler watches for unscheduled pods and binds them
+#      to a node, writing the binding back through the API server.
+#   5. The kubelet on the target node reconciles its assignments
+#      and asks the container runtime to start the container.
+#
+# Spine reads as the request flow; etcd sits above as the state
+# store; scheduler sits below as the watch-loop client driving
+# placement. Both side-channels close back through the API server
+# in reality (watch loops); the diagram shows the dominant direction.
+#
+# `etcd` is tagged `critical` because losing it loses the cluster.
+
+kubectl     { shape: rect,      label: "kubectl\n(apply)" }
+apiserver   { shape: rect,      label: "kube-\napiserver" }
+auth        { shape: diamond,   label: "authn\n+ RBAC" }
+kubelet     { shape: rect,      label: "kubelet" }
+runtime     { shape: rect,      label: "container\nruntime" }
+pod         { shape: roundrect, label: "pod" }
+
+etcd        { shape: cylinder,  label: "etcd", tags: [critical] }
+scheduler   { shape: roundrect, label: "kube-\nscheduler" }
+
+# Control + data plane spine.
+pipeline request: kubectl -> apiserver -> auth -> kubelet -> runtime -> pod
+
+# State store sits above the apiserver (default :left in LR = up).
+branch state-store: apiserver -> etcd
+
+# Scheduler sits below auth (`:right` in LR = down). It receives
+# unscheduled pods after RBAC has cleared them.
+branch scheduling:right: auth -> scheduler

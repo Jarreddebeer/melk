@@ -120,7 +120,7 @@ describe("polyline — back-edges", () => {
     // With back-edges allocated to the outermost (top) slot of the
     // shared face, the back-trace exits above the forward-edge cluster
     // and doesn't cross any forward edges. No crossings needed.
-    const out = polylines("pipeline p: a -> b -> c\nback: c -> a");
+    const out = polylines("pipeline p: a -> b -> c\nc >- a");
     const cToA = polylineFor(out, "c", "a");
     // The polyline must visit a y-coord above row 0 (the page-top
     // gutter). row 0's top y = rowGutterUnits[0] * CELL_PX = 1 * 32 = 32.
