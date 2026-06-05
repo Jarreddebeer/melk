@@ -13,9 +13,9 @@ branch audit-out:right: ledger -> audit_log
 audit_log { shape: cylinder, tags: [critical] }
 ```
 
-Renders to a clean orthogonal SVG with a frame, label, and tinted
-`audit_log` cylinder. No random jitter; the same source always
-produces the same diagram.
+Renders to a clean orthogonal SVG with a frame, label, and a tinted
+`audit_log` cylinder. The layout is deterministic — the same source
+always produces the same diagram.
 
 ## Install
 
@@ -23,23 +23,18 @@ produces the same diagram.
 npm install -g @jarreddebeer/melk
 ```
 
-The package is published under a user scope because the unscoped
-`melk` name and the `@melk` org name are both soft-reserved on npm
-(`melk` was rejected as too close to `mem`/`meow`/`walk`/`del`; the
-`@melk` org name returned "not available" on creation). The project's
-identity remains `melk` — that's the binary name, the file
-extension, and the language name. Only the npm install path is
-scoped.
-
 The CLI binary is `melk`:
 
 ```sh
-melk render examples/01-simple.melk > out.svg
+melk render   examples/01-simple.melk > out.svg
 melk validate examples/01-simple.melk
 melk format   examples/01-simple.melk
 ```
 
-Library import (for tooling that wraps melk):
+CLI subcommands: `parse`, `bind`, `validate`, `format`, `render`. Run
+with no args for full usage.
+
+Library import:
 
 ```js
 import { tokenize, parse, bind, renderSVG } from "@jarreddebeer/melk";
@@ -53,29 +48,21 @@ npm install
 npx tsx src/cli.ts render examples/01-simple.melk > out.svg
 ```
 
-CLI subcommands: `parse`, `bind`, `validate`, `format`, `render`.
-Run with no args for full usage.
-
-## Why
-
-Existing diagram-as-code tools (Mermaid, Graphviz, ELK) produce knotted
-output on non-trivial diagrams — especially around back-edges, fan-outs,
-and shared buses, which routinely loop or wrap. melk's approach:
+## How it works
 
 - **Composition primitives** (`pipeline`, `branch`, `fan-out`, `bus`,
-  `highway`, `intersect`) name the *structure*, not just the edges.
-  Naming the structure constrains placement so the layout pass has a
-  shape to honour, not a soup of unrelated edges.
+  `highway`, `intersect`) name the *structure* of the diagram. Naming
+  the structure gives the layout pass a shape to honour, and lets the
+  source stay terse — a four-node flow is a single `pipeline` line.
 - **Global-grid placement** snaps every box, port, and label to a
-  uniform pitch. Trace routing then operates on a clean
-  orthogonal-visibility graph with bend / crossing / overlap penalties.
+  uniform pitch. Layout is deterministic — the same source always
+  produces the same diagram.
+- **Orthogonal Manhattan routing** with bend, crossing, and overlap
+  penalties produces clean engineered-looking traces, with dedicated
+  channels for back-edges, fan-outs, and shared buses.
 - **Themes are separate JSON.** A theme owns colour, typography,
   strokes, dash patterns, tag rules, and module-frame chrome. The same
   `.melk` re-skins by swapping themes without source edits.
-
-The result: source is small, output is honest about the diagram's
-shape, and an LLM can author either side without the renderer
-producing surprises.
 
 ## Authoring with an LLM
 
@@ -88,12 +75,12 @@ melk is built to be LLM-friendly:
   the 34 examples in [examples/](examples/) by what they demonstrate,
   with copy-pasteable recipes for common patterns.
 - **Structured errors with fix hints**: every error has an `E_*` code
-  and a `Hint:` suffix on the high-traffic ones. Seeing
-  `E_AMBIGUOUS_PLACEMENT` an LLM gets a concrete `branch :right:`
+  and a `Hint:` suffix on the high-traffic ones, so seeing
+  `E_AMBIGUOUS_PLACEMENT` gives the author a concrete `branch :right:`
   template to apply.
 - **Fast iterate loop**: `melk validate <file>` runs the full pipeline
-  and prints `OK` or a single error line — no SVG noise — so an LLM
-  can iterate without burning context on render output.
+  and prints `OK` or a single-line error — quick feedback without
+  rendering an SVG.
 - **Canonical form**: `melk format <file>` normalizes whitespace and
   category ordering so diffs focus on meaningful change.
 

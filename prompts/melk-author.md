@@ -36,7 +36,8 @@ Both files live in the project root.
      - shared-row crossing point → `intersect` (highways only)
 3. Write the primitives first. They both *create the edges* and
    *constrain placement*. The layout pass uses them as the diagram's
-   skeleton. Pages of one-edge-per-line declarations are a code smell.
+   skeleton. Prefer one primitive over many standalone edges where the
+   topology is a single shape.
 4. Refine: add node attributes (`shape`, `size`, `label`, `tags`,
    `icon`) only where you want non-default appearance.
 5. If theming matters, set `theme:` to one of the four built-ins
@@ -101,7 +102,7 @@ ordering. Format is idempotent and semantically a no-op.
   `pipeline main: a -> b -> c -> d -> e` reads better than five
   separate `a -> b` lines.
 - Don't add `label:` if the node id already reads as a good label
-  (`ingest` vs `ingest { label: "Ingest" }` — the latter is noise).
+  (`ingest` is preferable to `ingest { label: "Ingest" }`).
 - Add comments (`# ...`) sparingly; the topology is usually
   self-evident.
 

@@ -700,9 +700,9 @@ $ melk validate broken.melk
 [place] E_AMBIGUOUS_PLACEMENT: nodes 'publish' and 'audit' both placed at (row 0, col 2). Add a structured-flow constraint to disambiguate, or split the source. Hint: if 'audit' is a side-channel off a spine member, use `branch <name>:right: <spine> -> audit` (or `:left:`)...
 ```
 
-Use this for fast structural checking — e.g. an LLM author iterating
-on a `.melk` without producing 16 KB of SVG noise per attempt. If
-theme-resolution edge cases matter, run `render` instead.
+Use this for fast structural checking — quick feedback during
+authoring without rendering an SVG each time. If you also need to
+catch theme-resolution problems, run `render` instead.
 
 ### `format`
 
@@ -852,9 +852,10 @@ Warnings (don't fail the build):
 This section is advice, not enforcement, for an LLM emitting `.melk`.
 
 1. **Sketch topology with primitives first.** A `pipeline` line both
-   names the chain and decides the placement. Pages of one-edge-per-line
-   declarations are a code smell for diagram-DSLs — write the pipeline,
-   then refine with node attributes.
+   names the chain and constrains the placement. Prefer one
+   `pipeline a -> b -> c -> d` over four standalone edges — terser
+   source, and the placer has a structure to honour. Refine with
+   node attributes afterwards.
 
 2. **Let nodes auto-declare.** You don't need to declare every node
    before using it in a pipeline. Add `{ shape: ..., label: ... }`
