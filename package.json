@@ -1,6 +1,6 @@
 {
   "name": "@jarreddebeer/melk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publishConfig": {
     "access": "public"
   },
@@ -8,6 +8,14 @@
   "type": "module",
   "license": "MIT",
   "author": "Jarred de Beer <jarr2000@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jarreddebeer/melk.git"
+  },
+  "homepage": "https://github.com/Jarreddebeer/melk#readme",
+  "bugs": {
+    "url": "https://github.com/Jarreddebeer/melk/issues"
+  },
   "keywords": [
     "diagram",
     "architecture",
