@@ -9,7 +9,9 @@
 
 layout: lr
 
-primary { shape: cylinder, size: 9x5, label: "Primary store" }
+writes { size: 7x5 }
+reads { size: 7x5 }
+primary { shape: cylinder, size: 13x5, label: "Primary store" }
 replica { shape: cylinder, size: 9x5, label: "Replica" }
 
 pipeline main: writes -> primary -> replica

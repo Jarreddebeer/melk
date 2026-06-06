@@ -27,15 +27,15 @@ legend: on
 #     phase-in scope still expands; tagged `critical` because UMR
 #     non-compliance carries regulatory penalties.
 
-execution  { shape: rect,      label: "execution\n(voice / SEF)" }
-confirm    { shape: rect,      label: "confirmation\n(MarkitWire)" }
-clearing   { shape: diamond,   label: "clearing\neligibility?" }
-ccp        { shape: rect,      label: "CCP novation\n(LCH SwapClear)" }
-settlement { shape: cylinder,  label: "settlement\n+ margin" }
-maturity   { shape: rect, label: "maturity\n/ termination" }
+execution  { shape: rect,      label: "execution\n(voice / SEF)", size: 13x7 }
+confirm    { shape: rect,      label: "confirmation\n(MarkitWire)", size: 11x7 }
+clearing   { shape: diamond,   label: "clearing\neligibility?", size: 11x7 }
+ccp        { shape: rect,      label: "CCP novation\n(LCH SwapClear)", size: 15x7 }
+settlement { shape: cylinder,  label: "settlement\n+ margin", size: 9x7 }
+maturity   { shape: rect, label: "maturity\n/ termination", size: 11x7 }
 
-report     { shape: rect, label: "trade repository\n(DTCC GTR)" }
-bilateral  { shape: rect, label: "bilateral\n+ UMR margin", tags: [critical] }
+report     { shape: rect, label: "trade repository\n(DTCC GTR)", size: 13x7 }
+bilateral  { shape: rect, label: "bilateral\n+ UMR margin", tags: [critical], size: 11x7 }
 
 pipeline trade_flow: execution -> confirm -> clearing -> ccp -> settlement -> maturity
 

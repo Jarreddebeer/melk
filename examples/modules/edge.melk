@@ -6,8 +6,10 @@
 
 layout: lr
 
+ingress { size: 7x5 }
+egress { size: 7x5 }
 pipeline edge_chain: ingress -> cdn -> waf -> gateway -> egress
 
-cdn     { shape: rect, label: "CDN" }
-waf     { shape: rect, label: "WAF" }
-gateway { shape: rect, label: "API gateway" }
+cdn     { shape: rect, label: "CDN", size: 7x5 }
+waf     { shape: rect, label: "WAF", size: 7x5 }
+gateway { shape: rect, label: "API gateway", size: 11x5 }

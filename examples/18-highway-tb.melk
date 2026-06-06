@@ -8,6 +8,11 @@ crossings: 10
 # to the south, and the bundle's traces run top-to-bottom through
 # the dashed highway box.
 
+src_a { size: 7x5 }
+dst_x { size: 7x5 }
+dst_y { size: 7x5 }
+dst_z { size: 7x5 }
+src_c { size: 7x5 }
 hwy { shape: highway }
 
 # §11.12: src_b's outgoing traces are author-ordered. By declaring
@@ -15,7 +20,7 @@ hwy { shape: highway }
 # slot 0 (left under TB) of src_b's S face; `src_b -> dst_y` lands
 # at slot 1. Without slot-order: declaration the default sort
 # (by target column) would swap them.
-src_b { slot-order: declaration }
+src_b { slot-order: declaration, size: 7x5 }
 
 src_a -> dst_x { via: hwy }
 src_a -> dst_y { via: hwy }

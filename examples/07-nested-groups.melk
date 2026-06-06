@@ -4,12 +4,15 @@ layout: lr
 # becomes a `pipeline`; A and B become overlapping `nodeset`
 # rectangles (nesting is purely visual under Phase 4).
 
+request { size: 7x5 }
+result { size: 7x5 }
+response { size: 9x5 }
 client     { shape: circle }
 sink       { shape: rect }
-preprocess { shape: rect }
-verify     { shape: diamond }
-audit      { shape: cylinder, label: "audit log" }
-postprocess { shape: rect }
+preprocess { shape: rect, size: 11x5 }
+verify     { shape: diamond, size: 9x5 }
+audit      { shape: cylinder, label: "audit log", size: 9x5 }
+postprocess { shape: rect, size: 11x5 }
 
 pipeline main: client -> request -> preprocess -> input -> verify -> audit -> result -> postprocess -> response -> sink
 

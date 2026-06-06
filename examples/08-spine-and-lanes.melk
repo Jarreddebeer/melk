@@ -3,11 +3,12 @@ layout: lr
 # Horizontal spine with two side-branches plus a visual grouping per
 # "lane" (Phase 3's `lane` keyword is now a `nodeset`).
 
+ingest { size: 7x5 }
 transform { shape: rect,    size: 9x5, label: "ETL" }
-validate  { shape: diamond }
-publish   { shape: rect }
-enrich    { shape: rect }
-alert     { shape: rect, label: "alert!" }
+validate  { shape: diamond, size: 9x5 }
+publish   { shape: rect, size: 7x5 }
+enrich    { shape: rect, size: 7x5 }
+alert     { shape: rect, label: "alert!", size: 7x5 }
 
 pipeline main: ingest -> transform -> validate -> publish
 

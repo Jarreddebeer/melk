@@ -23,15 +23,15 @@ legend: on
 #
 # `etcd` is tagged `critical` because losing it loses the cluster.
 
-kubectl     { shape: rect,      label: "kubectl\n(apply)" }
-apiserver   { shape: rect,      label: "kube-\napiserver" }
-auth        { shape: diamond,   label: "authn\n+ RBAC" }
-kubelet     { shape: rect,      label: "kubelet" }
-runtime     { shape: rect,      label: "container\nruntime" }
+kubectl     { shape: rect,      label: "kubectl\n(apply)", size: 7x7 }
+apiserver   { shape: rect,      label: "kube-\napiserver", size: 9x7 }
+auth        { shape: diamond,   label: "authn\n+ RBAC", size: 9x7 }
+kubelet     { shape: rect,      label: "kubelet", size: 7x5 }
+runtime     { shape: rect,      label: "container\nruntime", size: 9x7 }
 pod         { shape: rect, label: "pod" }
 
-etcd        { shape: cylinder,  label: "etcd", tags: [critical] }
-scheduler   { shape: rect, label: "kube-\nscheduler" }
+etcd        { shape: cylinder,  label: "etcd", tags: [critical], size: 7x5 }
+scheduler   { shape: rect, label: "kube-\nscheduler", size: 9x7 }
 
 # Control + data plane spine.
 pipeline request: kubectl -> apiserver -> auth -> kubelet -> runtime -> pod

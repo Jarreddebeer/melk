@@ -10,10 +10,15 @@ crossings: 10
 # both try to fix the position of svc_a / svc_b. Plain edges
 # follow the highway's placement without competing for it.
 
+ext_1 { size: 7x5 }
+ext_2 { size: 7x5 }
+ext_3 { size: 7x5 }
+norm_a { size: 7x5 }
+norm_b { size: 7x5 }
 svc_b { shape: rect, size: 7x7 }
 svc_a { shape: rect, size: 7x7 }
 inlet { shape: highway }
-db    { shape: cylinder, label: "store" }
+db    { shape: cylinder, label: "store", size: 7x5 }
 
 ext_1 -> svc_a { via: inlet }
 ext_1 -> svc_b { via: inlet }

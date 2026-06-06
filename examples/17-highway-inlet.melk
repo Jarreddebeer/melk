@@ -7,6 +7,12 @@ crossings: 10
 #
 # No scaffolding declarations needed — `via: inlet` is enough.
 
+ext_1 { size: 7x5 }
+svc_a { size: 7x5 }
+svc_b { size: 7x5 }
+ext_2 { size: 7x5 }
+svc_c { size: 7x5 }
+ext_3 { size: 7x5 }
 inlet { shape: highway }
 
 ext_1 -> svc_a { via: inlet }

@@ -5,6 +5,18 @@ crossings: 30
 # stages. Stresses gutter widening + crossings on the V corridors
 # between stages.
 
+ingest_a { size: 9x5 }
+parse_a { size: 9x5 }
+enrich_a { size: 9x5 }
+sink_a { size: 7x5 }
+ingest_b { size: 9x5 }
+parse_b { size: 9x5 }
+enrich_b { size: 9x5 }
+sink_b { size: 7x5 }
+ingest_c { size: 9x5 }
+parse_c { size: 9x5 }
+enrich_c { size: 9x5 }
+sink_c { size: 7x5 }
 pipeline lane-a: ingest_a -> parse_a -> enrich_a -> sink_a
 pipeline lane-b: ingest_b -> parse_b -> enrich_b -> sink_b
 pipeline lane-c: ingest_c -> parse_c -> enrich_c -> sink_c

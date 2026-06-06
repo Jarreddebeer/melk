@@ -17,9 +17,8 @@ import {
   LegendError,
 } from "../src/render/legend.js";
 import { place } from "../src/layout/place.js";
-import { reserveCorridors } from "../src/layout/corridors.js";
-import { packTracks } from "../src/layout/tracks.js";
-import { buildPolylines } from "../src/layout/polyline.js";
+import { assignSlots } from "../src/layout/slots.js";
+import { routeChannels } from "../src/layout/channels.js";
 import { renderSVG } from "../src/render/svg.js";
 
 function model(src: string) {
@@ -212,10 +211,9 @@ describe("CLI --legend flag resolution", () => {
     if (legendOverride !== undefined) m.legend = legendOverride;
     else delete m.legend;
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, loadTheme("document-light"));
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, loadTheme("document-light"));
   }
 
   it("CLI off override hides legend even when source has legend: on", () => {
@@ -237,10 +235,9 @@ describe("end-to-end render with legend", () => {
   function render(src: string, themeName = "document-light"): string {
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, loadTheme(themeName));
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, loadTheme(themeName));
   }
 
   it("absence of legend: on emits no legend marker", () => {
@@ -316,10 +313,9 @@ describe("end-to-end render with legend", () => {
       parse(tokenize(["legend: on", "a { tags: [critical] }", "a -> b"].join("\n"))),
     );
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    expect(() => renderSVG(m, p, r, polys, theme)).toThrow(/E_LEGEND_TAG_HAS_NO_CAPTION/);
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    expect(() => renderSVG(m, p, routing, theme)).toThrow(/E_LEGEND_TAG_HAS_NO_CAPTION/);
   });
 
   it("swatch override box→line is reflected in rendered swatch element", () => {
@@ -343,10 +339,9 @@ describe("end-to-end render with legend", () => {
       parse(tokenize(["legend: on", "a { tags: [forced] }", "a -> b"].join("\n"))),
     );
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    const out = renderSVG(m, p, r, polys, custom);
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    const out = renderSVG(m, p, routing, custom);
     // The legend entry for 'forced' should use a <line> swatch despite
     // its tag rule classifying as 'box' by inference.
     const match = out.match(/<g data-legend-entry="forced">[\s\S]*?<\/g>/);

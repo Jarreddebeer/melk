@@ -12,6 +12,8 @@ title: "End-to-end request flow"
 import "./modules/payments.melk" as payments
 import "./modules/notifier.melk" as notifier
 
+frontend { size: 9x5 }
+customer { size: 9x5 }
 frontend -> payments.api
 payments.gateway -> notifier.receive
 notifier.deliver -> customer

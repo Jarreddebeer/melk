@@ -23,11 +23,11 @@ legend: on
 # `issuer` is tagged `critical` because it's the only node that can
 # actually approve the transaction — everyone else just routes.
 
-terminal { shape: rect,      label: "POS\nterminal" }
-acquirer { shape: rect,      label: "acquirer\nbank" }
-network  { shape: diamond,   label: "card\nnetwork" }
-issuer   { shape: rect,      label: "issuer\nbank", tags: [critical] }
-receipt  { shape: rect, label: "approved\n(receipt)" }
+terminal { shape: rect,      label: "POS\nterminal", size: 7x7 }
+acquirer { shape: rect,      label: "acquirer\nbank", size: 9x7 }
+network  { shape: diamond,   label: "card\nnetwork", size: 9x7 }
+issuer   { shape: rect,      label: "issuer\nbank", tags: [critical], size: 7x7 }
+receipt  { shape: rect, label: "approved\n(receipt)", size: 9x7 }
 
 # Forward auth-request spine.
 pipeline auth_request: terminal -> acquirer -> network -> issuer

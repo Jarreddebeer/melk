@@ -113,7 +113,7 @@ export function place(model: Model): Placement {
  * A future spacing setting in the theme/page will set this value (1-3
  * cells).
  */
-const MEMBER_GAP = 1;
+const MEMBER_GAP = 5;
 
 /** Forward / perp cell-extent of a node id given its local forward direction. */
 function extentFor(id: string, ctx: PlaceCtx): { forward: number; perp: number } {
@@ -190,8 +190,14 @@ function applyAnchor(
   let refCol: number;
 
   if (placed.length === 0) {
-    // Park the whole group at a fresh row, col 0.
-    refRow = ctx.nextFreeRow;
+    // Park the whole group at a fresh row, col 0. When prior anchors
+    // have already placed nodes, pad by MEMBER_GAP rows so the new
+    // construct doesn't land flush against the previous block's bottom
+    // edge (visual rhythm consistent with bus/fan-out spacing, and the
+    // nodeset rectangles drawn around each disconnected group don't
+    // visually overlap their neighbours).
+    const pad = ctx.cells.size > 0 ? MEMBER_GAP : 0;
+    refRow = ctx.nextFreeRow + pad;
     refCol = 0;
   } else {
     // Derive reference from the first already-placed member. Then check
@@ -259,23 +265,36 @@ function inheritForward(anchor: string, ctx: PlaceCtx): Direction {
 }
 
 function anchorPipeline(p: Pipeline, ctx: PlaceCtx): void {
-  // Pipeline members lie on consecutive cells along the local forward
-  // direction (DESIGN §2.2, §2.5). Multi-cell occupancy: each member's
-  // offset advances by the PREVIOUS member's forward extent, so a 5x9
-  // hub at members[0] and a 5x5 default at members[1] sit on adjacent
-  // cells, not overlapping. Forward is inherited from member[0] if
-  // already placed; otherwise the page default.
+  // Pipeline members lie along the local forward direction with one
+  // empty cell between consecutive members (DESIGN §2.2, §2.5). The
+  // empty cell is the channel-router's runway: traces from member i
+  // exit the forward face, walk one empty cell, and enter member i+1's
+  // rear face. Multi-cell occupancy: each member's offset advances by
+  // the PREVIOUS member's forward extent PLUS one PIPELINE_GAP cell.
   const fwd = inheritForward(p.members[0]!, ctx);
   const s = step(fwd);
   const offsets: Cell[] = [];
   let accum = 0;
   for (let i = 0; i < p.members.length; i++) {
     offsets.push({ row: s.row * accum, col: s.col * accum });
-    accum += extentFor(p.members[i]!, ctx).forward;
+    accum += extentFor(p.members[i]!, ctx).forward + PIPELINE_GAP;
   }
   const forwards = p.members.map(() => fwd);
   applyAnchor(p.members, offsets, forwards, ctx, `pipeline '${p.name}'`);
 }
+
+/**
+ * Cells of empty space between consecutive pipeline members along the
+ * flow axis. The channel router needs empty cells to walk the trace
+ * from one member's forward face into the next's rear face — and
+ * enough of them that the polyline reads as a real arrow, not a stub.
+ *
+ * Set to 5 so the visible gap between adjacent boxes equals one
+ * default-node-width and the diagram doesn't look squashed. Smaller
+ * values left back-to-back boxes nearly touching (Redis kissing
+ * worker.2 in ex 38).
+ */
+const PIPELINE_GAP = 5;
 
 function anchorBus(b: Bus, ctx: PlaceCtx): void {
   // Bus geometry, isometric (DESIGN §2.5): producers stack along the
@@ -299,51 +318,82 @@ function anchorBus(b: Bus, ctx: PlaceCtx): void {
     perpAccum += extentFor(b.producers[i]!, ctx).perp;
     if (i < n - 1) perpAccum += MEMBER_GAP;
   }
-  const anchorPerp = anchorPerpOf(b.producers, perpOffsets, b.shared, ctx);
+  // pStepSign is the signed magnitude of `-pStep` on whichever axis is
+  // non-zero. Under LR pStep=N, -pStep=S → +1 (rows). Under TB pStep=E,
+  // -pStep=W → -1 (cols). The anchor formula needs it to convert between
+  // perpOffset and signed cell coordinate.
+  const pStepSign = -pStep.row !== 0 ? -pStep.row : -pStep.col;
+  const anchorPerp = anchorPerpOf(b.producers, perpOffsets, b.shared, ctx, pStepSign);
 
   for (let i = 0; i < n; i++) {
     const po = perpOffsets[i]!;
     offsets.push({ row: -pStep.row * po, col: -pStep.col * po });
   }
-  // Shared: one max-producer-forward-extent step forward at the anchor.
+  // Shared: one max-producer-forward-extent step forward at the anchor,
+  // plus a gap for the channel-router runway. Scale the gap with `n` so
+  // each producer's trace gets its own lane in the V-channel.
   let maxProducerFwd = 1;
   for (const p of b.producers) {
     const ext = extentFor(p, ctx).forward;
     if (ext > maxProducerFwd) maxProducerFwd = ext;
   }
+  const busGap = Math.max(PIPELINE_GAP, n + 2);
+  const busForward = maxProducerFwd + busGap;
   offsets.push({
-    row: fStep.row * maxProducerFwd + -pStep.row * anchorPerp,
-    col: fStep.col * maxProducerFwd + -pStep.col * anchorPerp,
+    row: fStep.row * busForward + -pStep.row * anchorPerp,
+    col: fStep.col * busForward + -pStep.col * anchorPerp,
   });
   const forwards = members.map(() => fwd);
   applyAnchor(members, offsets, forwards, ctx, `bus '${b.name}'`);
 }
 
 /**
- * Anchor offset (in perp cell-units) for `shared` such that shared's
- * geometric centre lands on the member block's geometric centre.
+ * Anchor offset (signed cell-units along -pStep) for `shared` such that
+ * shared's geometric cell centre lands on the producer block's geometric
+ * cell centre. The returned value `anchorPerp` is consumed as
+ * `cell = -pStep * anchorPerp` by the caller, so it represents the
+ * leading edge of `shared` in the same -pStep frame that member offsets
+ * use.
  *
- *   blockCentre = midpoint of (first member's leading edge,
- *                              last member's trailing edge)
- *   anchorPerp  = blockCentre - sharedPerp / 2   (shared's top row)
+ * The geometry depends on which direction -pStep points (members extend
+ * cell-positive from their leading-cell, regardless of pStep's sign).
+ * Under LR (-pStep = +row), members at po=0 .. po=last all extend
+ * row-positive from their leading row, so the block in cells spans
+ * `0 .. last + lastMember.perp - 1`. Under TB (-pStep = -col), members
+ * at po=0 .. po=last extend col-positive from their leading col, but
+ * leading cols are negative — the block spans `-last .. 0 + firstMember.perp - 1`.
  *
- * Same expression for odd and even n — no parity branch. A non-integer
- * result is snapped down by `Math.floor` so the cell map only sees
- * whole cells; that introduces at most a half-cell asymmetry when
- * block-height and shared-height have different parity.
+ * We work in cell coordinates of one fixed axis (the axis -pStep moves
+ * along) and solve directly for `shared`'s leading cell, then convert
+ * back to a -pStep-frame perpOffset.
  */
 function anchorPerpOf(
   memberIds: string[],
   perpOffsets: number[],
   sharedId: string,
   ctx: PlaceCtx,
+  pStepSign: number, // -pStep's sign on the perp axis: +1 (LR) or -1 (TB)
 ): number {
-  const first = perpOffsets[0]!;
-  const lastIdx = memberIds.length - 1;
-  const last = perpOffsets[lastIdx]! + extentFor(memberIds[lastIdx]!, ctx).perp;
-  const blockCentre = (first + last) / 2;
+  // Each member's leading-cell on the perp axis = pStepSign * po.
+  // Members extend cell-positive from their leading cell regardless of
+  // pStep's direction, so trailing-cell = leading-cell + member.perp - 1.
+  let minCell = Infinity;
+  let maxCell = -Infinity;
+  for (let i = 0; i < memberIds.length; i++) {
+    const leading = pStepSign * perpOffsets[i]!;
+    const trailing = leading + extentFor(memberIds[i]!, ctx).perp - 1;
+    if (leading < minCell) minCell = leading;
+    if (trailing > maxCell) maxCell = trailing;
+  }
+  const blockCentre = (minCell + maxCell) / 2;
   const sharedPerp = extentFor(sharedId, ctx).perp;
-  return Math.floor(blockCentre - sharedPerp / 2);
+  // shared.leading-cell = blockCentre - (sharedPerp - 1) / 2.
+  const sharedLeadingCell = blockCentre - (sharedPerp - 1) / 2;
+  // Convert back to a -pStep perpOffset: cell = pStepSign * po, so
+  // po = sharedLeadingCell / pStepSign. Floor for whole-cell snapping
+  // (half-cell asymmetry is unavoidable when block-perp and shared-perp
+  // have different parity).
+  return Math.floor(sharedLeadingCell / pStepSign);
 }
 
 function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
@@ -366,12 +416,18 @@ function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
     perpAccum += extentFor(f.consumers[i]!, ctx).perp;
     if (i < n - 1) perpAccum += MEMBER_GAP;
   }
-  const anchorPerp = anchorPerpOf(f.consumers, perpOffsets, f.shared, ctx);
+  const pStepSign = -pStep.row !== 0 ? -pStep.row : -pStep.col;
+  const anchorPerp = anchorPerpOf(f.consumers, perpOffsets, f.shared, ctx, pStepSign);
 
   // Shared sits at -pStep * anchorPerp (perp-centered on consumers).
   offsets.push({ row: -pStep.row * anchorPerp, col: -pStep.col * anchorPerp });
-  // Each consumer: one shared-forward-extent step forward at its perp.
-  const sharedFwdExtent = extentFor(f.shared, ctx).forward;
+  // Each consumer: shared-forward-extent + gap step forward at its perp
+  // (the gap is the channel-router runway between shared and consumer
+  // columns). Scale the gap with `n` so each consumer has its own lane
+  // in the V-channel: PIPELINE_GAP works for small fans (≤4); larger
+  // fans need n+1 cols to fit n lanes plus 1 col of clearance.
+  const fanGap = Math.max(PIPELINE_GAP, n + 1);
+  const sharedFwdExtent = extentFor(f.shared, ctx).forward + fanGap;
   for (let i = 0; i < n; i++) {
     const po = perpOffsets[i]!;
     offsets.push({
@@ -390,16 +446,39 @@ function anchorBranch(b: Branch, ctx: PlaceCtx): void {
   // forward (§2.5, §6.4). Multi-cell: step by spine's extent in the
   // branch direction so a 5x9 spine and a 5x5 branch member don't
   // overlap.
+  //
+  // Center-align on the parentFwd axis (the axis perpendicular to the
+  // branch direction): different-sized spine and member otherwise share
+  // a leading edge, which under LR puts sidecar's W edge flush with
+  // hub's W edge — the trace exits sidecar's S face and enters hub's N
+  // face off-centre. Mirror of the bus/fan-out median-alignment fix.
   const parentFwd = inheritForward(b.spine, ctx);
   const side = b.side ?? "left";
   const branchFwd: Direction = side === "left" ? left(parentFwd) : right(parentFwd);
   const s = step(branchFwd);
-  // The branch direction is perpendicular to parentFwd, so we step by
-  // the spine's perp extent (its dim along the branch axis).
-  const spinePerp = extentFor(b.spine, ctx).perp;
+  // Step along the branch direction by the spine's perp extent plus
+  // PIPELINE_GAP — channel-router runway between spine and branch member.
+  const spinePerp = extentFor(b.spine, ctx).perp + PIPELINE_GAP;
+  // Centring shim along the parentFwd axis: parentFwd-extent of spine
+  // minus parentFwd-extent of member, divided by 2. Floored for whole-
+  // cell snapping. Compute member's extent under its eventual branchFwd
+  // (set by applyAnchor below) — ctx.forward doesn't have it yet.
+  const memberNode = ctx.nodeOf.get(b.member);
+  const memberW = memberNode?.size.width ?? 1;
+  const memberH = memberNode?.size.height ?? 1;
+  const memberExtOnParentFwd = extentOf(memberW, memberH, branchFwd).perp;
+  const spineFwdExt = extentFor(b.spine, ctx).forward;
+  const centreShim = Math.floor((spineFwdExt - memberExtOnParentFwd) / 2);
+  const pStepFwd = step(parentFwd);
   applyAnchor(
     [b.spine, b.member],
-    [{ row: 0, col: 0 }, { row: s.row * spinePerp, col: s.col * spinePerp }],
+    [
+      { row: 0, col: 0 },
+      {
+        row: s.row * spinePerp + pStepFwd.row * centreShim,
+        col: s.col * spinePerp + pStepFwd.col * centreShim,
+      },
+    ],
     [parentFwd, branchFwd],
     ctx,
     `branch '${b.name}'`,
@@ -466,6 +545,7 @@ function anchorHighwayVia(
     for (let i = 0; i < nSrc; i++) {
       srcPerpOffsets.push(acc);
       acc += extentFor(m.sources[i]!, ctx).perp;
+      if (i < nSrc - 1) acc += MEMBER_GAP;
     }
   }
   const srcMedianIdx = Math.floor((nSrc - 1) / 2);
@@ -479,11 +559,14 @@ function anchorHighwayVia(
     const ext = extentFor(s, ctx).forward;
     if (ext > maxSrcFwd) maxSrcFwd = ext;
   }
+  // Channel-router runway: one PIPELINE_GAP cell between source's
+  // trailing edge and highway's leading edge.
+  const srcBackStep = maxSrcFwd + PIPELINE_GAP;
   for (let i = 0; i < nSrc; i++) {
     const po = srcPerpOffsets[i]! - srcMedianPerp;
     offsets.push({
-      row: -fStep.row * maxSrcFwd + -pStep.row * po,
-      col: -fStep.col * maxSrcFwd + -pStep.col * po,
+      row: -fStep.row * srcBackStep + -pStep.row * po,
+      col: -fStep.col * srcBackStep + -pStep.col * po,
       z: hwyZ,
     });
     forwards.push(fwd);
@@ -497,13 +580,14 @@ function anchorHighwayVia(
     for (let i = 0; i < nTgt; i++) {
       tgtPerpOffsets.push(acc);
       acc += extentFor(m.targets[i]!, ctx).perp;
+      if (i < nTgt - 1) acc += MEMBER_GAP;
     }
   }
   const tgtMedianIdx = Math.floor((nTgt - 1) / 2);
   const tgtMedianPerp = tgtPerpOffsets[tgtMedianIdx] ?? 0;
   // Highway forward extent: how far targets must sit beyond the
   // highway's anchor cell to be east of the highway's east face.
-  const hwyFwdExtent = extentFor(m.name, ctx).forward;
+  const hwyFwdExtent = extentFor(m.name, ctx).forward + PIPELINE_GAP;
   for (let i = 0; i < nTgt; i++) {
     const po = tgtPerpOffsets[i]! - tgtMedianPerp;
     offsets.push({
@@ -554,19 +638,31 @@ function flowPass(model: Model, ctx: PlaceCtx): void {
       if (fromPlaced) {
         const a = ctx.cells.get(e.from)!;
         const fwd = ctx.forward.get(e.from) ?? ctx.defaultForward;
-        // Step past `from`'s forward extent (multi-cell): the next free
-        // cell east of from is at from.col + from's width (lr layout).
-        const fromExt = extentFor(e.from, ctx).forward;
-        ctx.cells.set(e.to, stepForward(a, fwd, fromExt));
+        // Step past `from`'s forward extent, plus one PIPELINE_GAP cell
+        // of channel-router runway. The empty cell between consecutive
+        // boxes is where the trace exits and turns.
+        const fromExt = extentFor(e.from, ctx).forward + PIPELINE_GAP;
+        // Centre `to` on `from`'s perp axis: when source and target have
+        // different perp extents, leading-edge alignment puts their slot
+        // centres at different perp coords and the trace exits off-axis
+        // (e.g. small `client` above wide `api`). Shim by half the perp
+        // difference. Same trick as anchorBus/anchorFanOut/anchorBranch.
+        const fromPerp = extentFor(e.from, ctx).perp;
+        const toPerp = extentFor(e.to, ctx).perp;
+        const perpShim = Math.floor((fromPerp - toPerp) / 2);
+        ctx.cells.set(e.to, perpShimAlong(stepForward(a, fwd, fromExt), fwd, perpShim));
         ctx.placedBy.set(e.to, `edge ${e.from} -> ${e.to}`);
         if (!ctx.forward.has(e.to)) ctx.forward.set(e.to, fwd);
       } else {
-        // Reverse-flow: place `from` `to-extent` cells *back* from `to`
-        // so its trailing edge touches `to`'s leading edge.
+        // Reverse-flow: place `from` `to-extent + gap` cells *back* from
+        // `to` so the channel-router has a runway between them.
         const b = ctx.cells.get(e.to)!;
         const fwd = ctx.forward.get(e.to) ?? ctx.defaultForward;
-        const fromExt = extentFor(e.from, ctx).forward;
-        ctx.cells.set(e.from, stepBack(b, fwd, fromExt));
+        const fromExt = extentFor(e.from, ctx).forward + PIPELINE_GAP;
+        const fromPerp = extentFor(e.from, ctx).perp;
+        const toPerp = extentFor(e.to, ctx).perp;
+        const perpShim = Math.floor((toPerp - fromPerp) / 2);
+        ctx.cells.set(e.from, perpShimAlong(stepBack(b, fwd, fromExt), fwd, perpShim));
         ctx.placedBy.set(e.from, `edge ${e.from} -> ${e.to}`);
         if (!ctx.forward.has(e.from)) ctx.forward.set(e.from, fwd);
       }
@@ -591,7 +687,12 @@ function nextOrigin(ctx: PlaceCtx): Cell {
     const bottom = c.row + h - 1;
     if (bottom > maxRow) maxRow = bottom;
   }
-  return { row: maxRow + 1, col: 0 };
+  // Pad past the existing block by MEMBER_GAP cells so a new flow
+  // doesn't land flush against the previous block's bottom edge —
+  // important when an anchor construct (e.g. fan-out) already occupies
+  // rows above, and a disconnected fragment needs its own row.
+  const padding = ctx.cells.size > 0 ? MEMBER_GAP : 0;
+  return { row: maxRow + 1 + padding, col: 0 };
 }
 
 function stepForward(c: Cell, fwd: Direction, extent: number = 1): Cell {
@@ -602,6 +703,18 @@ function stepForward(c: Cell, fwd: Direction, extent: number = 1): Cell {
 function stepBack(c: Cell, fwd: Direction, extent: number = 1): Cell {
   const s = step(fwd);
   return { row: c.row - s.row * extent, col: c.col - s.col * extent };
+}
+
+/**
+ * Offset a cell by `n` units along the perp axis of `fwd` (the local
+ * "left" direction). Used to centre a different-perp-extent successor on
+ * its predecessor: shim by (predPerp - succPerp) / 2 on that axis so
+ * their geometric centres line up.
+ */
+function perpShimAlong(c: Cell, fwd: Direction, n: number): Cell {
+  if (n === 0) return c;
+  const p = step(left(fwd));
+  return { row: c.row + p.row * n, col: c.col + p.col * n };
 }
 
 // --- orphan parking -------------------------------------------------------
@@ -617,11 +730,14 @@ function stepBack(c: Cell, fwd: Direction, extent: number = 1): Cell {
  * working.
  */
 function parkOrphans(model: Model, ctx: PlaceCtx): void {
+  // Gap (in cells) inserted between the last anchor-placed node and the
+  // first parked orphan, so orphans don't end up flush against e.g.
+  // a fan-out's bottom member. Same value MEMBER_GAP uses between
+  // construct members — keeps the visual rhythm consistent.
+  const ORPHAN_GAP = MEMBER_GAP;
+  let firstOrphan = true;
   for (const n of model.nodes) {
     if (ctx.cells.has(n.id)) continue;
-    // Re-derive nextFreeRow from the current placement to be sure we
-    // don't overlap anything the flow pass put down. Multi-cell: use
-    // each existing node's full footprint bottom row.
     let maxRow = -1;
     for (const [id, c] of ctx.cells) {
       const placed = ctx.nodeOf.get(id);
@@ -629,13 +745,17 @@ function parkOrphans(model: Model, ctx: PlaceCtx): void {
       const bottom = c.row + h - 1;
       if (bottom > maxRow) maxRow = bottom;
     }
-    if (maxRow + 1 > ctx.nextFreeRow) ctx.nextFreeRow = maxRow + 1;
+    // For the first orphan, add ORPHAN_GAP cells of padding past the
+    // last anchor-placed node. Subsequent orphans pack tight against
+    // each other (no extra gap between orphans).
+    const padding = firstOrphan ? ORPHAN_GAP : 0;
+    if (maxRow + 1 + padding > ctx.nextFreeRow) ctx.nextFreeRow = maxRow + 1 + padding;
     ctx.cells.set(n.id, { row: ctx.nextFreeRow, col: 0 });
     ctx.placedBy.set(n.id, "orphan parking");
     if (!ctx.forward.has(n.id)) ctx.forward.set(n.id, ctx.defaultForward);
-    // Advance past THIS node's own footprint.
     const myH = Math.max(1, Math.ceil(n.size.height));
     ctx.nextFreeRow += myH;
+    firstOrphan = false;
   }
 }
 
@@ -872,14 +992,26 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
       forwardAt: new Map(),
     };
   }
+  // Back-edge perimeter buffer: when the model has back-edges, reserve
+  // a 2-cell buffer around the diagram so the channel router's
+  // perimeter routing has room to wrap around the outermost nodes
+  // rather than threading through interior gaps. Without this, a
+  // tightly-packed diagram has no "outside" — every column is occupied
+  // by some node — and back-edges fall back to interior corridors. The
+  // shift below pulls every cell IN by `BACK_EDGE_PAD` on min{row,col}
+  // and grows the grid extent by another `BACK_EDGE_PAD` past max so
+  // the buffer appears on all four sides.
+  const BACK_EDGE_PAD = 2;
+  const hasBackEdge = model.edges.some((e) => e.isBackEdge);
+  const pad = hasBackEdge ? BACK_EDGE_PAD : 0;
   const shifted: Map<string, Cell> = new Map();
   for (const [id, c] of ctx.cells) {
-    const cell: Cell = { row: c.row - minRow, col: c.col - minCol };
+    const cell: Cell = { row: c.row - minRow + pad, col: c.col - minCol + pad };
     if (c.z !== undefined) cell.z = c.z;
     shifted.set(id, cell);
   }
-  const nRows = maxRow - minRow + 1;
-  const nCols = maxCol - minCol + 1;
+  const nRows = maxRow - minRow + 1 + 2 * pad;
+  const nCols = maxCol - minCol + 1 + 2 * pad;
   // Multi-cell occupancy: every row contributes a unit cell (= 1).
   // Nodes' larger sizes are expressed by their footprints spanning
   // multiple rows/cols, not by inflating the anchor row's unit count.

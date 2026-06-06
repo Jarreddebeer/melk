@@ -1,5 +1,5 @@
 layout: tb
-crossings: 5
+crossings: 7
 
 # Top-to-bottom flow with mixed shapes and two back-edges. `api` fans out
 # to three downstream nodes — wrapped in `fan-out` so the placer can park
@@ -8,10 +8,10 @@ crossings: 5
 
 client { shape: circle }
 api    { shape: rect, size: 13x5 }
-auth   { shape: diamond }
-cache  { shape: cylinder }
-db     { shape: cylinder, size: 5x9, label: "ODS" }
-worker { shape: rect }
+auth   { shape: diamond, size: 7x5 }
+cache  { shape: cylinder, size: 7x5 }
+db     { shape: cylinder, size: 7x5, label: "ODS" }
+worker { shape: rect, size: 7x5 }
 
 client -> api
 fan-out downstream: api -> [auth, cache, worker]

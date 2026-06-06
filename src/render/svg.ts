@@ -30,9 +30,8 @@ import type { ImportedModule, Model, ModelEdge, ModelNode } from "../bind/model.
 import type { ModulePlacedBody } from "../layout/module-place.js";
 import type { ShapeName } from "../parser/ast.js";
 import type { Placement } from "../layout/placement.js";
-import type { Reservation } from "../layout/corridors.js";
-import { CELL_PX } from "../layout/corridors.js";
-import type { Point, Polyline, Polylines } from "../layout/polyline.js";
+import { CELL_PX } from "../layout/slots.js";
+import type { ChannelRouting, Point, Polyline } from "../layout/channels.js";
 import type { TagRule, Theme } from "../theme/theme.js";
 import {
   isGradientString,
@@ -97,11 +96,15 @@ export interface RenderOpts {
 export function renderSVG(
   model: Model,
   placement: Placement,
-  reservation: Reservation,
-  polylines: Polylines,
+  routing: ChannelRouting,
   theme: Theme,
   opts: RenderOpts = {},
 ): string {
+  // `routing` carries both the per-edge polylines and the diagram
+  // pixel extent. Kept as a separate name from `polylines` because
+  // downstream code reads both `routing.polylines` and the canvas
+  // width/height.
+  const polylines = routing;
   // DESIGN-PHASE5-ICONS §5.1 — build the icon registry once per render.
   // Side effects (disk reads / HTTPS fetches / cache writes / stderr
   // warnings) all live in icons.ts; the rest of this function still
@@ -112,7 +115,7 @@ export function renderSVG(
     opts.allowNetwork ?? true,
   );
 
-  const layout = pixelLayout(placement, reservation);
+  const layout = pixelLayout(placement);
   const boxes = boxBounds(model, placement, layout);
 
   // Pre-compute nodeset rects so we can both (a) draw them and (b) extend
@@ -412,7 +415,7 @@ export function renderSVG(
  * `frameLabelSize + 2` of extra headroom above the topmost nodeset.
  */
 function canvasBounds(
-  polylines: Polylines,
+  polylines: ChannelRouting,
   nodesetRects: { name: string; rect: BoxBounds }[],
   circleLabelExtents: { x: number; y0: number; y1: number; halfWidth: number }[],
   frameLabelSize: number,
@@ -463,22 +466,20 @@ interface PixelLayout {
   rowHeightPx: number[];
 }
 
-function pixelLayout(placement: Placement, reservation: Reservation): PixelLayout {
+function pixelLayout(placement: Placement): PixelLayout {
   const colWidthPx = placement.colUnits.map((u) => u * CELL_PX);
   const rowHeightPx = placement.rowUnits.map((u) => u * CELL_PX);
   const colX: number[] = [];
-  let x = reservation.colGutterUnits[0]! * CELL_PX;
+  let x = 0;
   for (let c = 0; c < placement.colUnits.length; c++) {
     colX.push(x);
     x += colWidthPx[c]!;
-    x += reservation.colGutterUnits[c + 1]! * CELL_PX;
   }
   const rowY: number[] = [];
-  let y = reservation.rowGutterUnits[0]! * CELL_PX;
+  let y = 0;
   for (let r = 0; r < placement.rowUnits.length; r++) {
     rowY.push(y);
     y += rowHeightPx[r]!;
-    y += reservation.rowGutterUnits[r + 1]! * CELL_PX;
   }
   return { colX, rowY, colWidthPx, rowHeightPx };
 }
@@ -1818,8 +1819,8 @@ function renderModuleBody(
   // flow body offset (populated by applyModuleAlignment) shifts the
   // body inside its cell so flow-axis ports line up with connected
   // counterparts.
-  const pixelWidth = imported.pixelWidth ?? body.polylines.width;
-  const pixelHeight = imported.pixelHeight ?? body.polylines.height;
+  const pixelWidth = imported.pixelWidth ?? body.routing.width;
+  const pixelHeight = imported.pixelHeight ?? body.routing.height;
   const padX = Math.max(0, (parentBox.width - pixelWidth) / 2);
   const padY = Math.max(0, (parentBox.height - pixelHeight) / 2);
   const offX = imported.bodyOffsetX ?? 0;
@@ -1831,7 +1832,7 @@ function renderModuleBody(
   // top-level renderer does. We can't call renderSVG recursively
   // because it emits a full <svg> document; instead we replay the
   // node/edge emission loops inside our own <g>.
-  const subLayout = pixelLayout(body.placement, body.reservation);
+  const subLayout = pixelLayout(body.placement);
   const subBoxes = boxBounds(subModel, body.placement, subLayout);
 
   // The icon registry is built per-render in the main entry; modules
@@ -1905,8 +1906,8 @@ function renderModuleBody(
   }
 
   // Internal edges (polylines) first so they sit behind boxes.
-  for (let i = 0; i < body.polylines.polylines.length; i++) {
-    const poly = body.polylines.polylines[i]!;
+  for (let i = 0; i < body.routing.polylines.length; i++) {
+    const poly = body.routing.polylines[i]!;
     const edge = subModel.edges[poly.edgeIndex];
     if (!edge) continue;
     const overrides = resolveTags(
@@ -1953,8 +1954,8 @@ function renderModuleBody(
   }
 
   // Edge labels last, so they sit on top of the polylines they label.
-  for (let i = 0; i < body.polylines.polylines.length; i++) {
-    const poly = body.polylines.polylines[i]!;
+  for (let i = 0; i < body.routing.polylines.length; i++) {
+    const poly = body.routing.polylines[i]!;
     const edge = subModel.edges[poly.edgeIndex];
     if (!edge || !edge.label) continue;
     parts.push(renderEdgeLabel(edge, poly, subTheme));
@@ -2013,16 +2014,22 @@ function nodeShape(
       const ry = Math.min(10, b.height / 4);
       const top = b.y + ry;
       const bottom = b.y + b.height - ry;
-      const d = [
+      const outline = [
         `M ${fmt(b.x)} ${fmt(top)}`,
         `A ${fmt(rx)} ${fmt(ry)} 0 0 1 ${fmt(b.x + b.width)} ${fmt(top)}`,
         `L ${fmt(b.x + b.width)} ${fmt(bottom)}`,
         `A ${fmt(rx)} ${fmt(ry)} 0 0 1 ${fmt(b.x)} ${fmt(bottom)}`,
         `Z`,
+      ].join(" ");
+      const backArc = [
         `M ${fmt(b.x)} ${fmt(top)}`,
         `A ${fmt(rx)} ${fmt(ry)} 0 0 0 ${fmt(b.x + b.width)} ${fmt(top)}`,
       ].join(" ");
-      return `<path d="${d}" ${common} fill-rule="evenodd"/>`;
+      const backStroke = theme.tokens["border-subtle"];
+      return (
+        `<path d="${outline}" ${common}/>` +
+        `<path d="${backArc}" fill="none" stroke="${backStroke}" stroke-width="${sw}"${dashAttr}/>`
+      );
     }
     case "highway":
       // Highways render nothing; renderNode returns "" before calling

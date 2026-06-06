@@ -5,6 +5,11 @@ layout: lr
 # along the named chain of edges. Neither influences placement or
 # routing — they sit on top of whatever the placer produces.
 
+ingest { size: 7x5 }
+parse { size: 7x5 }
+validate { size: 7x5 }
+enrich { size: 7x5 }
+publish { size: 7x5 }
 pipeline main: ingest -> parse -> validate -> enrich -> publish
 
 # Two overlapping nodesets and one highlighted path through the spine.

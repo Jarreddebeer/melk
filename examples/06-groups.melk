@@ -5,10 +5,14 @@ crossings: 10
 # become regular nodes; the group itself becomes a `nodeset` for visual
 # grouping. The fan-in into verify is a `bus`, the fan-out is a `fan-out`.
 
+request { size: 7x5 }
+token { size: 7x5 }
+identity { size: 7x5 }
+error { size: 7x5 }
 client    { shape: circle }
-dashboard { shape: rect }
-verify    { shape: diamond }
-log       { shape: cylinder, label: "audit log" }
+dashboard { shape: rect, size: 9x5 }
+verify    { shape: diamond, size: 9x5 }
+log       { shape: cylinder, label: "audit log", size: 9x5 }
 
 bus     auth-in:  [request, token] -> verify
 fan-out auth-out: verify -> [identity, log]

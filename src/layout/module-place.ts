@@ -28,16 +28,14 @@ import type {
   ModulePort,
 } from "../bind/model.js";
 import type { Theme } from "../theme/theme.js";
-import { CELL_PX } from "./corridors.js";
-import type { Reservation } from "./corridors.js";
-import { reserveCorridors } from "./corridors.js";
+import { CELL_PX } from "./slots.js";
+import { assignSlots, type SlotAssignment } from "./slots.js";
+import { routeChannels, type ChannelRouting } from "./channels.js";
 import { place } from "./place.js";
 import type { Placement } from "./placement.js";
 import { computePixelLayout } from "./pixels.js";
 import { applyTextFit, applyTextFitToSizes } from "./text-fit.js";
-import { packTracks } from "./tracks.js";
-import { buildPolylines } from "./polyline.js";
-import type { Polylines } from "./polyline.js";
+import { applyModulePortEndpoints } from "./module-route.js";
 
 /**
  * The post-place sub-model state attached to each `ImportedModule` so
@@ -47,8 +45,8 @@ import type { Polylines } from "./polyline.js";
  */
 export interface ModulePlacedBody {
   placement: Placement;
-  reservation: Reservation;
-  polylines: Polylines;
+  slots: Map<number, SlotAssignment>;
+  routing: ChannelRouting;
   theme: Theme;
 }
 
@@ -114,15 +112,10 @@ export function placeModules(
     applyTextFitToSizes(imported.model, theme);
     const subPlacement = place(imported.model);
     const subFit = applyTextFit(subPlacement, imported.model, theme);
-    const subReservation = reserveCorridors(imported.model, subFit);
-    const subPacking = packTracks(imported.model, subFit, subReservation);
-    const subPolylines = buildPolylines(
-      imported.model,
-      subFit,
-      subReservation,
-      subPacking,
-    );
-    const layout = computePixelLayout(subFit, subReservation);
+    const subSlots = assignSlots(imported.model, subFit);
+    const subRouting = routeChannels(imported.model, subFit, subSlots);
+    applyModulePortEndpoints(subRouting, imported.model, subFit);
+    const layout = computePixelLayout(subFit);
 
     const pixelWidth = layout.totalWidth;
     const pixelHeight = layout.totalHeight;
@@ -131,8 +124,8 @@ export function placeModules(
     imported.pixelHeight = pixelHeight;
     imported.body = {
       placement: subFit,
-      reservation: subReservation,
-      polylines: subPolylines,
+      slots: subSlots,
+      routing: subRouting,
       theme,
     } satisfies ModulePlacedBody;
 
@@ -381,11 +374,11 @@ function buildFacePorts(
 export function applyModuleAlignment(
   model: Model,
   placement: Placement,
-  reservation: Reservation,
+  slots: Map<number, SlotAssignment>,
 ): void {
   if (model.imports.length === 0) return;
   const isLR = model.layoutMode === "lr";
-  const layout = computePixelLayout(placement, reservation);
+  const layout = computePixelLayout(placement);
   const flowFromSide: "E" | "S" = isLR ? "E" : "S";
   const flowToSide: "W" | "N" = isLR ? "W" : "N";
 
@@ -466,34 +459,28 @@ export function applyModuleAlignment(
   // Collect face-to-face flow-axis edges that touch a regular node OR
   // another module, and translate them into per-module offset
   // constraints.
-  for (const route of reservation.routes) {
-    const edge = model.edges[route.edgeIndex];
-    if (edge === undefined) continue;
+  for (let i = 0; i < model.edges.length; i++) {
+    const edge = model.edges[i]!;
+    const slot = slots.get(i);
+    if (slot === undefined) continue;
     const aIsMod = modules.has(edge.from);
     const bIsMod = modules.has(edge.to);
     if (!aIsMod && !bIsMod) continue;
-    // Skip qualified refs — they pin to specific internal nodes, not
-    // a face port. Aligning the body to satisfy them is out of scope
-    // here.
     if (edge.fromInternal !== undefined || edge.toInternal !== undefined) {
       continue;
     }
-    // Only consider edges where the route uses the parent flow-axis
-    // faces on both ends. Cross-flow edges (e.g. the branch from
-    // `ingest -> observability`) drive a perpendicular layout that
-    // alignment along the cross-flow axis can't help.
-    if (route.sourceSide !== flowFromSide && route.sourceSide !== flowToSide) {
+    if (slot.sourceSide !== flowFromSide && slot.sourceSide !== flowToSide) {
       continue;
     }
-    if (route.targetSide !== flowFromSide && route.targetSide !== flowToSide) {
+    if (slot.targetSide !== flowFromSide && slot.targetSide !== flowToSide) {
       continue;
     }
 
     const aPort = aIsMod
-      ? facePortLocal(edge.from, route.sourceSide)
+      ? facePortLocal(edge.from, slot.sourceSide)
       : undefined;
     const bPort = bIsMod
-      ? facePortLocal(edge.to, route.targetSide)
+      ? facePortLocal(edge.to, slot.targetSide)
       : undefined;
 
     // What world coord does each end *currently* want, before we shift
@@ -586,28 +573,29 @@ export function applyModuleAlignment(
     for (const imported of model.imports) {
       const moduleSide: number[] = [];
       const regularSide: number[] = [];
-      for (const route of reservation.routes) {
-        const edge = model.edges[route.edgeIndex];
-        if (edge === undefined) continue;
+      for (let i = 0; i < model.edges.length; i++) {
+        const edge = model.edges[i]!;
+        const slot = slots.get(i);
+        if (slot === undefined) continue;
         if (edge.fromInternal !== undefined || edge.toInternal !== undefined) {
           continue;
         }
-        if (route.sourceSide !== flowFromSide && route.sourceSide !== flowToSide) continue;
-        if (route.targetSide !== flowFromSide && route.targetSide !== flowToSide) continue;
+        if (slot.sourceSide !== flowFromSide && slot.sourceSide !== flowToSide) continue;
+        if (slot.targetSide !== flowFromSide && slot.targetSide !== flowToSide) continue;
         let myId: string;
         let mySide: "N" | "S" | "E" | "W";
         let otherId: string;
         let otherSide: "N" | "S" | "E" | "W";
         if (edge.from === imported.alias) {
           myId = edge.from;
-          mySide = route.sourceSide;
+          mySide = slot.sourceSide;
           otherId = edge.to;
-          otherSide = route.targetSide;
+          otherSide = slot.targetSide;
         } else if (edge.to === imported.alias) {
           myId = edge.to;
-          mySide = route.targetSide;
+          mySide = slot.targetSide;
           otherId = edge.from;
-          otherSide = route.sourceSide;
+          otherSide = slot.sourceSide;
         } else {
           continue;
         }

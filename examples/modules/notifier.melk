@@ -3,4 +3,7 @@
 
 layout: lr
 
+receive { size: 7x5 }
+dispatch { size: 9x5 }
+deliver { size: 7x5 }
 pipeline route: receive -> dispatch -> deliver

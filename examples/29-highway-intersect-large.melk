@@ -15,6 +15,12 @@ theme:  schematic-dark
 # schematics). The all-to-all crossings make this the canonical
 # circuit-board demonstration of the metaphor melk is built around.
 
+src_v1 { size: 7x5 }
+dst_v1 { size: 7x5 }
+dst_v2 { size: 7x5 }
+dst_v3 { size: 7x5 }
+src_v2 { size: 7x5 }
+src_v3 { size: 7x5 }
 src_h3 { shape: rect, size: 9x7 }
 src_h2 { shape: rect, size: 9x7 }
 dst_h3 { shape: rect, size: 9x7 }

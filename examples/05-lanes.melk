@@ -1,27 +1,36 @@
 layout: lr
-crossings: 10
+crossings: 6
 
-# Three horizontal lanes. Phase 3's `lane` keyword is gone; lanes are
-# annotations now. Each lane becomes a top-level `pipeline` (which
-# parks on its own row), and the cross-lane edges are written
-# explicitly. The `nodeset`s add the visual grouping. Crossings are
-# inevitable with three stacked pipelines and cross-edges, hence the
-# explicit budget.
+# Three horizontal lanes, each a separate pipeline. Lanes are pure
+# annotation: a `pipeline` parks its members on one row, and each
+# `nodeset` draws a dashed rectangle around its members at render time.
+# The placer leaves a MEMBER_GAP between disconnected pipelines so
+# lane rectangles don't visually overlap (Phase 4).
+#
+# Cross-lane edges are written as bare forwards. They route through
+# the empty cells between lanes — the channel router walks the grid
+# and bends in the gap, so the dashed nodeset rectangles read as
+# coherent lanes while signals still cross between them.
 
-api { shape: rect, size: 5x7 }
+ingest     { size: 7x5 }
 transform  { shape: rect,     size: 9x5, label: "ETL" }
-auth       { shape: diamond }
-controller { shape: rect }
 ods        { shape: cylinder, size: 9x5, label: "ODS" }
+
+auth       { shape: diamond, size: 7x5 }
+controller { shape: rect,    size: 9x5 }
+
+api        { shape: rect,   size: 9x5 }
 client     { shape: circle }
 
 pipeline data:    ingest -> transform -> ods
 pipeline control: auth -> controller
 pipeline egress:  api -> client
 
+# Cross-lane signals. `transform -> auth` invokes the control plane
+# from data; `controller -> api` feeds an authorisation result onto
+# the egress lane.
 transform  -> auth
 controller -> api
-ods        -> api
 
 nodeset data-plane: ingest, transform, ods
 nodeset control:    auth, controller

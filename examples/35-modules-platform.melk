@@ -35,6 +35,8 @@ import "./modules/observability.melk" as observability { theme: "./themes/module
 # Data plane spine: client request flows left-to-right across all
 # four planes. A pipeline anchors the row so the placer keeps every
 # module in the same horizontal lane.
+client { size: 7x5 }
+consumer { size: 9x5 }
 pipeline data_plane: client -> edge -> ingest -> compute -> storage -> consumer
 
 # Observability plane sits BELOW the data spine. The branch anchors

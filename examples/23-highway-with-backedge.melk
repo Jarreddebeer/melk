@@ -9,6 +9,11 @@ crossings: 20
 # Tests how a single highway composes with non-via traffic in the
 # same diagram: a back-edge, a bypass, and the bundle all coexist.
 
+ext_1 { size: 7x5 }
+sink_a { size: 7x5 }
+sink_c { size: 7x5 }
+ext_3 { size: 7x5 }
+monitor { size: 7x5 }
 ext_2 { shape: rect, size: 7x7 }
 sink_b { shape: rect, size: 9x7 }
 hwy { shape: highway }

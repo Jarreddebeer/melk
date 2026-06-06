@@ -11,6 +11,12 @@ crossings: 10
 # sits under the dashed box rather than alongside ext_2/ext_3.
 # There is no positional-hint primitive in Phase 4 to fix this.
 
+ext_1 { size: 7x5 }
+sink_a { size: 7x5 }
+ext_2 { size: 7x5 }
+sink_b { size: 7x5 }
+sink_c { size: 7x5 }
+ext_3 { size: 7x5 }
 hwy { shape: highway }
 
 ext_1 -> sink_a

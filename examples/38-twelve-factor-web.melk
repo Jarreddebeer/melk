@@ -20,8 +20,9 @@ caption: "Source: examples/38-twelve-factor-web.melk"
 # Backing services are drawn as cylinders to read as durable state;
 # dyno-tier nodes are plain rects.
 
+client { size: 7x5 }
 lb       { shape: rect,      label: "load balancer", size: 13x5 }
-queue    { shape: rect,      label: "queue\n(broker)", size: 9x5 }
+queue    { shape: rect,      label: "queue\n(broker)", size: 9x7 }
 db       { shape: cylinder,  label: "PostgreSQL\n(primary)", size: 13x9 }
 cache    { shape: cylinder,  label: "Redis\n(cache)", size: 9x7 }
 

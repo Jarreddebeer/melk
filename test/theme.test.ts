@@ -22,9 +22,8 @@ import { tokenize } from "../src/parser/lexer.js";
 import { parse } from "../src/parser/parser.js";
 import { bind } from "../src/bind/bind.js";
 import { place } from "../src/layout/place.js";
-import { reserveCorridors } from "../src/layout/corridors.js";
-import { packTracks } from "../src/layout/tracks.js";
-import { buildPolylines } from "../src/layout/polyline.js";
+import { assignSlots } from "../src/layout/slots.js";
+import { routeChannels } from "../src/layout/channels.js";
 import { renderSVG } from "../src/render/svg.js";
 
 // Helper: a minimal valid theme as a raw object. Tests mutate clones of
@@ -698,10 +697,9 @@ describe("end-to-end: theme swap + tag overrides change SVG output", () => {
   function render(src: string, themeName: string): string {
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, loadTheme(themeName));
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, loadTheme(themeName));
   }
 
   it("same source renders different surface fill under different themes", () => {
@@ -759,10 +757,9 @@ describe("end-to-end: gradient fill rendering", () => {
     const theme = validateTheme(raw, "<test>");
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, theme);
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, theme);
   }
 
   it("rect with gradient fill emits a <linearGradient> def + url() fill", () => {

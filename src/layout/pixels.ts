@@ -1,17 +1,19 @@
 /**
- * Shared pixel layout. Moved from polyline.ts so the track packer can
- * also resolve cell/slot references to pixels — needed for pixel-aware
- * interval encoding in `tracks.ts` (see DESIGN-PHASE4.md §4 and the
- * `Pixel-aware interval encoding` note in `feedback-highway-invariants`).
+ * Shared pixel layout (Phase 4 channel-routing model).
  *
- * Inputs (`placement` cell counts + `reservation` gutter widths) are
- * both available by the end of Step 5. Step 6 (track packing) can call
- * `computePixelLayout` directly; Step 7 (polyline) re-uses the same
- * function with the same inputs.
+ * The grid is `cells × CELL_PX`. No gutter widening — the corridor +
+ * track-packing concept that drove the gutter math is gone. Channel
+ * routing (`channels.ts`) walks through empty cells, so spacing between
+ * unrelated nodes shows up as the empty cells the placer left there
+ * (e.g. `MEMBER_GAP = 1` cell between bus producers).
+ *
+ * `computePixelLayout(placement)` produces colX/rowY/widths/heights/
+ * totals. `slotPixel` resolves a (side, slot, anchor cell, footprint
+ * size) to its pixel position on a face.
  */
 import type { Cell, Placement } from "./placement.js";
-import type { Reservation, Side } from "./corridors.js";
-import { CELL_PX, COMB_PITCH } from "./corridors.js";
+import type { Side } from "./slots.js";
+import { CELL_PX, COMB_PITCH } from "./slots.js";
 
 export interface Point {
   x: number;
@@ -27,54 +29,33 @@ export interface PixelLayout {
   colWidthPx: number[];
   /** rowHeightPx[r] = height of row r in pixels. */
   rowHeightPx: number[];
-  /** colGutterPx[g] = width of column gutter g in pixels. */
-  colGutterPx: number[];
-  /** rowGutterPx[g] = height of row gutter g in pixels. */
-  rowGutterPx: number[];
   totalWidth: number;
   totalHeight: number;
 }
 
-export function computePixelLayout(
-  placement: Placement,
-  reservation: Reservation,
-): PixelLayout {
+export function computePixelLayout(placement: Placement): PixelLayout {
   const nCols = placement.colUnits.length;
   const nRows = placement.rowUnits.length;
-
   const colWidthPx = placement.colUnits.map((u) => u * CELL_PX);
   const rowHeightPx = placement.rowUnits.map((u) => u * CELL_PX);
-  const colGutterPx = reservation.colGutterUnits.map((u) => u * CELL_PX);
-  const rowGutterPx = reservation.rowGutterUnits.map((u) => u * CELL_PX);
 
-  // colX[c] = sum of (col widths + col gutters) west of col c.
-  // Gutter 0 = left page margin; gutter c = the one immediately west of col c.
   const colX = new Array<number>(nCols).fill(0);
-  let xAccum = colGutterPx[0]!;
+  let xAccum = 0;
   for (let c = 0; c < nCols; c++) {
     colX[c] = xAccum;
-    xAccum += colWidthPx[c]! + colGutterPx[c + 1]!;
+    xAccum += colWidthPx[c]!;
   }
   const totalWidth = xAccum;
 
   const rowY = new Array<number>(nRows).fill(0);
-  let yAccum = rowGutterPx[0]!;
+  let yAccum = 0;
   for (let r = 0; r < nRows; r++) {
     rowY[r] = yAccum;
-    yAccum += rowHeightPx[r]! + rowGutterPx[r + 1]!;
+    yAccum += rowHeightPx[r]!;
   }
   const totalHeight = yAccum;
 
-  return {
-    colX,
-    rowY,
-    colWidthPx,
-    rowHeightPx,
-    colGutterPx,
-    rowGutterPx,
-    totalWidth,
-    totalHeight,
-  };
+  return { colX, rowY, colWidthPx, rowHeightPx, totalWidth, totalHeight };
 }
 
 /**
@@ -84,8 +65,7 @@ export function computePixelLayout(
  * Multi-cell occupancy: the box is anchored at the top-left of its
  * footprint cell (`boxCell`) and its pixel size is declared
  * (`boxWidthCells * CELL_PX` × `boxHeightCells * CELL_PX`). No
- * centering — the box fills its footprint by construction (cells
- * span multiple grid rows/cols when needed instead of inflating).
+ * centering — the box fills its footprint by construction.
  */
 export function slotPixel(
   side: Side,
@@ -110,25 +90,4 @@ export function slotPixel(
     case "S":
       return { x: left + slotOffset, y: top + heightPx };
   }
-}
-
-/**
- * Pixel x of a V-corridor's western edge (= the col boundary the
- * corridor sits on). Used to compute corridor-corridor intersection
- * positions for the track packer's interval encoding.
- */
-export function vCorridorWestEdgeX(corridorIndex: number, layout: PixelLayout): number {
-  return corridorIndex === 0
-    ? 0
-    : layout.colX[corridorIndex - 1]! + layout.colWidthPx[corridorIndex - 1]!;
-}
-
-/**
- * Pixel y of an H-corridor's northern edge. Used similarly to
- * `vCorridorWestEdgeX`.
- */
-export function hCorridorNorthEdgeY(corridorIndex: number, layout: PixelLayout): number {
-  return corridorIndex === 0
-    ? 0
-    : layout.rowY[corridorIndex - 1]! + layout.rowHeightPx[corridorIndex - 1]!;
 }

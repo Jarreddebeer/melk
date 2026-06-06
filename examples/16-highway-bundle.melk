@@ -10,6 +10,12 @@ crossings: 10
 # + fan-out anchor) and route each trace as a member of the highway's
 # parallel bundle.
 
+src_a { size: 7x5 }
+dst_x { size: 7x5 }
+dst_y { size: 7x5 }
+src_b { size: 7x5 }
+dst_z { size: 7x5 }
+src_c { size: 7x5 }
 hwy { shape: highway }
 
 src_a -> dst_x { via: hwy }

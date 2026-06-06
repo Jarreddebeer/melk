@@ -21,7 +21,7 @@ api      { shape: icon(basic/server),    label: "API" }
 store    { shape: icon(basic/database),  label: "Store" }
 
 # Badge-form: rect shape, icon as a corner badge.
-gateway  { shape: rect, icon: basic/server, icon-position: corner, label: "Gateway" }
+gateway  { shape: rect, icon: basic/server, icon-position: corner, label: "Gateway", size: 9x5 }
 
 # Demonstrate the missing-icon placeholder (deliberately wrong name).
 mystery  { shape: icon(basic/does-not-exist), label: "missing" }

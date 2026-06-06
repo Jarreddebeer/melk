@@ -3,7 +3,7 @@ layout: lr
 # Eight producers fan into one switch; eight consumers fan out.
 # Stress-tests slot demand on a single tall hub box.
 
-switch { shape: rect, size: 9x17, label: "switch" }
+switch { shape: rect, size: 9x11, label: "switch" }
 
 bus     producers: [p1, p2, p3, p4, p5, p6, p7, p8] -> switch
 fan-out consumers: switch -> [c1, c2, c3, c4, c5, c6, c7, c8]

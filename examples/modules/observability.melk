@@ -11,12 +11,13 @@
 
 layout: tb
 
+signals { size: 7x5 }
 collector { shape: rect, size: 9x5, label: "Collector" }
 
 signals -> collector
 
 fan-out fanout: collector -> [dashboards, alerting, archive]
 
-dashboards { shape: rect, label: "Dashboards" }
-alerting   { shape: rect, label: "Alerting" }
-archive    { shape: cylinder, label: "Archive" }
+dashboards { shape: rect, label: "Dashboards", size: 11x5 }
+alerting   { shape: rect, label: "Alerting", size: 7x5 }
+archive    { shape: cylinder, label: "Archive", size: 9x5 }

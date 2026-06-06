@@ -23,16 +23,17 @@ function cellOf(p: ReturnType<typeof placement>, id: string): Cell {
 }
 
 describe("placer — anchor pass: pipeline", () => {
-  it("places pipeline members at consecutive cols on the same row", () => {
+  it("places pipeline members one PIPELINE_GAP cell apart on the same row", () => {
     const p = placement("pipeline ingest: a -> b -> c");
     const a = cellOf(p, "a");
     const b = cellOf(p, "b");
     const c = cellOf(p, "c");
     expect(a.row).toBe(b.row);
     expect(b.row).toBe(c.row);
-    // Multi-cell: default 5x5 nodes step by 5 cols, not 1.
-    expect(b.col).toBe(a.col + 5);
-    expect(c.col).toBe(b.col + 5);
+    // Default 5x5 nodes step by 5 + PIPELINE_GAP(5) = 10 cols. The gap
+    // is the channel router's runway between consecutive members.
+    expect(b.col).toBe(a.col + 10);
+    expect(c.col).toBe(b.col + 10);
   });
 
   it("places TB pipelines south of each other on the same col", () => {
@@ -42,8 +43,8 @@ describe("placer — anchor pass: pipeline", () => {
     const c = cellOf(p, "c");
     expect(a.col).toBe(b.col);
     expect(b.col).toBe(c.col);
-    expect(b.row).toBe(a.row + 5);
-    expect(c.row).toBe(b.row + 5);
+    expect(b.row).toBe(a.row + 10);
+    expect(c.row).toBe(b.row + 10);
   });
 
   it("parks unrelated pipelines on disjoint rows", () => {
@@ -65,24 +66,24 @@ describe("placer — anchor pass: bus", () => {
     const s = cellOf(p, "s");
     expect(a.col).toBe(b.col);
     expect(b.col).toBe(c.col);
-    // Default 5x5 producers stack by 5 + MEMBER_GAP(1) = 6 rows.
-    expect(b.row).toBe(a.row + 6);
-    expect(c.row).toBe(b.row + 6);
-    // Shared sits one shared-width(5) east of producers.
-    expect(s.col).toBe(a.col + 5);
-    // Block centre = (0 + 12 + 5) / 2 = 8.5 (cells from a's top).
-    // Shared h=7, so shared's top = 8.5 - 3.5 = 5.
-    expect(s.row).toBe(a.row + 5);
+    // Default 5x5 producers stack by 5 + MEMBER_GAP(5) = 10 rows.
+    expect(b.row).toBe(a.row + 10);
+    expect(c.row).toBe(b.row + 10);
+    // Shared sits one shared-width(5) + PIPELINE_GAP(5) = 10 east of producers.
+    expect(s.col).toBe(a.col + 10);
+    // perpOffsets [0, 10, 20]. Block end = 25. Block centre = 12.5.
+    // Shared h=7, centre offset = 3.5. anchorPerp = floor(12.5 - 3.5) = 9.
+    expect(s.row).toBe(a.row + 9);
   });
 
   it("centres shared on the block for an even producer count", () => {
     const p = placement("s { size: 5x9 }\nbus power: [a, b, c, d] -> s");
     const a = cellOf(p, "a");
     const s = cellOf(p, "s");
-    // 4 producers, h=5, MEMBER_GAP=1: perpOffsets [0, 6, 12, 18].
-    // Block end = 23. Block centre = 11.5. Shared h=9 (parity-bumped
-    // to 10), centre offset = 5. anchorPerp = floor(11.5 - 5) = 6.
-    expect(s.row).toBe(a.row + 6);
+    // 4 producers, h=5, MEMBER_GAP=5: perpOffsets [0, 10, 20, 30].
+    // Block end = 35. Block centre = 17.5. Shared h=9 (parity-bumped
+    // to 10), centre offset = 5. anchorPerp = floor(17.5 - 5) = 12.
+    expect(s.row).toBe(a.row + 12);
   });
 });
 
@@ -95,20 +96,20 @@ describe("placer — anchor pass: fan-out", () => {
     const c = cellOf(p, "c");
     expect(a.col).toBe(b.col);
     expect(b.col).toBe(c.col);
-    // Consumers sit one shared-width(5) east of shared.
-    expect(a.col).toBe(s.col + 5);
-    // Default 5x5 consumers stack by 5 + MEMBER_GAP(1) = 6 rows.
-    expect(b.row).toBe(a.row + 6);
-    expect(c.row).toBe(b.row + 6);
-    // Block centre = 8.5; shared h=7, centre offset 3.5. anchorPerp
-    // = floor(8.5 - 3.5) = 5 → s.row = a.row + 5.
-    expect(s.row).toBe(a.row + 5);
+    // Consumers sit one shared-width(5) + PIPELINE_GAP(5) = 10 east of shared.
+    expect(a.col).toBe(s.col + 10);
+    // Default 5x5 consumers stack by 5 + MEMBER_GAP(5) = 10 rows.
+    expect(b.row).toBe(a.row + 10);
+    expect(c.row).toBe(b.row + 10);
+    // perpOffsets [0, 10, 20]. Block centre = 12.5. Shared h=7,
+    // centre offset = 3.5. anchorPerp = floor(12.5 - 3.5) = 9.
+    expect(s.row).toBe(a.row + 9);
   });
 });
 
 describe("placer — anchor pass: branch", () => {
-  // Multi-cell: branch member is offset by spine's perp extent, not just 1.
-  // For default 5x5 spines, perp = 5, so members are at b.row ± 5.
+  // Multi-cell + PIPELINE_GAP: branch member is offset by spine's perp
+  // extent + PIPELINE_GAP. For default 5x5 spines, that's 5 + 5 = 10.
   it("under LR, default :left puts member north of the spine (CCW rotation of east is north)", () => {
     const p = placement(
       "pipeline main: a -> b -> c\nbranch off: b -> x",
@@ -116,7 +117,7 @@ describe("placer — anchor pass: branch", () => {
     const b = cellOf(p, "b");
     const x = cellOf(p, "x");
     expect(x.col).toBe(b.col);
-    expect(x.row).toBe(b.row - 5);
+    expect(x.row).toBe(b.row - 10);
   });
 
   it("under LR, explicit :right puts member south of the spine", () => {
@@ -126,7 +127,7 @@ describe("placer — anchor pass: branch", () => {
     const b = cellOf(p, "b");
     const x = cellOf(p, "x");
     expect(x.col).toBe(b.col);
-    expect(x.row).toBe(b.row + 5);
+    expect(x.row).toBe(b.row + 10);
   });
 
   it("under TB, default :left puts member east of the spine (CCW of south is east)", () => {
@@ -136,7 +137,7 @@ describe("placer — anchor pass: branch", () => {
     const b = cellOf(p, "b");
     const x = cellOf(p, "x");
     expect(x.row).toBe(b.row);
-    expect(x.col).toBe(b.col + 5);
+    expect(x.col).toBe(b.col + 10);
   });
 
   it("under TB, explicit :right puts member west of the spine", () => {
@@ -146,7 +147,7 @@ describe("placer — anchor pass: branch", () => {
     const b = cellOf(p, "b");
     const x = cellOf(p, "x");
     expect(x.row).toBe(b.row);
-    expect(x.col).toBe(b.col - 5);
+    expect(x.col).toBe(b.col - 10);
   });
 
   it("a pipeline rooted on the branched node extends along the branch direction", () => {
@@ -159,9 +160,11 @@ describe("placer — anchor pass: branch", () => {
     const x = cellOf(p, "x");
     const y = cellOf(p, "y");
     expect(x.col).toBe(b.col);
-    expect(x.row).toBe(b.row - 5);
+    // Branch member is offset by spine perp extent + PIPELINE_GAP.
+    expect(x.row).toBe(b.row - 10);
     expect(y.col).toBe(x.col);
-    expect(y.row).toBe(x.row - 5);
+    // The tail `pipeline tail: x -> y` adds PIPELINE_GAP(5) between x and y.
+    expect(y.row).toBe(x.row - 10);
   });
 });
 
@@ -194,14 +197,14 @@ describe("placer — anchor conflicts", () => {
 });
 
 describe("placer — flow pass", () => {
-  // Multi-cell: flow-pass steps by the source node's forward extent.
-  // For default 5x5 nodes that's +5 cols (lr) or +5 rows (tb).
-  it("places the target of a free edge one cell east of the source", () => {
+  // Multi-cell + PIPELINE_GAP: flow-pass steps by source extent + 5
+  // gap cells. Default 5x5 + 5 = 10 cells per step.
+  it("places the target of a free edge one extent + gap east of the source", () => {
     const p = placement("a -> b");
     const a = cellOf(p, "a");
     const b = cellOf(p, "b");
     expect(b.row).toBe(a.row);
-    expect(b.col).toBe(a.col + 5);
+    expect(b.col).toBe(a.col + 10);
   });
 
   it("chains free edges along the flow axis", () => {
@@ -209,7 +212,7 @@ describe("placer — flow pass", () => {
     const cells = ["a", "b", "c", "d"].map((id) => cellOf(p, id));
     for (let i = 0; i < cells.length - 1; i++) {
       expect(cells[i + 1]!.row).toBe(cells[i]!.row);
-      expect(cells[i + 1]!.col).toBe(cells[i]!.col + 5);
+      expect(cells[i + 1]!.col).toBe(cells[i]!.col + 10);
     }
   });
 
@@ -217,7 +220,7 @@ describe("placer — flow pass", () => {
     const p = placement("a -> b\nb >- a");
     const a = cellOf(p, "a");
     const b = cellOf(p, "b");
-    expect(b.col).toBe(a.col + 5);
+    expect(b.col).toBe(a.col + 10);
     expect(b.row).toBe(a.row);
   });
 
@@ -228,8 +231,9 @@ describe("placer — flow pass", () => {
     const a = cellOf(p, "a");
     const b = cellOf(p, "b");
     const c = cellOf(p, "c");
-    expect(b.col).toBe(a.col + 5);
-    expect(c.col).toBe(b.col + 5);
+    // Both pipeline and free-edge flow now use extent + PIPELINE_GAP.
+    expect(b.col).toBe(a.col + 10);
+    expect(c.col).toBe(b.col + 10);
     expect(c.row).toBe(b.row);
   });
 });
@@ -338,7 +342,8 @@ describe("placer — local forward (isometry)", () => {
     const x = cellOf(p, "x");
     const z = cellOf(p, "z");
     expect(z.col).toBe(x.col);
-    expect(z.row).toBe(x.row - 5);
+    // pipeline tail: x -> z adds PIPELINE_GAP(5) between x and z.
+    expect(z.row).toBe(x.row - 10);
     expect(p.forwardAt.get("z")).toBe("N");
   });
 });

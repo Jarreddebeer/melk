@@ -10,6 +10,16 @@ crossings: 30
 # parks the second bundle at a fresh row beneath the first without
 # anchor conflicts.
 
+ext_1 { size: 7x5 }
+sink_a { size: 7x5 }
+ext_2 { size: 7x5 }
+sink_b { size: 7x5 }
+sink_c { size: 7x5 }
+ext_3 { size: 7x5 }
+probe_1 { size: 9x5 }
+metric_x { size: 9x5 }
+metric_y { size: 9x5 }
+probe_2 { size: 9x5 }
 hwy   { shape: highway }
 hwy_m { shape: highway }
 

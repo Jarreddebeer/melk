@@ -23,9 +23,9 @@ import { formatProgram } from "./parser/format.js";
 import { bind } from "./bind/bind.js";
 import { place } from "./layout/place.js";
 import { applyTextFit, applyTextFitToSizes } from "./layout/text-fit.js";
-import { reserveCorridors } from "./layout/corridors.js";
-import { packTracks } from "./layout/tracks.js";
-import { buildPolylines } from "./layout/polyline.js";
+import { assignSlots } from "./layout/slots.js";
+import { routeChannels } from "./layout/channels.js";
+import { applyModulePortEndpoints } from "./layout/module-route.js";
 import { applyModuleAlignment, placeModules } from "./layout/module-place.js";
 import { renderSVG } from "./render/svg.js";
 import {
@@ -214,23 +214,17 @@ function main(): void {
     applyTextFitToSizes(model, theme);
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
-    const reservation = reserveCorridors(model, placement);
+    const slots = assignSlots(model, placement);
     // DESIGN-PHASE5-MODULES.md §3.3 (extension) — shift each imported
     // module body inside its synthetic cell along the cross-flow axis
     // so face-to-face flow-axis ports line up with their counterparts.
-    // Reads facePorts[side][0] (the single-edge snap default), produces
-    // a per-module bodyOffsetX/Y that both the polyline builder (via
-    // buildModulePortIndex) and the renderer (renderModuleBody) honour.
-    applyModuleAlignment(model, placement, reservation);
-    const packing = packTracks(model, placement, reservation);
-    // DESIGN-PHASE5-MODULES.md §4.1 — buildPolylines now lands directly
-    // on internal node pixel positions for edges with `fromInternal` /
-    // `toInternal`, so no separate endpoint-translation post-pass is
-    // needed. The corridor trunk routes around the actual endpoints,
-    // giving a clean L-bend inside the module body.
-    const polylines = buildPolylines(model, placement, reservation, packing);
+    applyModuleAlignment(model, placement, slots);
+    const routing = routeChannels(model, placement, slots);
+    // DESIGN-PHASE5-MODULES.md §4.1 — replace trace endpoints on
+    // module-internal edges with the internal node's actual port pixel.
+    applyModulePortEndpoints(routing, model, placement);
     const noNetwork = argv.includes("--no-network");
-    const svg = renderSVG(model, placement, reservation, polylines, theme, {
+    const svg = renderSVG(model, placement, routing, theme, {
       meltFileDir: dirname(filePath),
       allowNetwork: !noNetwork,
     });
@@ -282,13 +276,11 @@ function runValidate(source: string, filePath: string): number {
     applyTextFitToSizes(model, theme);
     const rawPlacement = place(model);
     const placement = applyTextFit(rawPlacement, model, theme);
-    stage = "reserveCorridors";
-    const reservation = reserveCorridors(model, placement);
-    applyModuleAlignment(model, placement, reservation);
-    stage = "packTracks";
-    const packing = packTracks(model, placement, reservation);
-    stage = "buildPolylines";
-    buildPolylines(model, placement, reservation, packing);
+    stage = "assignSlots";
+    const slots = assignSlots(model, placement);
+    applyModuleAlignment(model, placement, slots);
+    stage = "routeChannels";
+    routeChannels(model, placement, slots);
     process.stdout.write("OK\n");
     return 0;
   } catch (err) {

@@ -5,13 +5,20 @@ crossings: 20
 # external consumers. Tests slot demand on the fan-out's east comb
 # and the convergence of multiple channels onto each cylinder.
 
-router     { shape: rect,     size: 9x13, label: "router" }
-source     { shape: rect,     label: "source" }
-prometheus { shape: cylinder, label: "prometheus" }
-kafka      { shape: cylinder, label: "kafka" }
-s3         { shape: cylinder, label: "s3" }
-pager      { shape: rect,     label: "pagerduty" }
-jaeger     { shape: cylinder, label: "jaeger" }
+ingest { size: 7x5 }
+metrics { size: 7x5 }
+events { size: 7x5 }
+alerts { size: 7x5 }
+traces { size: 7x5 }
+snapshots { size: 9x5 }
+router     { shape: rect,     size: 9x9, label: "router" }
+source     { shape: rect,                 label: "source", size: 7x5 }
+prometheus { shape: cylinder, size: 11x5, label: "prometheus" }
+kafka      { shape: cylinder, size: 7x5,  label: "kafka" }
+s3         { shape: cylinder, size: 5x5,  label: "s3" }
+pager      { shape: rect,     size: 9x5,  label: "pagerduty" }
+jaeger     { shape: cylinder, size: 9x5,  label: "jaeger" }
+
 
 source  -> ingest
 ingest  -> router { avoid: channels }

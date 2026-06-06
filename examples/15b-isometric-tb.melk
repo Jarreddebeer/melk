@@ -12,7 +12,8 @@ crossings: 5
 # and the branch points east (CCW of S = E) instead of north
 # (CCW of E = N). No other edits required.
 
-hub { shape: rect, size: 13x9, label: "hub" }
+sidecar { size: 7x5 }
+hub { shape: rect, size: 7x5, label: "hub" }
 
 bus     into-hub:    [p1, p2, p3] -> hub
 fan-out out-of-hub:  hub -> [c1, c2, c3]

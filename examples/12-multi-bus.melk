@@ -4,7 +4,14 @@ layout: lr
 # then a many-target fan-out from the same hub. The hub anchors at
 # the median row of the producer fan-in.
 
-hub { shape: rect, size: 9x13, label: "aggregator" }
+host1 { size: 7x5 }
+host2 { size: 7x5 }
+dashboard { size: 9x5 }
+alerting { size: 7x5 }
+archive { size: 7x5 }
+replay { size: 7x5 }
+debug { size: 7x5 }
+hub { shape: rect, size: 11x9, label: "aggregator" }
 
 bus     producers: [host1, host2, app1, app2, svc1, svc2] -> hub
 fan-out consumers: hub -> [dashboard, alerting, archive, replay, audit, debug]

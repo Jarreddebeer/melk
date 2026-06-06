@@ -8,6 +8,12 @@ crossings: 10
 # the entry (west) and exit (east) perimeter where the trace dips
 # down and surfaces again.
 
+src_a { size: 7x5 }
+dst_x { size: 7x5 }
+dst_y { size: 7x5 }
+src_b { size: 7x5 }
+dst_z { size: 7x5 }
+src_c { size: 7x5 }
 hwy { shape: highway, render: underground }
 
 src_a -> dst_x { via: hwy }

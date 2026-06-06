@@ -1,11 +1,12 @@
 layout: lr
+crossings: 2
 
 # Fan-out into a, b, c; fan-in back into a single join; labelled back-edge
 # from the sink to the fanout. Exercises bus/fan-out anchoring and the
 # rear-face back-edge corridor.
 
-fanout { shape: rect, size: 5x13 }
-join   { shape: rect, size: 5x13 }
+fanout { shape: rect, size: 7x5 }
+join   { shape: rect, size: 5x5 }
 
 src    -> fanout
 fan-out broadcast: fanout -> [a, b, c]

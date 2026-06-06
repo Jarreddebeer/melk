@@ -9,7 +9,8 @@ theme:  document-dark
 # (DESIGN-PHASE5-THEMING.md). Geometry is identical to document-light;
 # only the palette and weights differ.
 
-transform { shape: rect,     size: 9x5, label: "ETL pipeline" }
+ingest { size: 7x5 }
+transform { shape: rect,     size: 11x5, label: "ETL pipeline" }
 ods       { shape: cylinder, size: 9x5, label: "ODS" }
 
 ingest    -> transform

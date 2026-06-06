@@ -7,4 +7,6 @@
 
 layout: lr
 
+ledger { size: 7x5 }
+gateway { size: 7x5 }
 pipeline ingress: api -> auth -> ledger -> gateway

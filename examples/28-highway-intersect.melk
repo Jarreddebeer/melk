@@ -12,6 +12,13 @@ crossings: 30
 # rendered at half opacity and thinner, with manhole circles at the
 # N and S perimeter where each trace dips and surfaces.
 
+dst_x { size: 7x5 }
+dst_y { size: 7x5 }
+dst_z { size: 7x5 }
+top_p { size: 7x5 }
+bot_p { size: 7x5 }
+bot_q { size: 7x5 }
+bot_r { size: 7x5 }
 src_a { shape: rect, size: 7x7 }
 hwy_h { shape: highway }
 hwy_v { shape: highway, orient: vertical, render: underground }

@@ -7,6 +7,7 @@
 
 layout: lr
 
+parsed { size: 7x5 }
 pipeline main: inlet -> parse -> validate -> enrich -> parsed
 
 # Side-channel: validate emits an audit record. A branch puts `audit`
@@ -14,7 +15,7 @@ pipeline main: inlet -> parse -> validate -> enrich -> parsed
 # with the next spine member.
 branch audit-out: validate -> audit
 
-parse    { shape: rect, label: "Parse" }
-validate { shape: rect, label: "Validate" }
-enrich   { shape: rect, label: "Enrich" }
-audit    { shape: rect, label: "Audit event" }
+parse    { shape: rect, label: "Parse", size: 7x5 }
+validate { shape: rect, label: "Validate", size: 7x5 }
+enrich   { shape: rect, label: "Enrich", size: 7x5 }
+audit    { shape: rect, label: "Audit event", size: 9x5 }

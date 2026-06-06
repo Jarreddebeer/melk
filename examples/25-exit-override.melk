@@ -14,9 +14,14 @@ crossings: 20
 # then north up to log's S face. Same number of corridors but a
 # different shape.
 
+ext_1 { size: 7x5 }
+svc_a { size: 7x5 }
+ext_2 { size: 7x5 }
+ext_3 { size: 7x5 }
+svc_c { size: 7x5 }
 svc_b { shape: rect, size: 7x7 }
 hwy { shape: highway }
-log { shape: cylinder, label: "audit" }
+log { shape: cylinder, label: "audit", size: 7x5 }
 
 # Bundle edges (via highway).
 ext_1 -> svc_a { via: hwy }

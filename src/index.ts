@@ -3,9 +3,8 @@ export { parse } from "./parser/parser.js";
 export { bind } from "./bind/bind.js";
 export { place } from "./layout/place.js";
 export { applyTextFit } from "./layout/text-fit.js";
-export { reserveCorridors } from "./layout/corridors.js";
-export { packTracks } from "./layout/tracks.js";
-export { buildPolylines } from "./layout/polyline.js";
+export { assignSlots } from "./layout/slots.js";
+export { routeChannels } from "./layout/channels.js";
 export { renderSVG } from "./render/svg.js";
 export {
   BUILTIN_THEME_NAMES,

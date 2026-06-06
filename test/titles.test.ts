@@ -13,9 +13,8 @@ import { parse } from "../src/parser/parser.js";
 import { bind } from "../src/bind/bind.js";
 import { loadTheme } from "../src/theme/theme.js";
 import { place } from "../src/layout/place.js";
-import { reserveCorridors } from "../src/layout/corridors.js";
-import { packTracks } from "../src/layout/tracks.js";
-import { buildPolylines } from "../src/layout/polyline.js";
+import { assignSlots } from "../src/layout/slots.js";
+import { routeChannels } from "../src/layout/channels.js";
 import { renderSVG } from "../src/render/svg.js";
 import { buildHeader, buildFooter } from "../src/render/titles.js";
 
@@ -26,10 +25,9 @@ function model(src: string) {
 function render(src: string, themeName = "document-light"): string {
   const m = bind(parse(tokenize(src)));
   const p = place(m);
-  const r = reserveCorridors(m, p);
-  const t = packTracks(m, p, r);
-  const polys = buildPolylines(m, p, r, t);
-  return renderSVG(m, p, r, polys, loadTheme(themeName));
+  const slots = assignSlots(m, p);
+  const routing = routeChannels(m, p, slots);
+  return renderSVG(m, p, routing, loadTheme(themeName));
 }
 
 describe("title:/subtitle:/caption: parser directives (DESIGN-PHASE5-TITLES §1)", () => {
@@ -267,10 +265,9 @@ describe("CLI --title / --subtitle / --caption override (smoke, mutating model d
       else if (overrides[field] !== undefined) m[field] = overrides[field]!;
     }
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, loadTheme("document-light"));
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, loadTheme("document-light"));
   }
 
   it("override replaces in-source title", () => {

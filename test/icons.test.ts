@@ -20,9 +20,8 @@ import {
 } from "../src/render/icons.js";
 import { loadTheme, validateTheme } from "../src/theme/theme.js";
 import { place } from "../src/layout/place.js";
-import { reserveCorridors } from "../src/layout/corridors.js";
-import { packTracks } from "../src/layout/tracks.js";
-import { buildPolylines } from "../src/layout/polyline.js";
+import { assignSlots } from "../src/layout/slots.js";
+import { routeChannels } from "../src/layout/channels.js";
 import { renderSVG } from "../src/render/svg.js";
 
 function model(src: string) {
@@ -288,10 +287,9 @@ describe("end-to-end render with icons", () => {
   function render(src: string, themeName = "document-light"): string {
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, loadTheme(themeName), {
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, loadTheme(themeName), {
       meltFileDir: fixtureDir,
       allowNetwork: false,
     });
@@ -425,10 +423,9 @@ describe("end-to-end render with icons", () => {
       ),
     );
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    const out = renderSVG(m, p, r, polys, theme, {
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    const out = renderSVG(m, p, routing, theme, {
       meltFileDir: fixtureDir,
       allowNetwork: false,
     });
@@ -454,10 +451,9 @@ describe("icon node border (theme-default + per-node override)", () => {
   function renderWith(src: string, theme = loadTheme("document-light")): string {
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, theme, {
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, theme, {
       meltFileDir: fixtureDir,
       allowNetwork: false,
     });
@@ -572,10 +568,9 @@ describe("tag-rule icon-color (re-tint via theme tag)", () => {
   function renderWith(src: string, theme = loadTheme("document-light")): string {
     const m = bind(parse(tokenize(src)));
     const p = place(m);
-    const r = reserveCorridors(m, p);
-    const t = packTracks(m, p, r);
-    const polys = buildPolylines(m, p, r, t);
-    return renderSVG(m, p, r, polys, theme, {
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    return renderSVG(m, p, routing, theme, {
       meltFileDir: fixtureDir,
       allowNetwork: false,
     });

@@ -56,7 +56,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { tokenize } from "../parser/lexer.js";
 import { parse } from "../parser/parser.js";
-import { TRACES_PER_CELL_UNIT } from "../layout/corridors.js";
 import type {
   AnchorRef,
   Branch,
@@ -1243,7 +1242,8 @@ function autoSizeHighways(ctx: BindCtx): void {
   for (const node of ctx.nodes.values()) {
     if (node.shape !== "highway") continue;
     const edgeCount = edgesPerHwy.get(node.id) ?? 0;
-    const rawBreadth = Math.max(1, Math.ceil(edgeCount / TRACES_PER_CELL_UNIT));
+    // CELL_PX = COMB_PITCH, so one trace per cell-unit of face length.
+    const rawBreadth = Math.max(1, edgeCount);
     // Round up to match parity with edgeCount. With CELL_PX = COMB_PITCH,
     // an F-trace cluster on an L-cell face puts slots at integer cell-
     // centers only when (L - F) is even — i.e., L and F have the same

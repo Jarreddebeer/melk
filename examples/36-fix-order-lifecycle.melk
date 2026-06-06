@@ -21,14 +21,14 @@ legend: on
 # `rejected` is tagged `critical` so it stands out as the terminal
 # error state; `fill` is the happy-path terminal and stays plain.
 
-oms          { shape: rect,      label: "OMS\n(NewOrderSingle)" }
+oms          { shape: rect,      label: "OMS\n(NewOrderSingle)", size: 15x7 }
 gateway      { shape: rect,      label: "FIX gateway", size: 13x7 }
-risk         { shape: diamond,   label: "pre-trade\nrisk" }
-exchange     { shape: rect,      label: "exchange\nmatching" }
-ack          { shape: rect, label: "Exec(New)\n150=0" }
-partial      { shape: rect, label: "Exec(Partial)\n150=1" }
-fill         { shape: rect, label: "Exec(Fill)\n150=2" }
-rejected     { shape: rect, label: "Exec(Rejected)\n150=8", tags: [critical] }
+risk         { shape: diamond,   label: "pre-trade\nrisk", size: 11x7 }
+exchange     { shape: rect,      label: "exchange\nmatching", size: 9x7 }
+ack          { shape: rect, label: "Exec(New)\n150=0", size: 11x7 }
+partial      { shape: rect, label: "Exec(Partial)\n150=1", size: 11x7 }
+fill         { shape: rect, label: "Exec(Fill)\n150=2", size: 9x7 }
+rejected     { shape: rect, label: "Exec(Rejected)\n150=8", tags: [critical], size: 13x7 }
 
 pipeline order_flow: oms -> gateway -> risk -> exchange -> ack -> partial -> fill
 

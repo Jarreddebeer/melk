@@ -29,12 +29,12 @@ legend: on
 # success. `cancelled` is tagged `critical` so the failure terminal
 # stands out.
 
-order        { shape: rect,      label: "OrderService\n(OrderPlaced)" }
+order        { shape: rect,      label: "OrderService\n(OrderPlaced)", size: 13x7 }
 payment      { shape: rect,      label: "PaymentService\n(PaymentAuthorised)", size: 29x7 }
-inventory    { shape: rect,      label: "InventoryService\n(StockReserved)" }
+inventory    { shape: rect,      label: "InventoryService\n(StockReserved)", size: 15x7 }
 shipping     { shape: rect,      label: "ShippingService\n(LabelPrinted)", size: 25x7 }
-delivered    { shape: rect, label: "OrderDelivered" }
-cancelled    { shape: rect, label: "OrderCancelled", tags: [critical] }
+delivered    { shape: rect, label: "OrderDelivered", size: 13x5 }
+cancelled    { shape: rect, label: "OrderCancelled", tags: [critical], size: 13x5 }
 
 pipeline happy_path: order -> payment -> inventory -> shipping -> delivered
 

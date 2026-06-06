@@ -11,6 +11,14 @@ crossings: 20
 # cluster between them automatically (sources west of ingress,
 # sinks east of egress).
 
+ext_1 { size: 7x5 }
+svc_a { size: 7x5 }
+svc_b { size: 7x5 }
+ext_2 { size: 7x5 }
+svc_c { size: 7x5 }
+ext_3 { size: 7x5 }
+sink_x { size: 7x5 }
+sink_z { size: 7x5 }
 sink_y { shape: rect, size: 9x7 }
 ingress { shape: highway }
 egress  { shape: highway }
