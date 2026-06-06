@@ -1,102 +1,148 @@
 # melk — next session handoff
 
-**Test count: 529 passing + 8 skipped (5 deferred this session). 43
-examples. master is clean through 7280aa0. This session's work is
-uncommitted.**
+**Test count: 524 passing + 8 skipped. 43 examples. master at
+`2157066` (channel design doc landed). Working tree clean.**
 
-## What landed this session (continuation of the multi-cell work)
+## What landed this session
 
-Continuation of last session. **#43 mesh→user kink is FIXED** — the
-trace is now a perfectly straight horizontal line. All previously
-failing tests now pass.
+Two commits on top of `7280aa0` from the prior session:
 
-Threads, in order:
+- `8ed65e4` — Multi-cell layout polish: text-fit no-op, MEMBER_GAP
+  uniform spacing in bus/fan-out, per-column gutter-boundary rule, and
+  the sizing table in SYNTAX.md / prompts/melk-author.md.
+- `2157066` — DESIGN-PHASE4.md §3 rewrite. Replaces the corridors +
+  track-packing + polyline model with a **channel routing** model. §4
+  deleted. §7 pipeline summary updated.
 
-1. **CELL_PX = COMB_PITCH = 8** (was 16). Cells are slot-pitch sized.
-   See [feedback-cell-equals-slot](memory/feedback-cell-equals-slot.md).
-2. **Default node size 2x2 → 5x5 (odd).** Preserves visual baseline.
-3. **Corpus + tests resized with 2N+1 rule.** 210 sites across 33 files.
-4. **Multi-cell occupancy wired through the placer.** `detectCollisions`
-   walks footprints; `normalise` leaves `rowUnits`/`colUnits` at 1;
-   anchors / flow pass / orphan parking are extent-aware.
-5. **Multi-cell wired through corridors.** `gutterIndex` takes node
-   dimensions and returns the gutter outside the footprint.
-   `corridorSequence` plumbs `srcSize`/`tgtSize` through. The strip-of-
-   V/H branch now only fires when both endpoints share row AND height
-   (so slot positions align).
-6. **Multi-cell wired through pixels + svg.** `slotPixel` and
-   `boxBounds` anchor at footprint top-left, no centering.
-7. **Text-fit moved BEFORE placer.** New `applyTextFitToSizes(model,
-   theme)` mutates `node.size` based on labels; runs before `place()`
-   so the placer uses grown sizes for footprint spacing.
-8. **Highway breadth parity-match.** Highway's breadth bumps by 1 when
-   F (trace count) and breadth disagree on parity. Makes mesh→user
-   land at a cell-centre slot.
-9. **applyIntersections dodge bump made multi-cell aware.** Walks
-   footprints when checking collisions; bumps by full step.
-10. **widen() made multi-cell aware.** Interior gutters INSIDE a node's
-    own footprint don't get the 1-cell-unit floor; only gutters at
-    footprint boundaries do. Cuts the rendered layout width
-    dramatically for examples with text-fit-grown nodes.
-11. **Hub-rect parity-match.** Any rect that's the shared of a bus or
-    fan-out gets the same parity bump as highways. Bumps eureka height
-    9 → 10, so eureka's W slots land on cell centres. The user→eureka
-    trace becomes a clean Z with predictable bends (was previously a
-    wild 600-px detour).
-12. **module-place footprint-anchor.** Removed centering math in
-    module-place / face-port calculations.
+The four ambiguous-placement examples (10, 37, 38, 41) now render.
+Example 38 (twelve-factor web) renders with worker.1/worker.2 each
+positioned correctly off queue (not perfectly symmetric — see Open
+threads).
 
-## The result
+## The channel routing model (locked in DESIGN-PHASE4.md §3)
 
-- **#43 mesh→user: STRAIGHT LINE** `M 248 68 L 280 68`. Down from
-  `M 288 76 L 294 76 C 296 76 296 80 298 80 L 352 80` (4-px chamfer).
-- **user→eureka: clean Z route** (was 16-bend detour through y=640
-  at one point).
-- **All 529 tests pass.** 8 skipped: 3 originally skipped + 5
-  deferred (3 polyline/track tangle tests on real-example geometry
-  that needs reasserting under multi-cell, 2 bend-intersection tests
-  with concrete pixel coords that shifted).
+Cells are occupied by a node footprint or empty. V-channels are runs
+of empty cells in a column; H-channels in a row. A trace exits a face
+slot, walks the entry channel forward, turns at the nearest available
+**bend cell** (intersection of V and H channel), and walks the
+perpendicular channel into the target slot.
 
-## What's open
+- One trace per bend cell — second-comer reroutes to next available.
+- Lazy channel growth: when two traces overlap in the same channel,
+  the second spills into the adjacent perpendicular cell column/row
+  (if empty).
+- Deterministic by edge declaration order.
+- L-shape default, Z when forced; straight when same row/col.
 
-### 1. 5 examples fail to render with `E_AMBIGUOUS_PLACEMENT`
+## Implementation plan (this is the next session's main task)
 
-```
-examples/10-multi-port-group.melk     prometheus + kafka collide
-examples/35-modules-platform.melk     alerting + archive collide
-examples/37-otc-swap-lifecycle.melk   clearing + report collide
-examples/38-twelve-factor-web.melk    db + cache collide
-examples/41-cqrs-event-sourcing.melk  orders_rm + inv_rm collide
-```
+1. **Lift slot allocator + side assignment + back-edge handling into
+   `src/layout/slots.ts`.** These primitives stay across the rewrite.
+   Source: `src/layout/corridors.ts` lines 587-594 (`assignSides`),
+   525-539 (`forwardOfEdge`), 1087+ (`assignSlots`). The slot
+   allocator is the biggest piece (~300 lines incl. via-half and
+   highway handling). Preserve the public contract:
+   `slotsFor(model, placement) → Map<edgeIndex, {sourceSide, sourceSlot, targetSide, targetSlot}>`.
 
-Each topology has implicit edges that converge two
-different-source nodes onto the same row/col under multi-cell flow.
-The single-cell placer accidentally gave them distinct rows because
-the spacing was tighter; multi-cell spaces nodes further apart and
-some accidental same-cell convergences become collisions.
+2. **Build `src/layout/channels.ts`.** Public surface:
+   ```ts
+   export interface ChannelRouting {
+     polylines: Polyline[];          // per edge
+     crossings: CrossingMarker[];    // X-marks where traces cross
+     width: number;                  // total pixel width
+     height: number;                 // total pixel height
+   }
+   export function routeChannels(
+     model: Model,
+     placement: Placement,
+     slots: Map<number, SlotAssignment>,  // from slots.ts
+   ): ChannelRouting
+   ```
+   Internals:
+   - Build occupancy grid: `Grid` of cells, each marked as occupied (by
+     which node id) or empty.
+   - For each edge in declaration order:
+     1. Read sourceSide, sourceSlot, targetSide, targetSlot from `slots`.
+     2. Compute entry cell (the empty cell immediately outside the
+        slot's pixel position).
+     3. Walk forward in that channel until reaching the row/col of the
+        target.
+     4. Turn at nearest available bend cell. If all are claimed, pick
+        the next-best bend cell along an alternate channel; if that
+        fails, raise `E_UNROUTABLE` or `E_BEND_DEADLOCK`.
+     5. Walk perpendicular channel to target's entry cell.
+     6. Mark used cells as claimed for this trace.
+   - Lazy growth: when a trace's segment overlaps another's in the same
+     channel along the long axis, grow the channel into the adjacent
+     parallel column/row of empty cells.
+   - Emit polyline: convert cell-path into pixel polyline, chamfer
+     90° bends at radius `COMB_PITCH / 2` (= 4 px).
 
-**Investigation:** trace each by `npx tsx src/cli.ts validate
-examples/<file>.melk` and look at the cell map. Likely fixes:
-- The author adds an explicit `branch` or `fan-out` to disambiguate
-  (the error message already suggests this).
-- The placer's flow-pass becomes smarter about colliding edges (e.g.,
-  parking convergent free edges on adjacent rows instead of
-  re-stepping into existing nodes).
+3. **Update `src/layout/pixels.ts`.** Drop `Reservation` import.
+   Drop `rowGutterPx` / `colGutterPx`. `computePixelLayout(placement)`
+   returns just `colX`, `rowY`, `colWidthPx`, `rowHeightPx`, plus
+   totals. No more gutter widening — the grid is `cells × CELL_PX`.
 
-### 2. user→eureka still has a small Z route
+4. **Wire CLI and SVG renderer.**
+   ```
+   // src/cli.ts
+   place → applyTextFitToSizes → place (already) →
+   slots = assignSlots(model, placement) →
+   routing = routeChannels(model, placement, slots) →
+   renderSVG(model, placement, routing, theme)
+   ```
+   `svg.ts` consumes `ChannelRouting` instead of `Reservation +
+   Polylines`.
 
-mesh→user is a perfect straight line. The user→eureka path now has
-predictable bends (the kink is gone) but it still routes through a
-4-bend Z because user is shorter (5 tall) than eureka (10 tall) and
-their slot positions sit at different offsets. A true single-line
-trace would require either:
-- eureka to be the same height as user (5), or
-- a slot-allocator policy that distributes slots to match the targets'
-  y-positions instead of clustering centred.
+5. **Update `src/layout/module-place.ts` / `module-route.ts`.** The
+   module orchestration calls `reserveCorridors`/`packTracks`/
+   `buildPolylines` on a submodel; swap each for `routeChannels` on
+   the submodel.
 
-Not blocking; the visual is now correct (real Z, no half-cell kink).
+6. **Update `src/bind/bind.ts`.** Drop the import of
+   `TRACES_PER_CELL_UNIT`. The hub-parity bump may still apply (slot
+   alignment), but the formula simplifies since cells equal slots.
 
-### 3. 5 deferred skipped tests
+7. **Delete legacy files:**
+   - `src/layout/corridors.ts` (1523 lines)
+   - `src/layout/tracks.ts` (1141 lines)
+   - `src/layout/polyline.ts` (1420 lines)
+   ≈ 4084 lines gone.
+
+8. **Tests.** Heaviest fallout:
+   - `test/corridors.test.ts` (~266 lines): delete entirely. The new
+     equivalent tests live in a new `test/channels.test.ts`.
+   - `test/tracks.test.ts` (~90 lines): delete.
+   - `test/polyline.test.ts` (~106 lines): mostly delete; some
+     bend-shape assertions become channel-router assertions.
+   - `test/bend-intersection.test.ts` (~24 lines): may survive in
+     spirit (assertions about pixel positions of bends), but specific
+     coords will change.
+   - `test/place.test.ts`, `test/modules.test.ts`, `test/text-fit.test.ts`,
+     `test/icons.test.ts`, `test/legend.test.ts`, `test/theme.test.ts`,
+     `test/titles.test.ts`, `test/parser.test.ts` should all still
+     pass — they don't touch routing internals.
+
+9. **Render the 4 currently-working examples (10, 37, 38, 41) plus
+   #43 (mesh→user) and eyeball.** The straight-line constraint on
+   #43's mesh→user trace must be preserved (it's the validation of the
+   multi-cell rewrite from the prior session).
+
+## What's open from prior threads
+
+### Worker symmetry in example 38 (not fully resolved)
+
+Workers around queue render asymmetric: when both `fan-out workers:
+queue -> [worker1, worker2]` AND `bus db-writes: [worker1, worker2] ->
+db` place the same workers, the second construct can't insert a gap
+that respects both queue's and db's geometric centres simultaneously.
+Worked through this in detail — the right resolution is per-column
+rowY arrays (each column has its own row-y positions), which is a
+bigger layout-IR change than this session bit off.
+
+This is a v2 cleanup; the visual now is OK to ship.
+
+### 5 deferred skipped tests (carried from prior session)
 
 ```
 test/tracks.test.ts          2 same-source coherence tests
@@ -104,71 +150,63 @@ test/polyline.test.ts        2 tangle tests on ex 19/29 real geometry
 test/modules.test.ts         1 face-to-face spread test
 ```
 
-These check that specific traces in real examples don't tangle /
-that source-coherence groups stay parallel. Multi-cell shifted the
-exact pixel positions; the assertions need to be re-derived from the
-new geometry. None are correctness-critical: each is a "we verified
-this specific known issue stays fixed" regression guard, which now
-needs its baseline updated.
+Some of these will simply be deleted by the channel rewrite (tracks
+and polyline as separate concepts are going away). The modules one
+needs to be re-asserted against the new channel geometry.
 
-## How to start the next session
+## Gotchas to keep in mind
+
+- **Declared size is authoritative.** Labels overflow rather than
+  growing boxes. `applyTextFitToSizes` is intentionally a no-op.
+  Don't reintroduce label-driven size growth.
+  ([feedback-declared-size-authoritative](memory/feedback-declared-size-authoritative.md))
+- **CELL_PX = COMB_PITCH = 8.** No factor-of-2 ratios.
+  ([feedback-cell-equals-slot](memory/feedback-cell-equals-slot.md))
+- **MEMBER_GAP = 1 cell.** Uniform spacing between consecutive bus /
+  fan-out / fan-in members; same formula across constructs. Shared
+  centres on the geometric block midpoint.
+- **No more gutters.** The channel router routes through empty cells,
+  not through gutters-between-rows. The corridor reserver in the
+  legacy code's purpose was demand-driven gutter widening; that's no
+  longer needed.
+- **Slot allocator stays.** Side assignment, slot index per face,
+  declaration order tiebreak — all preserved. Only the corridor
+  sequence + track packing + polyline emission concept go away.
+
+## Files most relevant to the work
+
+Edit-targets:
+```
+src/layout/slots.ts                 — NEW; extract from corridors.ts
+src/layout/channels.ts              — NEW; replaces corridors+tracks+polyline
+src/layout/pixels.ts                — drop gutter math; cell × CELL_PX layout only
+src/layout/module-place.ts          — switch to channels API
+src/layout/module-route.ts          — switch to channels API
+src/render/svg.ts                   — consume ChannelRouting
+src/cli.ts                          — drop reserve/pack/buildPolylines steps
+src/bind/bind.ts                    — drop TRACES_PER_CELL_UNIT import
+```
+
+Delete:
+```
+src/layout/corridors.ts             (1523 lines)
+src/layout/tracks.ts                (1141 lines)
+src/layout/polyline.ts              (1420 lines)
+test/corridors.test.ts              (deleted)
+test/tracks.test.ts                 (deleted)
+test/polyline.test.ts               (mostly deleted)
+```
+
+## How to start
 
 1. Read this file.
-2. `git status` → ~50 modified + 4 untracked (the examples 40-43 from
-   previous session, still uncommitted).
-3. `npx vitest run` → expect 529 passing, 8 skipped.
-4. `npx tsx src/cli.ts render examples/43-netflix-microservices.melk
-   -o /tmp/43.svg` → look at mesh→user (should be straight line).
-5. **First: fix the 5 colliding examples.** Either edit the .melk
-   source to add disambiguation, or improve the placer's flow-pass
-   to avoid two-source convergence.
-6. **Second: regen the 5 deferred skipped tests.** Update their
-   expected coords / corridor labels against the current geometry,
-   then unskip.
-7. **Third (optional polish): slot-allocator distribution policy.**
-   Place each outgoing trace at the y of its target, not in a
-   centred cluster. Would make user→eureka a single straight line.
-
-## Quick gotchas
-
-- **CELL_PX = COMB_PITCH = 8.** Cells ARE slots. Don't propose
-  factor-of-2 ratios; the predecessor memory is SUPERSEDED.
-- **Default node size is 5x5 (odd).**
-- **rowUnits/colUnits are always 1** under multi-cell. Sizes >1 are
-  expressed by FOOTPRINTS spanning multiple grid cells.
-- **Text-fit runs BEFORE place.** Call `applyTextFitToSizes(model,
-  theme)` between `bind()` and `place()` in any new pipeline.
-- **Corridor sequences use src/tgt SIZES**, not just cells. All
-  `corridorSequence(...)` calls take 9 args (was 7).
-- **Strip-of-V/H only when slots align.** `src.row === tgt.row &&
-  srcH === tgtH`. Anything else takes the V→H→V Z route.
-- **Hub-rect parity-match.** Any rect that's a bus shared or
-  fan-out shared with F ≥ 2 incoming/outgoing traces gets sideLen
-  parity-bumped to match F. Tests with bus/fan-out hubs may see
-  size dimensions bumped by 1.
-- **widen() now skips interior gutters within node footprints.**
-  Adjacent cells inside a single node's footprint don't get the
-  1-cell-unit floor. This is what makes the layout compact.
-
-## Files changed
-
-```
-src/bind/bind.ts                         — default 5x5, highway + rect parity-bump
-src/cli.ts                               — applyTextFitToSizes before place
-src/layout/corridors.ts                  — CELL_PX=8, footprint gutter/sequence, widen
-src/layout/module-place.ts               — applyTextFitToSizes, no centering
-src/layout/pixels.ts                     — no centering in slotPixel
-src/layout/place.ts                      — footprint collisions, extent-aware
-src/layout/placement.ts                  — footprint helpers
-src/layout/text-fit.ts                   — applyTextFitToSizes added
-src/render/svg.ts                        — no centering in boxBounds
-examples/*.melk                          — all sizes 2N+1
-test/*.ts                                — expectations updated; 5 skipped
-```
-
-## Files added (memory)
-
-```
-memory/feedback-cell-equals-slot.md      — CELL_PX must equal COMB_PITCH
-memory/feedback-hub-trace-parity.md      — hub face length ≡ F (mod 2)
-```
+2. Read DESIGN-PHASE4.md §3 (the channel routing spec).
+3. `git status` → clean tree at `2157066`.
+4. `npx vitest run` → 524 passing, 8 skipped.
+5. Begin with `src/layout/slots.ts` (lift slot allocator) — this is
+   the cleanest first step because it doesn't depend on any new
+   channel code.
+6. Then `src/layout/channels.ts` — implement same-row routing first,
+   then L-shape, then bends, then lazy growth, then back-edges.
+7. Run examples after each major addition; eyeball ex 38 and ex 43
+   as the two canonical visual checks.
