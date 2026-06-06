@@ -31,6 +31,7 @@ import type { Theme } from "../theme/theme.js";
 import { CELL_PX } from "./slots.js";
 import { assignSlots, type SlotAssignment } from "./slots.js";
 import { routeChannels, type ChannelRouting } from "./channels.js";
+import { autoAlignViaShims } from "./via-shim.js";
 import { place } from "./place.js";
 import type { Placement } from "./placement.js";
 import { computePixelLayout } from "./pixels.js";
@@ -113,6 +114,7 @@ export function placeModules(
     const subPlacement = place(imported.model);
     const subFit = applyTextFit(subPlacement, imported.model, theme);
     const subSlots = assignSlots(imported.model, subFit);
+    autoAlignViaShims(imported.model, subFit, subSlots);
     const subRouting = routeChannels(imported.model, subFit, subSlots);
     applyModulePortEndpoints(subRouting, imported.model, subFit);
     const layout = computePixelLayout(subFit);

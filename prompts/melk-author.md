@@ -18,7 +18,7 @@ Source files have the `.melk` extension.
 Before writing any `.melk`, read these two files end-to-end:
 
   - SYNTAX.md — the complete grammar and semantics. Pay particular
-    attention to §3.10 (placement model) — it's the mental model
+    attention to §3.11 (placement model) — it's the mental model
     behind every `E_AMBIGUOUS_PLACEMENT` you'll hit.
   - EXAMPLES.md — 39 worked examples indexed by feature, plus
     copy-pasteable recipes for common patterns and §5 (a catalogue

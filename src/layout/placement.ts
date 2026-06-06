@@ -77,6 +77,14 @@ export interface Placement {
    * under inheritance (DESIGN-PHASE4.md §2.5, §11.6).
    */
   forwardAt: Map<string, Direction>;
+  /**
+   * Per-node sub-cell pixel shift from an author `offset:` directive
+   * with a half-cell fractional component (`0xh`, `0x-h`). The grid
+   * stays integer (so `colX`/`rowY` lookups stay valid); slot pixel
+   * computation and node rendering BOTH add this delta. Empty map
+   * when no node has a fractional offset.
+   */
+  pixelShift: Map<string, { dx: number; dy: number }>;
 }
 
 /**

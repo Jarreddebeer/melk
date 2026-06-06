@@ -441,6 +441,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   let iconPositionSeen = false;
   let iconSeen = false;
   let border: boolean | undefined;
+  let offset: { dCol: number; dRow: number } | undefined;
   let orientSpan: { line: number; col: number; offset: number } | undefined;
   let renderSpan: { line: number; col: number; offset: number } | undefined;
   for (const prop of decl.properties) {
@@ -460,6 +461,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       (i) => (icon = i),
       (p) => (iconPosition = p),
       (bv) => (border = bv),
+      (off) => (offset = off),
     );
   }
   // DESIGN-PHASE5-ICONS §3.2 — both shape: icon(...) and icon: on the
@@ -517,6 +519,7 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   if (icon !== undefined) node.icon = icon;
   if (iconPosition !== undefined) node.iconPosition = iconPosition;
   if (border !== undefined) node.border = border;
+  if (offset !== undefined) node.offset = offset;
   ctx.nodes.set(decl.name, node);
   ctx.autoDeclared.delete(decl.name);
 }
@@ -1453,6 +1456,7 @@ function applyNodeProperty(
   setIcon: (i: { alias: string; name: string }) => void,
   setIconPosition: (p: "inline" | "corner") => void,
   setBorder: (b: boolean) => void,
+  setOffset: (o: { dCol: number; dRow: number }) => void,
 ): void {
   switch (prop.key) {
     case "shape":
@@ -1606,6 +1610,50 @@ function applyNodeProperty(
       }
       setTags(prop.value.items.map((it) => it.name));
       break;
+    case "offset": {
+      // Per-node nudge in (col, row) cells. Quoted-string syntax so
+      // fractions (e.g. half-cells for sub-grid slot alignment) and
+      // negatives can be expressed without inventing new token shapes:
+      // `offset: '0x0.5'` shifts down half a cell; `offset: '0x-1'`
+      // shifts up one cell; `offset: '1x1.5'` shifts east 1, south 1.5.
+      // The integer part of each component moves the cell on the grid;
+      // the fractional part becomes a sub-cell pixel shift applied at
+      // slot-pixel and render time. Use when the placer's default
+      // position leaves a node's slot cluster out of pixel alignment
+      // with the trace bundle it feeds.
+      if (prop.value.kind === "cells") {
+        throw new BindError(
+          "offset must be a quoted string, e.g. `offset: '0x1'` or `offset: '0x0.5'` " +
+            "(the quoted form lets you write fractions and negatives)",
+          prop.value.span,
+        );
+      }
+      if (prop.value.kind !== "string") {
+        throw new BindError(
+          "offset must be a quoted string, e.g. `offset: '0x1'` or `offset: '0x0.5'`",
+          prop.value.span,
+        );
+      }
+      const raw = prop.value.value.trim();
+      const match = /^(-?\d+(?:\.\d+)?)x(-?\d+(?:\.\d+)?)$/.exec(raw);
+      if (match === null) {
+        throw new BindError(
+          `offset '${raw}' must be in the form 'WxH' where each half is a number ` +
+            `(e.g. '0x1', '0x-0.5', '1x1.5')`,
+          prop.value.span,
+        );
+      }
+      const dCol = Number(match[1]);
+      const dRow = Number(match[2]);
+      if (!Number.isFinite(dCol) || !Number.isFinite(dRow)) {
+        throw new BindError(
+          `offset '${raw}' has non-finite components`,
+          prop.value.span,
+        );
+      }
+      setOffset({ dCol, dRow });
+      break;
+    }
     default:
       throw new BindError(`unknown node property: '${prop.key}'`, prop.span);
   }

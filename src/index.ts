@@ -5,6 +5,7 @@ export { place } from "./layout/place.js";
 export { applyTextFit } from "./layout/text-fit.js";
 export { assignSlots } from "./layout/slots.js";
 export { routeChannels } from "./layout/channels.js";
+export { autoAlignViaShims } from "./layout/via-shim.js";
 export { renderSVG } from "./render/svg.js";
 export {
   BUILTIN_THEME_NAMES,

@@ -58,7 +58,7 @@ npx tsx src/cli.ts render examples/01-simple.melk > out.svg
   uniform pitch. Layout is deterministic — the same source always
   produces the same diagram. Composition primitives *anchor* nodes
   to specific cells; the placer refuses to guess when two
-  constraints collide. See SYNTAX.md §3.10 and EXAMPLES.md §5 for
+  constraints collide. See SYNTAX.md §3.11 and EXAMPLES.md §5 for
   the mental model and the common error shapes.
 - **Orthogonal Manhattan routing** with bend, crossing, and overlap
   penalties produces clean engineered-looking traces, with dedicated
@@ -123,6 +123,11 @@ A typical LLM-driven authoring loop:
 - LR and TB modes; swapping them rotates the diagram with no other
   edits.
 - Composition primitives anchor placement; the placer never randomises.
+- Per-node `offset: "WxH"` for manual nudges when the auto-placer
+  needs a small override (integer cells or sub-cell pixel shifts).
+- Auto via-shim aligns highway via members' slot clusters with the
+  bundle's pixel grid — no manual intervention needed for the
+  common case.
 
 ### Routing
 

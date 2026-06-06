@@ -218,7 +218,7 @@ Trailing commas are accepted. The block accepts these attributes
 ```
 shape    size       label       tags
 icon     icon-position           border
-orient   render     slot-order
+orient   render     slot-order   offset
 ```
 
 ```melk
@@ -404,7 +404,54 @@ use slot order matching their declaration order in the source instead
 of the layout-derived spatial order. Lets you hand-tune fan-out
 ordering when the geometry-derived default isn't what you want.
 
-### 3.10 Placement model — how nodes get cells
+### 3.10 `offset:`
+
+Per-node nudge in `(col, row)` cells. Quoted-string syntax — the
+quotes let you write fractions and negatives without inventing new
+token shapes:
+
+```melk
+src_b { size: 7x5, offset: "0x0.5"  }   # +0 col, +0.5 row → 4 px down
+dst_y { size: 7x5, offset: "0x-0.5" }   # 4 px up
+m     { size: 5x5, offset: "1x1.5"  }   # +1 col, +1 row, +4 px down
+```
+
+Format: `'WxH'` where each half is `-?\d+(\.\d+)?`. Bare cells syntax
+(`offset: 0x1` without quotes) raises a bind error directing you to
+quote it.
+
+**Two parts:**
+
+- **Integer part** moves the node a whole number of cells on the grid.
+  `offset: "0x2"` shifts the node 2 rows south of where the placer
+  would otherwise have put it. The grid stays integer; downstream
+  placement math is unaffected.
+- **Fractional part** (`0.5`, `-0.5`, `0.25`, etc.) becomes a sub-cell
+  pixel shift. The node's slot pixels and rendered box pick up the
+  shift; the grid coordinates do not. Use this to align a node's slot
+  cluster with a trace bundle whose pixel parity it would otherwise
+  miss by 4 px.
+
+**When you need it.** Most cases are auto-handled. Highway via members
+(`{ via: hwy }`) get a sub-cell shim automatically when their slot
+cluster's pixel parity differs from the highway's — see §3.11's
+"Auto via-shim" callout below. Reach for `offset:` when the auto
+shim picks wrong, or for non-via cases where a node visually wants
+to sit half a cell off its anchored row/col to straighten a trace.
+
+**Caveats.**
+
+- The placer doesn't re-check footprints after the offset applies.
+  Two nodes whose cells overlap after offsets collide silently in
+  the router — author's responsibility to verify.
+- Sub-cell offsets shift only endpoints + the rendered box. The
+  channel-routed polyline body stays grid-aligned, so very large
+  fractional offsets distort the leg geometry. Designed for ≤ 1-cell
+  nudges.
+- Manual `offset:` overrides the auto via-shim — the auto pass skips
+  any node already carrying a pixel shift.
+
+### 3.11 Placement model — how nodes get cells
 
 This is the mental model every author needs. It's why
 `E_AMBIGUOUS_PLACEMENT` exists, why `branch` has a `:side`, and why
@@ -517,6 +564,24 @@ For copy-pasteable collision recipes, see EXAMPLES.md §3
 ("Shared backing service", "Side-channel off a spine", etc.)
 and §5 (placement errors keyed by the source shape that triggers
 each one).
+
+**5. Auto via-shim — when a node's slot cluster falls off the
+trace bundle's pixel grid.** A highway via member (`{ via: hwy }`
+sources and targets) gets a sub-cell pixel shift applied
+automatically when its face's slot cluster is half a cell out of
+phase with the highway's. The slot allocator centres each face's
+cluster independently; when `(faceLen - traceCount)` parity
+differs between member and highway, every paired slot lands 4 px
+off-grid. Untreated, that bias renders as a small C-curve kink on
+every same-row/same-col trace and as a chamfer at each end of
+L-bent traces. The shim is silent and never moves grid cells —
+only slot pixels and the rendered box pick up the 4-px nudge. No
+authoring action required.
+
+If the heuristic shifts wrong (rare, but possible with members
+that fan to multiple highways or have asymmetric trace counts),
+override it with an explicit `offset: '0xh'` — manual `offset:`
+on a node wins over the auto shim. See §3.10.
 
 ---
 

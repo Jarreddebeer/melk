@@ -502,12 +502,17 @@ function boxBounds(
     const sz = sizeOf.get(id) ?? { width: 1, height: 1 };
     const width = sz.width * CELL_PX;
     const height = sz.height * CELL_PX;
+    const shift = placement.pixelShift.get(id);
     // Multi-cell occupancy: box is anchored at the top-left of its
     // footprint cell and fills its declared pixel size. No centering;
     // boxes wider/taller than 1 cell span multiple grid rows/cols.
+    // A per-node `offset:` fractional part shifts the box by the
+    // accumulated sub-cell pixels — slot pixels in the router are
+    // shifted by the same delta, so the polyline endpoints stay
+    // attached to the box face after the shift.
     out.set(id, {
-      x: layout.colX[cell.col]!,
-      y: layout.rowY[cell.row]!,
+      x: layout.colX[cell.col]! + (shift?.dx ?? 0),
+      y: layout.rowY[cell.row]! + (shift?.dy ?? 0),
       width,
       height,
     });

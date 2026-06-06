@@ -109,6 +109,16 @@ export interface ModelNode {
    * the theme's `strokes.icon-border` setting (default "off").
    */
   border?: boolean;
+  /**
+   * Per-node author shift in (col, row) cells, applied after the
+   * placer's anchor/flow/normalise passes. `dCol` shifts east (+) /
+   * west (-) on the page grid; `dRow` shifts south (+) / north (-).
+   * Use to nudge a node whose default placement leaves its slot
+   * cluster out of pixel alignment with the trace bundle it feeds.
+   * Bypasses the placer's reasoning, so it can cause overlaps if
+   * misused — author's responsibility to verify.
+   */
+  offset?: { dCol: number; dRow: number };
 }
 
 /**

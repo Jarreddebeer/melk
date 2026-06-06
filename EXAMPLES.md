@@ -87,7 +87,10 @@ Use the inline `>-` form. Every example below uses it.
 - [25-exit-override.melk](examples/25-exit-override.melk) — explicit
   `exit:` face override on a highway-bound edge.
 - [27-highway-underground.melk](examples/27-highway-underground.melk)
-  — `render: underground` with faded outline + manhole exits.
+  — `render: underground` with faded outline + manhole exits. Also
+  the canonical example of auto via-shim: 6-tall hwy + 5-tall via
+  sources/sinks, slot clusters auto-aligned by the placer with no
+  `offset:` directives needed.
 - [28-highway-intersect.melk](examples/28-highway-intersect.melk) —
   two highways crossing at a `+` with one underground.
 - [29-highway-intersect-large.melk](examples/29-highway-intersect-large.melk)
@@ -412,6 +415,26 @@ dlq   { tags: [critical] }
 `future` and `critical` are built-in tags; their colours and legend
 captions come from the resolved theme.
 
+### Nudging a node with `offset:`
+
+Most layouts don't need this — the placer handles position, and
+highway via members are auto-aligned to the trace bundle's pixel
+grid. Reach for `offset:` when you want a node to sit at a specific
+relative cell or sub-cell, e.g. to straighten a trace the placer
+left with a 4-px kink in a topology the auto-shim doesn't cover.
+
+```melk
+# Format: 'WxH' (quoted). Integer parts move grid cells; fractional
+# parts (0.5, -0.5, …) become sub-cell pixel shifts.
+src_b { size: 7x5, offset: "0x0.5"  }   # +4 px down
+dst_y { size: 7x5, offset: "0x-0.5" }   # 4 px up
+m     { size: 5x5, offset: "1x1.5"  }   # +1 col, +1 row, +4 px down
+```
+
+The author owns collision risk — the placer doesn't re-check
+footprints after the offset applies. See SYNTAX.md §3.10 for the
+full attribute reference and caveats.
+
 ### Composed modules
 
 ```melk
@@ -468,7 +491,7 @@ when its face overflows. Most errors below are structural
 ("your source is ambiguous; pick one shape"); the last two
 (`E_SIDE_OVERSUBSCRIBED`, `E_CROSSINGS_OVER_BUDGET`) are capacity
 limits that need a one-line tweak rather than a topology change.
-See also SYNTAX.md §3.10 for the underlying model.
+See also SYNTAX.md §3.11 for the underlying model.
 
 ### `E_AMBIGUOUS_PLACEMENT`
 
@@ -558,7 +581,7 @@ hub { shape: rect, label: "hub", size: 7x5 }   # layout: tb — 7 N/S slots
 Each extra cell-unit adds 1 slot; the error names the exact recipe.
 The bind pass auto-bumps highway and hub-rect breadth by +1 when its
 parity disagrees with the trace count (so slots land on cell centres);
-you may see a 5x7 hub render as 5x8 in that case. See SYNTAX.md §3.10
+you may see a 5x7 hub render as 5x8 in that case. See SYNTAX.md §3.11
 for why explicit sizing is the author's call (determinism — silent
 growth on edge-count changes would shift the whole grid).
 

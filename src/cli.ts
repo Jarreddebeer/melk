@@ -27,6 +27,7 @@ import { assignSlots } from "./layout/slots.js";
 import { routeChannels } from "./layout/channels.js";
 import { applyModulePortEndpoints } from "./layout/module-route.js";
 import { applyModuleAlignment, placeModules } from "./layout/module-place.js";
+import { autoAlignViaShims } from "./layout/via-shim.js";
 import { renderSVG } from "./render/svg.js";
 import {
   BUILTIN_THEME_NAMES,
@@ -219,6 +220,10 @@ function main(): void {
     // module body inside its synthetic cell along the cross-flow axis
     // so face-to-face flow-axis ports line up with their counterparts.
     applyModuleAlignment(model, placement, slots);
+    // Auto-centring shim for highway via members: align each member's
+    // slot cluster pixel-parity with the highway's, so via traces
+    // don't get a 4-px C-curve kink on every entry/exit.
+    autoAlignViaShims(model, placement, slots);
     const routing = routeChannels(model, placement, slots);
     // DESIGN-PHASE5-MODULES.md §4.1 — replace trace endpoints on
     // module-internal edges with the internal node's actual port pixel.
@@ -279,6 +284,7 @@ function runValidate(source: string, filePath: string): number {
     stage = "assignSlots";
     const slots = assignSlots(model, placement);
     applyModuleAlignment(model, placement, slots);
+    autoAlignViaShims(model, placement, slots);
     stage = "routeChannels";
     routeChannels(model, placement, slots);
     process.stdout.write("OK\n");

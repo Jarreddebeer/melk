@@ -11,12 +11,14 @@ import { bind } from "../src/bind/bind.js";
 import { place } from "../src/layout/place.js";
 import { assignSlots } from "../src/layout/slots.js";
 import { routeChannels } from "../src/layout/channels.js";
+import { autoAlignViaShims } from "../src/layout/via-shim.js";
 import type { Point } from "../src/layout/channels.js";
 
 function route(src: string) {
   const m = bind(parse(tokenize(src)));
   const p = place(m);
   const s = assignSlots(m, p);
+  autoAlignViaShims(m, p, s);
   return { model: m, placement: p, routing: routeChannels(m, p, s) };
 }
 
@@ -325,5 +327,350 @@ describe("placer — TB bus/fan-out median producer column-aligns with hub", () 
     const hubCenterCol = hub.col + (hubNode.size.width - 1) / 2;
     const c2CenterCol = c2.col + (c2Node.size.width - 1) / 2;
     expect(c2CenterCol).toBe(hubCenterCol);
+  });
+});
+
+describe("channel routing — slot pixel as boundary-leg perp coord", () => {
+  it("Via-half slot on a cell boundary doesn't get a chamfer at the box face", () => {
+    // Regression: ex 18 src_a slot 1 (slot index 2.5 on a 7-wide face)
+    // landed at x = box.left + 24 px = the col26/col27 boundary. The old
+    // pixelizer set the V-channel coord to col26's CENTER (x=212) instead
+    // of the slot pixel (x=216), forcing a 4-px chamfer right at the
+    // source box face. With the fix, the V leg holds srcSlotPx.x, so the
+    // polyline exits the box dead-vertical for at least one whole cell
+    // before the first chamfer.
+    const src = `
+      layout: tb
+      crossings: 10
+      src_a { size: 7x5 }
+      src_b { size: 7x5 }
+      src_c { size: 7x5 }
+      dst_x { size: 7x5 }
+      dst_y { size: 7x5 }
+      dst_z { size: 7x5 }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+      src_a -> dst_y { via: hwy }
+      src_b -> dst_z { via: hwy }
+      src_b -> dst_y { via: hwy }
+      src_c -> dst_x { via: hwy }
+      src_c -> dst_z { via: hwy }
+    `;
+    const { model, routing } = route(src);
+    // Both src_a -> hwy traces should exit src_a's south face dead-
+    // vertical (no horizontal jog at the box border). Polyline format:
+    // points[0] = slot pixel, points[1] = first turn. The vector from
+    // points[0] to points[1] must be purely vertical (dx = 0).
+    let checked = 0;
+    for (let i = 0; i < model.edges.length; i++) {
+      const e = model.edges[i]!;
+      if (e.from !== "src_a" || e.to !== "hwy") continue;
+      const pl = routing.polylines.find((p) => p.edgeIndex === i)!;
+      const p0 = pl.points[0]!;
+      const p1 = pl.points[1]!;
+      expect(
+        p0.x,
+        `src_a -> hwy edge ${i}: first leg must hold slot.x (no exit chamfer)`,
+      ).toBe(p1.x);
+      checked++;
+    }
+    expect(checked).toBe(2);
+  });
+
+  it("Sibling via traces (src→hwy and hwy→dst) don't cross each other (ex 27)", () => {
+    // Regression: ex 27 had sibling crossings on BOTH ends of the
+    // highway. src_a→hwy slots (E face) crossed because the midCol
+    // picker rejected the col adjacent to hwy (clearance check saw
+    // hwy in cellOwner). hwy→dst_x and hwy→dst_z slots (W face of
+    // dst) crossed because the SECOND sibling picked a col that
+    // produced a crossing with its slot-0 sibling.
+    //
+    // Fixes: (a) at the V-leg's tgt-bend row, skip tgt's footprint
+    // in the clearance check (lets slot 0 of src→hwy reach the
+    // hwy-adjacent col); (b) when a sibling V leg to the same
+    // (src, tgt) pair is already placed, sweep from the opposite
+    // end of the corridor, with the direction chosen by goingUp/
+    // goingDown (slot 0 col < slot 1 col for goingUp; slot 0 col >
+    // slot 1 col for goingDown).
+    const src = `
+      layout: lr
+      crossings: 10
+      src_a { size: 7x5 }
+      dst_x { size: 7x5 }
+      dst_y { size: 7x5 }
+      src_b { size: 7x5 }
+      dst_z { size: 7x5 }
+      src_c { size: 7x5 }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+      src_a -> dst_y { via: hwy }
+      src_b -> dst_y { via: hwy }
+      src_b -> dst_z { via: hwy }
+      src_c -> dst_x { via: hwy }
+      src_c -> dst_z { via: hwy }
+    `;
+    const { model, routing } = route(src);
+
+    function pairPolylines(from: string, to: string): Point[][] {
+      return model.edges
+        .map((e, i) => ({ e, i }))
+        .filter(({ e }) => e.from === from && e.to === to)
+        .map(({ i }) => routing.polylines.find((p) => p.edgeIndex === i)!.points);
+    }
+
+    // src_a / src_c each fan out two via traces to hwy on the E face.
+    for (const src of ["src_a", "src_c"]) {
+      const polys = pairPolylines(src, "hwy");
+      expect(polys.length, `expected 2 ${src}→hwy edges`).toBe(2);
+      expect(
+        polylinesIntersect(polys[0]!, polys[1]!),
+        `${src}'s two via traces must not cross`,
+      ).toBe(false);
+    }
+
+    // hwy fans into dst_x (goingUp from hwy) and dst_z (goingDown)
+    // each with two via traces on the dst's W face.
+    for (const dst of ["dst_x", "dst_z"]) {
+      const polys = pairPolylines("hwy", dst);
+      expect(polys.length, `expected 2 hwy→${dst} edges`).toBe(2);
+      expect(
+        polylinesIntersect(polys[0]!, polys[1]!),
+        `hwy→${dst}'s two via traces must not cross`,
+      ).toBe(false);
+    }
+  });
+
+  it("hwy -> dst trace lands on the target face dead-vertical (arrow points down)", () => {
+    // Regression: ex 18 hwy -> dst_x ended with a 4-px horizontal stub
+    // because the LAST V leg's perp coord came from cellCx(bendCell)
+    // instead of tgtSlotPx.x. The SVG marker-end follows the last
+    // segment's orientation, so a horizontal stub → arrow points right.
+    // Fix: tgt slot pixel coord is held through the last V leg, so the
+    // final approach is straight down into the N face.
+    const src = `
+      layout: tb
+      crossings: 10
+      src_a { size: 7x5 }
+      src_b { size: 7x5 }
+      src_c { size: 7x5 }
+      dst_x { size: 7x5 }
+      dst_y { size: 7x5 }
+      dst_z { size: 7x5 }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+      src_a -> dst_y { via: hwy }
+      src_b -> dst_z { via: hwy }
+      src_b -> dst_y { via: hwy }
+      src_c -> dst_x { via: hwy }
+      src_c -> dst_z { via: hwy }
+    `;
+    const { model, routing } = route(src);
+    // For each hwy -> dst_* edge, the last two polyline points must
+    // share x (last segment is vertical). dst_* sit below the highway
+    // under TB, so the trace approaches from above.
+    for (let i = 0; i < model.edges.length; i++) {
+      const e = model.edges[i]!;
+      if (e.from !== "hwy" || !e.to.startsWith("dst_")) continue;
+      const pl = routing.polylines.find((p) => p.edgeIndex === i)!;
+      const last = pl.points[pl.points.length - 1]!;
+      const secondLast = pl.points[pl.points.length - 2]!;
+      expect(
+        last.x,
+        `hwy -> ${e.to} edge ${i}: last segment must be vertical so arrow points down (got dx=${last.x - secondLast.x})`,
+      ).toBe(secondLast.x);
+    }
+  });
+});
+
+describe("placer — per-node offset", () => {
+  it("fractional offset splits into integer cell + sub-cell pixel shift", () => {
+    // `offset: '0x0.5'` decomposes into 0 integer rows (cell stays put)
+    // and 4 sub-cell pixels (Placement.pixelShift = {dy: 4}). The
+    // routing slot-pixel computation and the box renderer both add the
+    // shift, so a half-cell-misaligned source can be nudged to land
+    // its slot on the trace bundle's grid line.
+    const src = `
+      layout: lr
+      crossings: 0
+      src_b { size: 7x5, offset: "0x0.5" }
+      dst_y { size: 7x5, offset: "0x-0.5" }
+      hwy { shape: highway }
+      src_b -> dst_y { via: hwy }
+    `;
+    const { placement } = route(src);
+    expect(placement.pixelShift.get("src_b")).toEqual({ dx: 0, dy: 4 });
+    expect(placement.pixelShift.get("dst_y")).toEqual({ dx: 0, dy: -4 });
+    // Mixed integer + fractional: `offset: '1x1.5'` → cell shifts +1
+    // col / +1 row, pixelShift dx=0, dy=4 (the .5 fraction).
+    const src2 = `
+      layout: lr
+      crossings: 0
+      m { size: 5x5, offset: "1x1.5" }
+      a { size: 5x5 }
+      a -> m
+    `;
+    const { placement: p2 } = route(src2);
+    expect(p2.pixelShift.get("m")).toEqual({ dx: 0, dy: 4 });
+  });
+
+  it("ex 27 half-cell offset eliminates the slot-misalignment wiggle", () => {
+    // Regression: the visible 4-px C-curve on src_b ↔ hwy in ex 27 came
+    // from src_b's 7-wide face placing slots at half-cell y (96, 104)
+    // while the 6-wide hwy placed them at integer y (100, 108). Shifting
+    // src_b down by 0.5 cell with `offset: '0x0.5'` puts the slot
+    // pixels on the hwy grid; both src_b → hwy via-half traces become
+    // single straight horizontal segments.
+    const src = `
+      layout: lr
+      crossings: 10
+      src_a { size: 7x5 }
+      src_c { size: 7x5 }
+      src_b { size: 7x5, offset: "0x0.5" }
+      dst_x { size: 7x5 }
+      dst_z { size: 7x5 }
+      dst_y { size: 7x5, offset: "0x-0.5" }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+      src_a -> dst_y { via: hwy }
+      src_b -> dst_z { via: hwy }
+      src_b -> dst_y { via: hwy }
+      src_c -> dst_x { via: hwy }
+      src_c -> dst_z { via: hwy }
+    `;
+    const { model, routing } = route(src);
+    // For each src_b → hwy polyline and each hwy → dst_y polyline,
+    // every waypoint must share a single y (= dead-straight horizontal).
+    const targets = [
+      { from: "src_b", to: "hwy" },
+      { from: "hwy", to: "dst_y" },
+    ];
+    for (const { from, to } of targets) {
+      const polys = model.edges
+        .map((e, i) => ({ e, i }))
+        .filter(({ e }) => e.from === from && e.to === to)
+        .map(({ i }) => routing.polylines.find((p) => p.edgeIndex === i)!.points);
+      for (const pts of polys) {
+        const ys = new Set(pts.map((p) => p.y));
+        expect(
+          ys.size,
+          `${from} → ${to} polyline must be horizontal (y values: ${[...ys].join(",")})`,
+        ).toBe(1);
+      }
+    }
+  });
+
+  it("integer-cell offset shifts the cell on the grid", () => {
+    const src = `
+      layout: lr
+      crossings: 0
+      a { size: 5x5 }
+      b { size: 5x5, offset: "0x2" }
+      a -> b
+    `;
+    const { placement } = route(src);
+    // a at default position; b shifted south by 2 cells from where the
+    // flow pass would have placed it. The pixel shift map is empty
+    // because the offset has no fractional component.
+    expect(placement.pixelShift.has("b")).toBe(false);
+    const aCell = placement.cells.get("a")!;
+    const bCell = placement.cells.get("b")!;
+    // Under LR, the flow pass places b at a's row + 0; offset 0x2 moves
+    // it two rows south.
+    expect(bCell.row - aCell.row).toBe(2);
+  });
+
+  it("rejects unquoted offset and malformed strings", () => {
+    expect(() => route(`a { size: 5x5, offset: 0x1 }\na -> b`)).toThrow(/offset must be a quoted string/);
+    expect(() => route(`a { size: 5x5, offset: "bad" }\na -> b`)).toThrow(/must be in the form 'WxH'/);
+  });
+
+  it("auto-shim aligns ex 27 same-row via traces without manual offset", () => {
+    // Option 2 of the half-cell slot misalignment fix: the placer's
+    // autoAlignViaShims pass shifts each via source/target by ±4 px on
+    // the perp axis so its slot cluster lines up with the highway's
+    // cluster. Without it (and without the manual `offset:` from
+    // Option 1), src_b's two outgoing via-half traces bend by 4 px on
+    // their entry to hwy. With the auto shim, every same-row trace is
+    // a single horizontal segment.
+    const src = `
+      layout: lr
+      crossings: 10
+      src_a { size: 7x5 }
+      dst_x { size: 7x5 }
+      dst_y { size: 7x5 }
+      src_b { size: 7x5 }
+      dst_z { size: 7x5 }
+      src_c { size: 7x5 }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+      src_a -> dst_y { via: hwy }
+      src_b -> dst_y { via: hwy }
+      src_b -> dst_z { via: hwy }
+      src_c -> dst_x { via: hwy }
+      src_c -> dst_z { via: hwy }
+    `;
+    const { model, placement, routing } = route(src);
+    // src_b and dst_y are on the same row as hwy; the auto pass should
+    // have given them ±4 px sub-cell shims. src_a / src_c L-bend to the
+    // highway, but the auto pass shims them too so their face slots
+    // sit on the highway's slot-pixel grid.
+    expect(placement.pixelShift.get("src_b")).toEqual({ dx: 0, dy: 4 });
+    expect(placement.pixelShift.get("dst_y")).toEqual({ dx: 0, dy: -4 });
+    expect(placement.pixelShift.get("src_a")).toEqual({ dx: 0, dy: 4 });
+    expect(placement.pixelShift.get("src_c")).toEqual({ dx: 0, dy: -4 });
+    // The two same-row trace pairs (src_b → hwy and hwy → dst_y) must
+    // both be single-segment horizontals.
+    const targets = [
+      { from: "src_b", to: "hwy" },
+      { from: "hwy", to: "dst_y" },
+    ];
+    for (const { from, to } of targets) {
+      const polys = model.edges
+        .map((e, i) => ({ e, i }))
+        .filter(({ e }) => e.from === from && e.to === to)
+        .map(({ i }) => routing.polylines.find((p) => p.edgeIndex === i)!.points);
+      for (const pts of polys) {
+        const ys = new Set(pts.map((p) => p.y));
+        expect(
+          ys.size,
+          `${from} → ${to} polyline must be horizontal (y values: ${[...ys].join(",")})`,
+        ).toBe(1);
+      }
+    }
+  });
+
+  it("auto-shim respects manual offset (manual wins)", () => {
+    // When the author has dialed in an `offset:` with a fractional
+    // pixel shift, the auto pass must leave it alone. Otherwise authors
+    // can't override the heuristic when it picks wrong.
+    const src = `
+      layout: lr
+      crossings: 0
+      src_a { size: 7x5, offset: "0x0.25" }
+      dst_x { size: 7x5 }
+      hwy { shape: highway }
+      src_a -> dst_x { via: hwy }
+    `;
+    const { placement } = route(src);
+    // Manual: 0.25 * 8 = 2 px (a deliberately quirky value the auto
+    // shim would never produce).
+    expect(placement.pixelShift.get("src_a")).toEqual({ dx: 0, dy: 2 });
+  });
+
+  it("auto-shim is no-op when parity already matches", () => {
+    // 5-wide hwy + 5-tall via sources: (faceLen - traceCount) parity
+    // matches between source's E face and hwy's W face, so the slot
+    // clusters are already aligned and the shim is 0.
+    const src = `
+      layout: lr
+      crossings: 0
+      src_a { size: 5x5 }
+      dst_x { size: 5x5 }
+      hwy { shape: highway, size: 5x1 }
+      src_a -> dst_x { via: hwy }
+    `;
+    const { placement } = route(src);
+    expect(placement.pixelShift.has("src_a")).toBe(false);
+    expect(placement.pixelShift.has("dst_x")).toBe(false);
   });
 });

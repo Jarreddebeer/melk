@@ -109,6 +109,12 @@ export function routeChannels(
   // DESIGN-PHASE4.md §3 "lazy channel growth". Keys: `${row},${col}`.
   const vLegClaim = new Map<string, number>();
   const hLegClaim = new Map<string, number>();
+  // Sibling-aware sweep direction: for each (srcId, tgtId) pair we've
+  // already routed, remember the midCol picked. Subsequent edges to the
+  // same pair sweep from the OPPOSITE end of the corridor so the two
+  // V-legs end up on opposite sides of the midpoint, avoiding the
+  // X-crossing where slot 1's V cuts through slot 0's H-out.
+  const siblingMidCols = new Map<string, number>();
   // Channel lane bookkeeping for crossing detection. Keys:
   //   `V|<col>` and `H|<row>`. Value: list of {edgeIndex, rowSpan or
   //   colSpan} for crossings detection.
@@ -179,8 +185,16 @@ export function routeChannels(
     const tgtW = Math.ceil(tgtSize.width);
     const tgtH = Math.ceil(tgtSize.height);
 
-    const srcExit = slotPixel(slot.sourceSide, slot.sourceSlot, srcCell, srcW, srcH, layout);
-    const tgtEntry = slotPixel(slot.targetSide, slot.targetSlot, tgtCell, tgtW, tgtH, layout);
+    const srcShift = placement.pixelShift.get(edge.from);
+    const tgtShift = placement.pixelShift.get(edge.to);
+    const srcExitRaw = slotPixel(slot.sourceSide, slot.sourceSlot, srcCell, srcW, srcH, layout);
+    const tgtEntryRaw = slotPixel(slot.targetSide, slot.targetSlot, tgtCell, tgtW, tgtH, layout);
+    const srcExit = srcShift
+      ? { x: srcExitRaw.x + srcShift.dx, y: srcExitRaw.y + srcShift.dy }
+      : srcExitRaw;
+    const tgtEntry = tgtShift
+      ? { x: tgtEntryRaw.x + tgtShift.dx, y: tgtEntryRaw.y + tgtShift.dy }
+      : tgtEntryRaw;
 
     // The "exit cell" of the source: the empty cell immediately adjacent
     // to the slot, outside the footprint.
@@ -238,6 +252,7 @@ export function routeChannels(
       srcH,
       tgtW,
       tgtH,
+      siblingMidCols,
     );
 
     // Claim interior cells of long legs so subsequent edges shift to
@@ -685,6 +700,7 @@ function computeCellPath(
   srcH: number,
   tgtW: number,
   tgtH: number,
+  siblingMidCols: Map<string, number>,
 ): Cell[] {
   const srcAxis: "V" | "H" = srcSide === "E" || srcSide === "W" ? "V" : "H";
   const tgtAxis: "V" | "H" = tgtSide === "E" || tgtSide === "W" ? "V" : "H";
@@ -788,8 +804,12 @@ function computeCellPath(
   // and prior bends, and (b) the V-leg interior cells between the two
   // bends are not already claimed by another edge's V leg.
   if (srcAxis === "V" && tgtAxis === "V") {
+    const pairKey = `${srcId}|${tgtId}`;
+    const siblingCol = siblingMidCols.get(pairKey);
     const candidate = pickMidCol(srcExit.col, tgtExit.col, srcExit.row, tgtExit.row,
-                                  cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
+                                  cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId,
+                                  siblingCol);
+    siblingMidCols.set(pairKey, candidate);
     const bend1: Cell = { row: srcExit.row, col: candidate };
     const bend2: Cell = { row: tgtExit.row, col: candidate };
     return claimZPath(srcExit, bend1, bend2, tgtExit, /*axis=*/ "V",
@@ -1152,6 +1172,7 @@ function pickMidCol(
   _edgeIndex: number,
   srcId: string,
   tgtId: string,
+  siblingCol: number | undefined,
 ): number {
   // Lane ordering: a fan-out (or bus, or any cluster of parallel V
   // traces) needs lanes assigned in monotonic order so the H exit runs
@@ -1166,10 +1187,37 @@ function pickMidCol(
   // Sweep direction: outward-from-lo when target is above src, outward-
   // from-hi when target is below. Identical srcRow/tgtRow (rare) falls
   // back to midpoint.
+  //
+  // Sibling override: when a prior edge to the same (src, tgt) pair
+  // already claimed a midCol, reverse the sweep so this edge picks the
+  // OPPOSITE end of the corridor. That places the two siblings on
+  // either side of their shared midpoint, preserving the slot ordering
+  // and avoiding the X-crossing where slot 1's V-leg cuts through slot
+  // 0's H-out (see ex 27 hwy→dst_x/dst_z; the master allocator gave
+  // both siblings the inner col, which crossed).
   const goingUp = row2 < row1;
   const goingDown = row2 > row1;
-  const start = goingUp ? lo + 1 : goingDown ? hi - 1 : Math.round((srcCol + tgtCol) / 2);
-  const step = goingUp ? +1 : goingDown ? -1 : 0;
+  let start: number;
+  let step: number;
+  if (siblingCol !== undefined) {
+    // No-crossing rule for sibling V-V Z traces sharing the same
+    // (src, tgt) pair:
+    //   goingUp:   slot 0 col < slot 1 col   (slot 1 to the right)
+    //   goingDown: slot 0 col > slot 1 col   (slot 1 to the left)
+    // The sibling is slot 0 (it was picked first). This edge is slot 1,
+    // so sweep from the appropriate end of the corridor.
+    if (goingUp) {
+      start = hi - 1;
+      step = -1;
+    } else {
+      // goingDown or flat: prefer leftward
+      start = lo + 1;
+      step = +1;
+    }
+  } else {
+    start = goingUp ? lo + 1 : goingDown ? hi - 1 : Math.round((srcCol + tgtCol) / 2);
+    step = goingUp ? +1 : goingDown ? -1 : 0;
+  }
   // Progressive relaxation: 2-cell clearance → 1-cell → 0-cell, then
   // drop the face-clearance rule. Each pass tries every column at the
   // current clearance level before relaxing.
@@ -1264,7 +1312,7 @@ function isVLaneFree(
   cellOwner: Map<string, string>,
   vLegClaim: Map<string, number>,
   _srcId: string,
-  _tgtId: string,
+  tgtId: string,
   clearance: number = 0,
 ): boolean {
   const lo = Math.min(row1, row2);
@@ -1273,9 +1321,26 @@ function isVLaneFree(
     const k = cellKey(r, col);
     if (vLegClaim.has(k)) return false;
     if (cellOwner.has(k)) return false;
+    // Tgt-side bend row: at row2 (= tgtExit.row), the V leg meets the
+    // H leg landing on tgt's face. Clearance from tgt at row2 would
+    // forbid the col adjacent to tgt — the best lane for the outer
+    // sibling and the one that avoids sibling crossings (see ex 27's
+    // src_a via traces, which used to cross because slot 0 fell back
+    // to the inner col when this rule blocked the outer one).
+    //
+    // Src-side clearance at row1 is KEPT. Relaxing it lets every V
+    // leg pick the col adjacent to src and exhausts the corridor for
+    // the far side (see ex 23: 4 hwy→sink_X edges share rows; if any
+    // claims col srcCol+1, the next runs out of lanes). The dst side
+    // crossing-avoidance for hwy→dst is handled by `siblingOppositeCol`
+    // in pickMidCol, which reverses the sweep direction when a prior
+    // sibling already claimed a col.
+    const atTgtBend = r === row2;
     for (let d = 1; d <= clearance; d++) {
-      if (cellOwner.has(cellKey(r, col - d))) return false;
-      if (cellOwner.has(cellKey(r, col + d))) return false;
+      const left = cellOwner.get(cellKey(r, col - d));
+      if (left !== undefined && !(atTgtBend && left === tgtId)) return false;
+      const right = cellOwner.get(cellKey(r, col + d));
+      if (right !== undefined && !(atTgtBend && right === tgtId)) return false;
     }
   }
   return true;
@@ -1288,7 +1353,7 @@ function isHLaneFree(
   cellOwner: Map<string, string>,
   hLegClaim: Map<string, number>,
   _srcId: string,
-  _tgtId: string,
+  tgtId: string,
   clearance: number = 0,
 ): boolean {
   const lo = Math.min(col1, col2);
@@ -1297,9 +1362,15 @@ function isHLaneFree(
     const k = cellKey(row, c);
     if (hLegClaim.has(k)) return false;
     if (cellOwner.has(k)) return false;
+    // Mirror of isVLaneFree's tgt-bend-only rule: at col2 (= tgtExit.col),
+    // tgt clearance is skipped; src clearance and unrelated footprints
+    // still apply.
+    const atTgtBend = c === col2;
     for (let d = 1; d <= clearance; d++) {
-      if (cellOwner.has(cellKey(row - d, c))) return false;
-      if (cellOwner.has(cellKey(row + d, c))) return false;
+      const above = cellOwner.get(cellKey(row - d, c));
+      if (above !== undefined && !(atTgtBend && above === tgtId)) return false;
+      const below = cellOwner.get(cellKey(row + d, c));
+      if (below !== undefined && !(atTgtBend && below === tgtId)) return false;
     }
   }
   return true;
@@ -1486,12 +1557,14 @@ function pixelizeCellPath(
   // Leg k covers cellPath indices [legStarts[k], legStarts[k+1]].
   const legStarts: number[] = [0, ...bendIndices, cellPath.length - 1];
 
-  // For leg k, the perp coord is:
-  //   - k === 0 (first leg): perp held from the source slot — for a V
-  //     first leg the channel-x equals srcSlotPx.x (the slot lives on
-  //     the channel-column boundary). For an H first leg, perp = srcSlotPx.y.
-  //   - k === last: same idea but from the target slot.
-  //   - intermediate: channel-center perp at the bend cell.
+  // For leg k, the perp coord is the slot pixel's perp on the boundary
+  // legs (k === 0 from srcSlotPx, k === last from tgtSlotPx) and the
+  // channel-center on intermediate bend cells. Holding the slot pixel
+  // through the boundary leg means a slot on a cell boundary (fractional
+  // slot index) doesn't get a 4-px lateral chamfer the moment the trace
+  // exits the box. Same rationale on the last leg lets the trace land
+  // square on the target face (so marker-end orients along the face
+  // normal, not a horizontal stub).
   //
   // Note: for a single-leg cellPath where k=0 IS k=last, the first-leg
   // branch wins; the trailing slot endpoint is appended separately and
@@ -1503,10 +1576,10 @@ function pixelizeCellPath(
     const b = cellPath[endIdx]!;
     const axis: "V" | "H" = a.col === b.col ? "V" : "H";
     if (k === 0) {
-      return { axis, coord: axis === "V" ? cellCx(a) : srcSlotPx.y };
+      return { axis, coord: axis === "V" ? srcSlotPx.x : srcSlotPx.y };
     }
     if (k === legStarts.length - 2) {
-      return { axis, coord: axis === "V" ? cellCx(b) : tgtSlotPx.y };
+      return { axis, coord: axis === "V" ? tgtSlotPx.x : tgtSlotPx.y };
     }
     return { axis, coord: axis === "V" ? cellCx(a) : cellCy(a) };
   };

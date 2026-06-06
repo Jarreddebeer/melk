@@ -965,6 +965,30 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
  * each row/col.
  */
 function normalise(model: Model, ctx: PlaceCtx): Placement {
+  // Apply per-node author offsets BEFORE the grid extent is computed,
+  // so a shifted node enlarges the diagram bounds instead of getting
+  // clipped. The INTEGER part of the offset moves the cell; the
+  // FRACTIONAL part (a half-cell, expressed as `h` in the source) is
+  // accumulated as a pixel-level shift carried in `Placement.pixelShift`
+  // and applied at slot-pixel and node-render time. Splitting this way
+  // keeps the grid integer (so `colX`/`rowY` lookups stay valid) while
+  // still letting the author fix a 4-px slot-cluster misalignment.
+  const offsetOf = new Map(model.nodes.map((n) => [n.id, n.offset]));
+  const pixelShift = new Map<string, { dx: number; dy: number }>();
+  if ([...offsetOf.values()].some((o) => o !== undefined)) {
+    for (const [id, c] of ctx.cells) {
+      const off = offsetOf.get(id);
+      if (off === undefined) continue;
+      const intCol = Math.trunc(off.dCol);
+      const intRow = Math.trunc(off.dRow);
+      const fracCol = off.dCol - intCol;
+      const fracRow = off.dRow - intRow;
+      ctx.cells.set(id, { ...c, row: c.row + intRow, col: c.col + intCol });
+      if (fracCol !== 0 || fracRow !== 0) {
+        pixelShift.set(id, { dx: fracCol * 8, dy: fracRow * 8 });
+      }
+    }
+  }
   // Compute grid extent from each node's FOOTPRINT, not just its anchor.
   // A node at anchor (r, c) with size (w, h) occupies rows
   // [r, r + ceil(h) - 1] and cols [c, c + ceil(w) - 1].
@@ -990,6 +1014,7 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
       colUnits: [],
       flowAxis: ctx.flowAxis,
       forwardAt: new Map(),
+      pixelShift: new Map(),
     };
   }
   // Back-edge perimeter buffer: when the model has back-edges, reserve
@@ -1024,5 +1049,6 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
     colUnits,
     flowAxis: ctx.flowAxis,
     forwardAt: new Map(ctx.forward),
+    pixelShift,
   };
 }
