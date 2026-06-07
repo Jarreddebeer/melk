@@ -22,6 +22,7 @@
 #      the module as a whole.
 
 layout: lr
+crossings: 5
 theme: "./themes/document-light-with-frames.json"
 title: "Platform overview"
 subtitle: "Edge · Ingest · Compute · Storage · Observability"

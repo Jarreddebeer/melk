@@ -629,9 +629,39 @@ a comment header — there is no block form.
 | `tags`   | identifier or `[a, b, ...]`             | Theme tag list (same semantics as node tags). For edges, `trace`/`trace-width`/`dash`/`opacity` apply. |
 | `via`    | highway-node identifier (single)        | Route through this highway. Multi-highway `via: [a, b]` is not supported (`E_VIA_MULTI_NOT_SUPPORTED`). |
 | `pivot`  | `source` or `target`                    | Z-route pivot side override. Rejected on structural edges (those produced by primitives).            |
-| `exit`   | `N`, `E`, `S`, `W`                      | Force the source face. Rejected on back-edges and via-edges.                                         |
-| `entry`  | `N`, `E`, `S`, `W`                      | Force the target face. Same restrictions.                                                            |
+| `exit`   | `N`, `E`, `S`, `W`                      | Force the source face. Rejected on back-edges and via-edges. See note on U-routing below.            |
+| `entry`  | `N`, `E`, `S`, `W`                      | Force the target face. Same restrictions. See note on U-routing below.                               |
 | `avoid`  | name or edge ref or `[a, b -> c, ...]`  | Routing must avoid these obstacles. Members can be node ids, primitive names, edgeset names, or `a -> b` edge refs. |
+
+#### `exit:` / `entry:` and U-routing
+
+The default router picks each face from the edge's forward direction.
+Use `exit:` to force the source face and `entry:` to force the target
+face — useful when the natural geometry would route the trace through
+another box.
+
+When `entry:` points to a face on the **wrong side** of the source
+(e.g. `entry: S` on a target whose source sits above it), the router
+auto-routes a perimeter U: the trace exits the source perpendicular
+to its face, runs along a perimeter row/col past the target's outer
+edge, then approaches the target's face perpendicular to it (arrow
+points into the face).
+
+```melk
+# query is north of orders_rm; we want the trace to enter from the
+# south, not cut across the read-models in between.
+query -> orders_rm { entry: S }
+```
+
+The placer reserves 2 perimeter cells around the diagram whenever any
+edge sets `exit:` or `entry:` so the router has room to wrap. Each
+trace's first segment runs perpendicular to its exit face for at
+least one cell before any bend (no "running down the side of the
+source box" artefacts).
+
+If a perimeter row/col isn't free, the router falls back to the
+standard L/Z — which may cut through the obstacle. Re-check your
+layout if the U doesn't materialise.
 
 ### 4.4 Node references
 

@@ -12,7 +12,7 @@ title: "End-to-end request flow (framed)"
 import "./modules/payments.melk" as payments
 import "./modules/notifier.melk" as notifier
 
-frontend { size: 9x5 }
+frontend { size: 9x5, offset: "0x1" }
 customer { size: 9x5 }
 frontend -> payments.api
 payments.gateway -> notifier.receive

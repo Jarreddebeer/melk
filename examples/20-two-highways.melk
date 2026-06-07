@@ -19,7 +19,7 @@ svc_c { size: 7x5 }
 ext_3 { size: 7x5 }
 sink_x { size: 7x5 }
 sink_z { size: 7x5 }
-sink_y { shape: rect, size: 9x7 }
+sink_y { shape: rect, size: 9x7, offset: "0x-1" }
 ingress { shape: highway }
 egress  { shape: highway }
 

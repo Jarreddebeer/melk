@@ -8,7 +8,7 @@ crossings: 10
 # to the south, and the bundle's traces run top-to-bottom through
 # the dashed highway box.
 
-src_a { size: 7x5 }
+src_a { size: 7x5, slot-order: declaration }
 dst_x { size: 7x5 }
 dst_y { size: 7x5 }
 dst_z { size: 7x5 }

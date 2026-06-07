@@ -20,7 +20,7 @@ Before writing any `.melk`, read these two files end-to-end:
   - SYNTAX.md — the complete grammar and semantics. Pay particular
     attention to §3.11 (placement model) — it's the mental model
     behind every `E_AMBIGUOUS_PLACEMENT` you'll hit.
-  - EXAMPLES.md — 39 worked examples indexed by feature, plus
+  - EXAMPLES.md — 43 worked examples indexed by feature, plus
     copy-pasteable recipes for common patterns and §5 (a catalogue
     of placement errors with the exact source shapes that trigger
     them).
@@ -120,6 +120,16 @@ Both files live in the project root.
   uniformly. If the author genuinely wants both shapes in one
   diagram, that's a stylistic choice and the meaning belongs in a
   legend entry, not in the shape alone.
+- **`entry:` / `exit:` are the right tool for "route around an
+  obstacle".** When a trace's natural L-route would cut through
+  another box, set `entry:` (or `exit:`) on the offending edge with
+  the face the trace should enter (or leave). Example:
+  `query -> orders_rm { entry: S }` makes the router wrap the trace
+  around the south of any boxes in between and approach `orders_rm`
+  from below. Don't reach for `offset:` to dodge — that moves the
+  node; `entry:`/`exit:` move the trace, which is almost always what
+  you actually want. Rejected on back-edges (already perimeter-routed)
+  and on via-edges (`E_EXIT_ON_VIA_EDGE`).
 
 ## Workflow
 

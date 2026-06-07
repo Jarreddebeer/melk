@@ -26,10 +26,15 @@ npm install -g @jarreddebeer/melk
 The CLI binary is `melk`:
 
 ```sh
-melk render   examples/01-simple.melk > out.svg
+melk render   examples/01-simple.melk            # writes examples/01-simple.svg next to input
+melk render   examples/01-simple.melk -o out.svg # explicit output path
 melk validate examples/01-simple.melk
 melk format   examples/01-simple.melk
 ```
+
+`render` defaults `-o` to `<input-without-.melk>.svg` next to the
+input. If `-o` resolves to the input path, melk appends `.svg` and
+warns rather than clobbering the source.
 
 CLI subcommands: `parse`, `bind`, `validate`, `format`, `render`. Run
 with no args for full usage.
@@ -45,7 +50,7 @@ Or run from a local checkout:
 ```sh
 git clone <this repo> && cd melk
 npm install
-npx tsx src/cli.ts render examples/01-simple.melk > out.svg
+npx tsx src/cli.ts render examples/01-simple.melk
 ```
 
 ## How it works
@@ -75,7 +80,7 @@ melk is built to be LLM-friendly:
   and self-contained. Every directive, attribute, shape, tag property,
   and error code is documented in one place.
 - **Worked examples by feature**: [EXAMPLES.md](EXAMPLES.md) groups
-  the 39 examples in [examples/](examples/) by what they demonstrate,
+  the 43 examples in [examples/](examples/) by what they demonstrate,
   with copy-pasteable recipes for common patterns.
 - **Structured errors with fix hints**: every error has an `E_*` code
   and a `Hint:` suffix on the high-traffic ones, so seeing
@@ -105,7 +110,7 @@ A typical LLM-driven authoring loop:
 3. LLM writes <name>.melk.
 4. Run `melk validate <name>.melk`.
 5. If non-OK, the error's Hint: tells the LLM what to fix. Iterate.
-6. Once OK, `melk render <name>.melk -o <name>.svg`.
+6. Once OK, `melk render <name>.melk` (writes `<name>.svg`).
 ```
 
 ## Features
@@ -132,7 +137,13 @@ A typical LLM-driven authoring loop:
 ### Routing
 
 - Orthogonal Manhattan routing with bend/crossing/overlap penalties.
-- Highway bundles for many-to-one or one-to-many flows.
+- Highway bundles for many-to-one or one-to-many flows. Multi-trace
+  fan-outs stair monotonically — the lane closest to the source slot
+  is also the first to bend, so adjacent chamfers don't overlap.
+- `exit:` / `entry:` per-edge face overrides force a specific source
+  or target face. The router auto-routes around the target's body
+  with a perimeter U-shape when the natural L would cut through it
+  (e.g. entering a node from its south face when the source is above).
 - Underground render mode for back-of-board routing with faded
   outlines and manhole exits.
 - X-junction materialisation for swapped opposite-direction edge pairs
@@ -155,9 +166,10 @@ A typical LLM-driven authoring loop:
 ## Project status
 
 v1.0-prep — Phase 5 (modules + alignment + themes) is functionally
-complete. 536 unit tests pass. 39 example renders cover the language
-surface. The active architecture spec is split across phase docs in
-the project root.
+complete. 411 unit tests pass. 43 example renders cover the language
+surface (42 currently render; ex 29 is a known 5×5 intersect routing
+limit tracked in [next-session.md](next-session.md)). The active
+architecture spec is split across phase docs in the project root.
 
 Active design docs:
 

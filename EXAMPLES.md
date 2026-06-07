@@ -1,6 +1,6 @@
 # melk examples cookbook
 
-39 worked examples in [examples/](examples/), indexed two ways:
+43 worked examples in [examples/](examples/), indexed two ways:
 
 - **§1 — By feature**: "I want to demonstrate X, which example shows it?"
 - **§2 — By number**: the canonical numbered list with one-line summaries.
@@ -96,6 +96,14 @@ Use the inline `>-` form. Every example below uses it.
 - [29-highway-intersect-large.melk](examples/29-highway-intersect-large.melk)
   — all-to-all 3x3 highway intersection (circuit-board feel).
 
+### Per-edge face overrides (`exit:` / `entry:`) and U-routing
+
+- [25-exit-override.melk](examples/25-exit-override.melk) — `exit:`
+  forces the highway entry face.
+- [41-cqrs-event-sourcing.melk](examples/41-cqrs-event-sourcing.melk)
+  — `entry: S` triggers an auto-built perimeter U-shape so the query
+  trace wraps under the read-models instead of cutting through them.
+
 ### Crossings
 
 - [14-crossings.melk](examples/14-crossings.melk) — two parallel
@@ -169,7 +177,7 @@ of how real diagrams compose, not just the language surface.
 
 ---
 
-## §2 — All 39 examples
+## §2 — All 43 examples
 
 Numbered list. Each row: filename → one-line description → primary
 features demonstrated.
@@ -215,6 +223,10 @@ features demonstrated.
 | 37  | [37-otc-swap-lifecycle.melk](examples/37-otc-swap-lifecycle.melk)                               | FpML-shaped OTC IRS lifecycle with regulatory + UMR branches.          | pipeline, branch (both sides), tags, legend |
 | 38  | [38-twelve-factor-web.melk](examples/38-twelve-factor-web.melk)                                 | Twelve-Factor web app: LB → web → queue → workers → DB + cache.        | fan-out, bus, branch, shared-backing |
 | 39  | [39-kubernetes-request-path.melk](examples/39-kubernetes-request-path.melk)                     | `kubectl apply` flow: API server → kubelet → pod, with etcd + scheduler. | pipeline, branch (both sides), tags, legend |
+| 40  | [40-saga-choreography.melk](examples/40-saga-choreography.melk)                                 | Order-fulfilment saga with compensating transactions.                  | pipeline, branch, back-edges, tags |
+| 41  | [41-cqrs-event-sourcing.melk](examples/41-cqrs-event-sourcing.melk)                             | CQRS + event sourcing; query path enters read-model from south.        | pipeline, branch, fan-out, `entry:` U-route |
+| 42  | [42-card-auth.melk](examples/42-card-auth.melk)                                                 | Four-party card authorisation with full return path.                   | pipeline, branch, back-edges |
+| 43  | [43-netflix-microservices.melk](examples/43-netflix-microservices.melk)                         | Netflix OSS topology: gateway → service mesh + Eureka discovery.       | pipeline, fan-out, tags, legend |
 
 (Number 26 was removed mid-project; the numbering is sparse on purpose.)
 
@@ -434,6 +446,28 @@ m     { size: 5x5, offset: "1x1.5"  }   # +1 col, +1 row, +4 px down
 The author owns collision risk — the placer doesn't re-check
 footprints after the offset applies. See SYNTAX.md §3.10 for the
 full attribute reference and caveats.
+
+### Forcing a face with `entry:` / `exit:`
+
+When the natural L-route would cut through another box, force the
+target face with `entry:`. The router auto-builds a perimeter U-shape
+so the trace exits perpendicular to the source face, wraps around the
+target's outer edge, and approaches perpendicular to the target face
+(arrow points into the face).
+
+```melk
+# Three read-models sit east of the query handler. A plain
+# `query -> orders_rm` would route west-into-east through the
+# inventory model. Force entry on the south face — the router
+# loops the trace under the read-models and approaches from below.
+query -> orders_rm { entry: S }
+```
+
+`exit:` mirrors it for the source side. Both are rejected on
+back-edges (which already use perimeter routing) and on via-edges.
+The placer reserves a 2-cell perimeter pad whenever any edge uses
+either — without it, there's no row/col "outside" the diagram for
+the U to wrap through. See [41-cqrs-event-sourcing.melk](examples/41-cqrs-event-sourcing.melk).
 
 ### Composed modules
 

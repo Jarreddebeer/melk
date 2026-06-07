@@ -2,15 +2,22 @@ layout: lr
 crossings: 30
 
 # Two highways crossing at a `+` (DESIGN-PHASE4.md §11.11). hwy_h is
-# horizontal (the lr default) and runs left-to-right between src_a/b
-# and dst_x/y. hwy_v is vertical and runs top-to-bottom between top_p/q
-# and bot_p/q. The `intersect hwy_h, hwy_v` declaration pre-places
-# both highways at the same cell.
+# horizontal (the lr default) and runs left-to-right between src_a
+# and dst_x/y/z. hwy_v is vertical and runs top-to-bottom between
+# top_p and bot_p/bot_q. The `intersect hwy_h, hwy_v` declaration
+# pre-places both highways at the same cell.
 #
 # hwy_v is marked `render: underground` so where the two highways
 # visually cross, hwy_v's traces dip below hwy_h's surface traces —
 # rendered at half opacity and thinner, with manhole circles at the
 # N and S perimeter where each trace dips and surfaces.
+#
+# bot_p / bot_q sit in the CENTRE and WEST slots of the south band
+# rather than spreading into the east slot, so neither collides with
+# dst_z (which naturally claims the south-east corner of hwy_h's
+# east band). DESIGN-PHASE4.md §11.11 notes that dense N×N intersects
+# crowd the corners; this 1×3 (horizontal) / 1×2 (vertical) mix
+# keeps every south-band sink clear of dst_z's column.
 
 dst_x { size: 7x5 }
 dst_y { size: 7x5 }
@@ -18,8 +25,7 @@ dst_z { size: 7x5 }
 top_p { size: 7x5 }
 bot_p { size: 7x5 }
 bot_q { size: 7x5 }
-bot_r { size: 7x5 }
-src_a { shape: rect, size: 7x7 }
+src_a { shape: rect, size: 7x5 }
 hwy_h { shape: highway }
 hwy_v { shape: highway, orient: vertical, render: underground }
 
@@ -31,4 +37,3 @@ src_a -> dst_z { via: hwy_h }
 
 top_p -> bot_p { via: hwy_v }
 top_p -> bot_q { via: hwy_v }
-top_p -> bot_r { via: hwy_v }

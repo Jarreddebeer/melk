@@ -45,6 +45,7 @@ function usage(): never {
   process.stderr.write("  validate              run the full pipeline; report errors only (no SVG output)\n");
   process.stderr.write("  format                emit a canonical, normalized form of the .melk source\n");
   process.stderr.write("  render [-o OUT.svg] [--theme=NAME] [--legend=VALUE]\n");
+  process.stderr.write("                        defaults -o to <input-without-.melk>.svg\n");
   process.stderr.write("         [--title=STR] [--subtitle=STR] [--caption=STR] [--no-network]\n");
   process.stderr.write("                        render to SVG; --theme overrides the in-source theme directive\n");
   process.stderr.write("                        built-in themes: " + BUILTIN_THEME_NAMES.join(", ") + "\n");
@@ -234,14 +235,31 @@ function main(): void {
       allowNetwork: !noNetwork,
     });
 
+    // Output path:
+    //   - `-o OUT` flag → write to OUT.
+    //   - no flag → write to <input-without-.melk>.<format> next to input.
+    // Safety: if the resolved output equals the input, append the format
+    // extension instead of clobbering the source.
     const outIdx = argv.indexOf("-o");
+    const outFormat = "svg";
+    let outPath: string;
     if (outIdx >= 0) {
-      const outPath = argv[outIdx + 1];
-      if (!outPath) usage();
-      writeFileSync(resolve(outPath!), svg);
+      const flagVal = argv[outIdx + 1];
+      if (!flagVal) usage();
+      outPath = resolve(flagVal!);
     } else {
-      process.stdout.write(svg);
+      const base = filePath.endsWith(".melk")
+        ? filePath.slice(0, -".melk".length)
+        : filePath;
+      outPath = `${base}.${outFormat}`;
     }
+    if (outPath === filePath) {
+      outPath = `${filePath}.${outFormat}`;
+      process.stderr.write(
+        `warning: output path equals input path; writing to '${outPath}' to avoid overwriting source.\n`,
+      );
+    }
+    writeFileSync(outPath, svg);
     return;
   }
 

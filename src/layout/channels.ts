@@ -110,11 +110,14 @@ export function routeChannels(
   const vLegClaim = new Map<string, number>();
   const hLegClaim = new Map<string, number>();
   // Sibling-aware sweep direction: for each (srcId, tgtId) pair we've
-  // already routed, remember the midCol picked. Subsequent edges to the
-  // same pair sweep from the OPPOSITE end of the corridor so the two
-  // V-legs end up on opposite sides of the midpoint, avoiding the
-  // X-crossing where slot 1's V cuts through slot 0's H-out.
-  const siblingMidCols = new Map<string, number>();
+  // already routed, remember every midCol picked. Subsequent edges to
+  // the same pair pick a col STRICTLY past the prior extremum so the
+  // bend cols form a monotone stair — goingDown each new col < min of
+  // priors, goingUp each new col > max of priors. Without monotonicity
+  // a 3+-sibling fan-in (ex 20 svc_a/b/c → sink_y) has its top and
+  // bottom siblings land on the SAME bend col with the middle sibling
+  // one cell off, and the chamfers visually overlap.
+  const siblingMidCols = new Map<string, number[]>();
   // Channel lane bookkeeping for crossing detection. Keys:
   //   `V|<col>` and `H|<row>`. Value: list of {edgeIndex, rowSpan or
   //   colSpan} for crossings detection.
@@ -572,6 +575,393 @@ function tryPerimeterRouteVV(
 }
 
 /**
+ * U-shape route for V-axis src (E/W face) → H-axis tgt (N/S face) when
+ * src sits on the WRONG side of tgt's face (e.g. src north of an S-face
+ * tgt). Standard L would force the V leg through tgt's interior. The U
+ * routes around the outside: V down (or up) from src to perimRow past
+ * tgt's far edge, H across to tgtExit.col, then V back UP (or DOWN) into
+ * the slot from outside.
+ *
+ * tgtSide=S: perimRow > tgtRowBot (south of tgt). Final V approaches
+ *   tgtExit from below, arrow points north into the slot.
+ * tgtSide=N: perimRow < tgtRowTop (north of tgt). Final V approaches
+ *   tgtExit from above, arrow points south into the slot.
+ */
+function tryUPathVtoH(
+  srcExit: Cell,
+  tgtExit: Cell,
+  tgtSide: Side,
+  srcAnchor: Cell,
+  tgtAnchor: Cell,
+  srcW: number,
+  srcH: number,
+  tgtW: number,
+  tgtH: number,
+  cellOwner: Map<string, string>,
+  bendOwner: Map<string, number>,
+  vLegClaim: Map<string, number>,
+  hLegClaim: Map<string, number>,
+  edgeIndex: number,
+  srcId: string,
+  tgtId: string,
+  gridRows: number,
+): Cell[] | null {
+  void srcW; void srcAnchor; void srcH;
+  const loCol = Math.min(srcExit.col, tgtExit.col);
+  const hiCol = Math.max(srcExit.col, tgtExit.col);
+  const tgtRowTop = tgtAnchor.row;
+  const tgtRowBot = tgtAnchor.row + tgtH - 1;
+  void tgtW;
+
+  const isHLaneFreeAt = (r: number): boolean => {
+    if (r < 0 || r >= gridRows) return false;
+    for (let c = loCol; c <= hiCol; c++) {
+      const k = cellKey(r, c);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (hLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+  const isVLegFreeAt = (col: number, fromR: number, toR: number): boolean => {
+    const lo = Math.min(fromR, toR);
+    const hi = Math.max(fromR, toR);
+    for (let r = lo; r <= hi; r++) {
+      const k = cellKey(r, col);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (vLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+
+  // Candidate perim rows: must be strictly past tgtExit on the approach
+  // side, so the final V leg has length >= 1 cell (the arrow points
+  // perpendicular to the face).
+  //   S face: tgtExit is just south of tgt's body (row = tgtRowBot+1).
+  //           perimRow must be > tgtExit.row.
+  //   N face: tgtExit is just north of tgt's body (row = tgtRowTop-1).
+  //           perimRow must be < tgtExit.row.
+  const candidates: number[] = [];
+  if (tgtSide === "S") {
+    for (let r = tgtExit.row + 1; r < gridRows; r++) candidates.push(r);
+  } else {
+    // tgtSide === "N"
+    for (let r = tgtExit.row - 1; r >= 0; r--) candidates.push(r);
+  }
+  void tgtRowTop; void tgtRowBot;
+
+  // V-axis exit means the first leg must run horizontally (along the
+  // exit-face's normal) for at least one cell before the trace bends
+  // south. The downward V leg sits one col east of srcExit (for E face;
+  // west for W face). Same on the target side: the final approach into
+  // the S/N face must be perpendicular to the face (vertical), so the
+  // H "across" leg must end one col before tgtExit.col, with a final
+  // small V leg taking the trace into the slot.
+  //
+  // Resulting topology: 4 legs H-V-H-V (an "around-the-corner" U).
+  // For srcExit.col adjacent to tgtExit.col (rare in U cases) we'd
+  // collapse to a degenerate 2-leg V, but in practice U-path only
+  // fires when srcExit and tgtExit are well-separated.
+  const srcStepC = srcExit.col <= tgtExit.col ? 1 : -1; // direction trace runs along H legs
+  const exitCol = srcExit.col + srcStepC;               // first bend col: one east/west of src exit
+  const approachCol = tgtExit.col;                       // V leg col that lands on tgt slot
+
+  for (const perimRow of candidates) {
+    if (!isHLaneFreeAt(perimRow)) continue;
+    // First small H leg: srcExit → (srcExit.row, exitCol). One cell.
+    // Then V leg from srcExit.row to perimRow at exitCol.
+    if (!isVLegFreeAt(exitCol, srcExit.row, perimRow)) continue;
+    // Final V leg from perimRow up/down into tgtExit.row at tgtExit.col.
+    if (!isVLegFreeAt(approachCol, perimRow, tgtExit.row)) continue;
+    // Bend cells:
+    //   bend1 = (srcExit.row, exitCol)     — corner of H→V
+    //   bend2 = (perimRow, exitCol)        — corner of V→H
+    //   bend3 = (perimRow, approachCol)    — corner of H→V (final)
+    const bend1: Cell = { row: srcExit.row, col: exitCol };
+    const bend2: Cell = { row: perimRow, col: exitCol };
+    const bend3: Cell = { row: perimRow, col: approachCol };
+    if (!isBendFree(bend1, cellOwner, bendOwner, srcId, tgtId)) continue;
+    if (!isBendFree(bend2, cellOwner, bendOwner, srcId, tgtId)) continue;
+    if (!isBendFree(bend3, cellOwner, bendOwner, srcId, tgtId)) continue;
+
+    bendOwner.set(cellKey(bend1.row, bend1.col), edgeIndex);
+    bendOwner.set(cellKey(bend2.row, bend2.col), edgeIndex);
+    bendOwner.set(cellKey(bend3.row, bend3.col), edgeIndex);
+
+    const path: Cell[] = [];
+    // H out: srcExit.col → exitCol at srcExit.row.
+    path.push({ row: srcExit.row, col: srcExit.col });
+    if (exitCol !== srcExit.col) {
+      path.push({ row: srcExit.row, col: exitCol });
+    }
+    // V down/up: srcExit.row → perimRow at exitCol.
+    const stepR1 = srcExit.row <= perimRow ? 1 : -1;
+    if (srcExit.row !== perimRow) {
+      for (let r = srcExit.row + stepR1; ; r += stepR1) {
+        path.push({ row: r, col: exitCol });
+        if (r === perimRow) break;
+      }
+    }
+    // H across: exitCol → approachCol at perimRow.
+    const stepC = exitCol <= approachCol ? 1 : -1;
+    if (exitCol !== approachCol) {
+      for (let c = exitCol + stepC; ; c += stepC) {
+        path.push({ row: perimRow, col: c });
+        if (c === approachCol) break;
+      }
+    }
+    // V into face: perimRow → tgtExit.row at tgtExit.col.
+    const stepR2 = perimRow <= tgtExit.row ? 1 : -1;
+    if (perimRow !== tgtExit.row) {
+      for (let r = perimRow + stepR2; ; r += stepR2) {
+        path.push({ row: r, col: tgtExit.col });
+        if (r === tgtExit.row) break;
+      }
+    }
+    return path;
+  }
+  return null;
+}
+
+/**
+ * Mirror of `tryUPathVtoH`: H-axis src (N/S face) → V-axis tgt (E/W
+ * face) when src is on the WRONG side of tgt's face.
+ */
+function tryUPathHtoV(
+  srcExit: Cell,
+  tgtExit: Cell,
+  tgtSide: Side,
+  srcAnchor: Cell,
+  tgtAnchor: Cell,
+  srcW: number,
+  srcH: number,
+  tgtW: number,
+  tgtH: number,
+  cellOwner: Map<string, string>,
+  bendOwner: Map<string, number>,
+  vLegClaim: Map<string, number>,
+  hLegClaim: Map<string, number>,
+  edgeIndex: number,
+  srcId: string,
+  tgtId: string,
+  gridCols: number,
+): Cell[] | null {
+  void srcAnchor; void srcW; void srcH; void tgtH;
+  const loRow = Math.min(srcExit.row, tgtExit.row);
+  const hiRow = Math.max(srcExit.row, tgtExit.row);
+  const tgtColLeft = tgtAnchor.col;
+  const tgtColRight = tgtAnchor.col + tgtW - 1;
+
+  const isVLaneFreeAt = (c: number): boolean => {
+    if (c < 0 || c >= gridCols) return false;
+    for (let r = loRow; r <= hiRow; r++) {
+      const k = cellKey(r, c);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (vLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+  const isHLegFreeAt = (row: number, fromC: number, toC: number): boolean => {
+    const lo = Math.min(fromC, toC);
+    const hi = Math.max(fromC, toC);
+    for (let c = lo; c <= hi; c++) {
+      const k = cellKey(row, c);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (hLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+
+  const candidates: number[] = [];
+  if (tgtSide === "E") {
+    for (let c = tgtColRight + 1; c < gridCols; c++) candidates.push(c);
+  } else {
+    // tgtSide === "W"
+    for (let c = tgtColLeft - 1; c >= 0; c--) candidates.push(c);
+  }
+
+  // Same "exit-perpendicular first" rule as V→H: trace exits N/S → first
+  // leg runs vertically for ≥1 cell before bending east/west. Final
+  // approach into the E/W face is also vertical→horizontal: the V across
+  // leg ends one row before tgtExit.row, with a small final H leg into
+  // the slot. Topology: V-H-V-H.
+  const srcStepR = srcExit.row <= tgtExit.row ? 1 : -1;
+  const exitRow = srcExit.row + srcStepR;
+  const approachRow = tgtExit.row;
+
+  for (const perimCol of candidates) {
+    if (!isVLaneFreeAt(perimCol)) continue;
+    // V short out: srcExit.row → exitRow at srcExit.col.
+    // Long H across: exitRow → approachRow at perimCol — but the H is at
+    // exitRow first then a V into approachRow at perimCol, then final H
+    // into slot. Verify lanes:
+    if (!isHLegFreeAt(exitRow, srcExit.col, perimCol)) continue;
+    if (!isHLegFreeAt(approachRow, perimCol, tgtExit.col)) continue;
+    const bend1: Cell = { row: exitRow, col: srcExit.col };
+    const bend2: Cell = { row: exitRow, col: perimCol };
+    const bend3: Cell = { row: approachRow, col: perimCol };
+    if (!isBendFree(bend1, cellOwner, bendOwner, srcId, tgtId)) continue;
+    if (!isBendFree(bend2, cellOwner, bendOwner, srcId, tgtId)) continue;
+    if (!isBendFree(bend3, cellOwner, bendOwner, srcId, tgtId)) continue;
+
+    bendOwner.set(cellKey(bend1.row, bend1.col), edgeIndex);
+    bendOwner.set(cellKey(bend2.row, bend2.col), edgeIndex);
+    bendOwner.set(cellKey(bend3.row, bend3.col), edgeIndex);
+
+    const path: Cell[] = [];
+    // V out: srcExit.row → exitRow at srcExit.col.
+    path.push({ row: srcExit.row, col: srcExit.col });
+    if (exitRow !== srcExit.row) {
+      path.push({ row: exitRow, col: srcExit.col });
+    }
+    // H across at exitRow: srcExit.col → perimCol.
+    const stepC1 = srcExit.col <= perimCol ? 1 : -1;
+    if (srcExit.col !== perimCol) {
+      for (let c = srcExit.col + stepC1; ; c += stepC1) {
+        path.push({ row: exitRow, col: c });
+        if (c === perimCol) break;
+      }
+    }
+    // V from exitRow to approachRow at perimCol.
+    const stepR = exitRow <= approachRow ? 1 : -1;
+    if (exitRow !== approachRow) {
+      for (let r = exitRow + stepR; ; r += stepR) {
+        path.push({ row: r, col: perimCol });
+        if (r === approachRow) break;
+      }
+    }
+    // H into face: perimCol → tgtExit.col at tgtExit.row.
+    const stepC2 = perimCol <= tgtExit.col ? 1 : -1;
+    if (perimCol !== tgtExit.col) {
+      for (let c = perimCol + stepC2; ; c += stepC2) {
+        path.push({ row: tgtExit.row, col: c });
+        if (c === tgtExit.col) break;
+      }
+    }
+    return path;
+  }
+  return null;
+}
+
+/**
+ * U-shape route for H-axis src (N/S face) → H-axis tgt (N/S face) when
+ * BOTH faces are on the same side (both S or both N), with src on the
+ * wrong side of tgt. Standard Z's midRow sits between srcExit.row and
+ * tgtExit.row, which forces the final V leg through tgt's interior.
+ * The U routes around tgt's far edge: V perpendicular out of src, H
+ * across to tgt's slot col past tgt's outer edge, V back into the slot.
+ *
+ * Topology: V-H-V (3 legs). First V matches src exit normal; last V
+ * matches tgt entry normal.
+ *
+ *   tgtSide=S: perimRow > tgt's south edge. Final V approaches going
+ *     north into the S face.
+ *   tgtSide=N: mirror.
+ */
+function tryUPathHHSameSide(
+  srcExit: Cell,
+  tgtExit: Cell,
+  tgtSide: Side,
+  srcAnchor: Cell,
+  tgtAnchor: Cell,
+  srcW: number,
+  srcH: number,
+  tgtW: number,
+  tgtH: number,
+  cellOwner: Map<string, string>,
+  bendOwner: Map<string, number>,
+  vLegClaim: Map<string, number>,
+  hLegClaim: Map<string, number>,
+  edgeIndex: number,
+  srcId: string,
+  tgtId: string,
+  gridRows: number,
+): Cell[] | null {
+  void srcAnchor; void srcW; void srcH; void tgtW;
+  const loCol = Math.min(srcExit.col, tgtExit.col);
+  const hiCol = Math.max(srcExit.col, tgtExit.col);
+  const tgtRowTop = tgtAnchor.row;
+  const tgtRowBot = tgtAnchor.row + tgtH - 1;
+
+  const isHLaneFreeAt = (r: number): boolean => {
+    if (r < 0 || r >= gridRows) return false;
+    for (let c = loCol; c <= hiCol; c++) {
+      const k = cellKey(r, c);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (hLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+  const isVLegFreeAt = (col: number, fromR: number, toR: number): boolean => {
+    const lo = Math.min(fromR, toR);
+    const hi = Math.max(fromR, toR);
+    for (let r = lo; r <= hi; r++) {
+      const k = cellKey(r, col);
+      const owner = cellOwner.get(k);
+      if (owner !== undefined && owner !== srcId && owner !== tgtId) return false;
+      if (vLegClaim.has(k)) return false;
+    }
+    return true;
+  };
+
+  // perimRow choices: strictly past tgtExit on the approach side, so the
+  // final V leg has ≥1 cell perpendicular to the face.
+  const candidates: number[] = [];
+  if (tgtSide === "S") {
+    for (let r = tgtExit.row + 1; r < gridRows; r++) candidates.push(r);
+  } else {
+    // tgtSide === "N"
+    for (let r = tgtExit.row - 1; r >= 0; r--) candidates.push(r);
+  }
+  void tgtRowTop; void tgtRowBot;
+
+  for (const perimRow of candidates) {
+    if (!isHLaneFreeAt(perimRow)) continue;
+    // V leg from srcExit south/north to perimRow at srcExit.col.
+    if (!isVLegFreeAt(srcExit.col, srcExit.row, perimRow)) continue;
+    // Final V leg from perimRow north/south to tgtExit.row at tgtExit.col.
+    if (!isVLegFreeAt(tgtExit.col, perimRow, tgtExit.row)) continue;
+    const bend1: Cell = { row: perimRow, col: srcExit.col };
+    const bend2: Cell = { row: perimRow, col: tgtExit.col };
+    if (!isBendFree(bend1, cellOwner, bendOwner, srcId, tgtId)) continue;
+    if (!isBendFree(bend2, cellOwner, bendOwner, srcId, tgtId)) continue;
+
+    bendOwner.set(cellKey(bend1.row, bend1.col), edgeIndex);
+    bendOwner.set(cellKey(bend2.row, bend2.col), edgeIndex);
+
+    const path: Cell[] = [];
+    // V leg: srcExit.row → perimRow at srcExit.col.
+    const stepR1 = srcExit.row <= perimRow ? 1 : -1;
+    for (let r = srcExit.row; ; r += stepR1) {
+      path.push({ row: r, col: srcExit.col });
+      if (r === perimRow) break;
+    }
+    // H leg: srcExit.col → tgtExit.col at perimRow.
+    const stepC = srcExit.col <= tgtExit.col ? 1 : -1;
+    if (srcExit.col !== tgtExit.col) {
+      for (let c = srcExit.col + stepC; ; c += stepC) {
+        path.push({ row: perimRow, col: c });
+        if (c === tgtExit.col) break;
+      }
+    }
+    // V leg: perimRow → tgtExit.row at tgtExit.col.
+    const stepR2 = perimRow <= tgtExit.row ? 1 : -1;
+    if (perimRow !== tgtExit.row) {
+      for (let r = perimRow + stepR2; ; r += stepR2) {
+        path.push({ row: r, col: tgtExit.col });
+        if (r === tgtExit.row) break;
+      }
+    }
+    return path;
+  }
+  return null;
+}
+
+/**
  * Back-edge perimeter route for H→H (N/S faces). Mirror of the V→V
  * version: lift to a perimeter COLUMN outside both src and tgt's
  * horizontal spans, then run vertically at that column.
@@ -700,7 +1090,7 @@ function computeCellPath(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  siblingMidCols: Map<string, number>,
+  siblingMidCols: Map<string, number[]>,
 ): Cell[] {
   const srcAxis: "V" | "H" = srcSide === "E" || srcSide === "W" ? "V" : "H";
   const tgtAxis: "V" | "H" = tgtSide === "E" || tgtSide === "W" ? "V" : "H";
@@ -785,11 +1175,52 @@ function computeCellPath(
   // src and tgt on same axis but different perp coords — Z-shape: two
   // bends, one on each end's channel, joined by a perpendicular run.
   if (srcAxis === "V" && tgtAxis === "H") {
+    // Standard L: bend at (srcExit.row, tgtExit.col). Path is
+    // H@srcRow → V@tgtCol. The V leg approaches tgt from srcExit.row,
+    // so the final approach direction is determined by whether src is
+    // NORTH or SOUTH of tgtExit.row.
+    //
+    // tgtSide=N: tgtExit is one row ABOVE tgt's body. To enter going
+    //   south (the natural N-face approach), the V leg must come from
+    //   above, i.e. srcExit.row < tgtExit.row. If src is BELOW tgt
+    //   (srcExit.row > tgtExit.row), the L would force the V leg
+    //   through tgt's interior. Route as U: drop to perimRow ABOVE
+    //   tgt, jog horizontally, then come DOWN into the N-face slot.
+    // tgtSide=S: mirror — to enter going north, src must be below
+    //   (srcExit.row > tgtExit.row). If src is ABOVE (the common case
+    //   for E/W→S routing), the L cuts through tgt's interior. Route
+    //   as U: drop BELOW tgt, jog horizontally, come UP into the
+    //   S-face slot.
+    const wrongSide = (tgtSide === "S" && srcExit.row < tgtExit.row)
+                  || (tgtSide === "N" && srcExit.row > tgtExit.row);
+    if (wrongSide) {
+      const uPath = tryUPathVtoH(srcExit, tgtExit, tgtSide,
+                                  srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
+                                  cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                  edgeIndex, srcId, tgtId, gridRows);
+      if (uPath) return uPath;
+      // Fall through to standard L if U couldn't find a perimeter row.
+    }
     const bend: Cell = { row: srcExit.row, col: tgtExit.col };
     return claimLPath(srcExit, bend, tgtExit, /*via=*/ "row-then-col",
                       cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
   }
   if (srcAxis === "H" && tgtAxis === "V") {
+    // Mirror of V→H. tgtSide=W/E and src is N/S of tgt.
+    // tgtSide=W: V leg approaches from src.col, the H-jog into W-face
+    //   comes from the WEST (col < tgtExit.col). If src.col > tgtExit.col
+    //   (src is east of tgt), L cuts through tgt. Route as U via a perim
+    //   col WEST of tgt.
+    // tgtSide=E: mirror.
+    const wrongSide = (tgtSide === "E" && srcExit.col < tgtExit.col)
+                  || (tgtSide === "W" && srcExit.col > tgtExit.col);
+    if (wrongSide) {
+      const uPath = tryUPathHtoV(srcExit, tgtExit, tgtSide,
+                                  srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
+                                  cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                  edgeIndex, srcId, tgtId, gridCols);
+      if (uPath) return uPath;
+    }
     const bend: Cell = { row: tgtExit.row, col: srcExit.col };
     return claimLPath(srcExit, bend, tgtExit, /*via=*/ "col-then-row",
                       cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
@@ -804,18 +1235,54 @@ function computeCellPath(
   // and prior bends, and (b) the V-leg interior cells between the two
   // bends are not already claimed by another edge's V leg.
   if (srcAxis === "V" && tgtAxis === "V") {
-    const pairKey = `${srcId}|${tgtId}`;
-    const siblingCol = siblingMidCols.get(pairKey);
+    // Key for the sibling tracker:
+    //   - via-half edges (highway fan-out): key by srcId + direction,
+    //     so ALL traces exiting the same highway in the same
+    //     up/down/flat direction share one monotone stair. The bottom
+    //     trace (largest srcRow, going down) turns first (smallest x),
+    //     regardless of which sink it lands in. Without grouping by
+    //     srcId, sink_y's 3-trace stair and sink_z's 1-trace stair pick
+    //     from separate pools and the chamfers cross. Without splitting
+    //     by direction, the up-going trace claims a col that the down-
+    //     going ratchet skips over and breaks monotonicity.
+    //   - non-via-half: key by (srcId, tgtId) as before. Lane-ordering
+    //     across unrelated edge pairs would over-constrain.
+    const dirTag = srcExit.row < tgtExit.row ? "D" : srcExit.row > tgtExit.row ? "U" : "F";
+    const pairKey = isViaHalf ? `${srcId}|${dirTag}` : `${srcId}|${tgtId}`;
+    const siblingCols = siblingMidCols.get(pairKey);
     const candidate = pickMidCol(srcExit.col, tgtExit.col, srcExit.row, tgtExit.row,
                                   cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId,
-                                  siblingCol);
-    siblingMidCols.set(pairKey, candidate);
+                                  siblingCols);
+    const arr = siblingMidCols.get(pairKey);
+    if (arr) arr.push(candidate);
+    else siblingMidCols.set(pairKey, [candidate]);
     const bend1: Cell = { row: srcExit.row, col: candidate };
     const bend2: Cell = { row: tgtExit.row, col: candidate };
     return claimZPath(srcExit, bend1, bend2, tgtExit, /*axis=*/ "V",
                       cellOwner, bendOwner, edgeIndex, srcId, tgtId);
   }
   // srcAxis === "H" && tgtAxis === "H"
+  // Same-side faces (both S or both N): standard Z's midRow sits between
+  // srcExit.row and tgtExit.row, which puts the H-jog INSIDE the row
+  // band of any boxes that share rows with src/tgt and routes the final
+  // V leg through tgt's interior. Use a U-shape past tgt's outer edge,
+  // same as the V→H wrong-side case.
+  //
+  // Detect via tgtSide + relative position. For tgtSide=S, the trace
+  // must approach the slot going north — requires final V leg starting
+  // SOUTH of tgtExit. If srcExit is NORTH of tgtExit (the normal case
+  // when tgt is downstream), standard Z lands the trace from the north
+  // through the body. Same logic mirrored for tgtSide=N.
+  const samesideWrong =
+    (tgtSide === "S" && srcExit.row < tgtExit.row) ||
+    (tgtSide === "N" && srcExit.row > tgtExit.row);
+  if (samesideWrong) {
+    const uPath = tryUPathHHSameSide(srcExit, tgtExit, tgtSide,
+                                      srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
+                                      cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                      edgeIndex, srcId, tgtId, gridRows);
+    if (uPath) return uPath;
+  }
   const candidate = pickMidRow(srcExit.row, tgtExit.row, srcExit.col, tgtExit.col,
                                 cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
   // V-lane near search: shift bend1.col/bend2.col off srcExit.col/
@@ -1172,7 +1639,7 @@ function pickMidCol(
   _edgeIndex: number,
   srcId: string,
   tgtId: string,
-  siblingCol: number | undefined,
+  siblingCols: number[] | undefined,
 ): number {
   // Lane ordering: a fan-out (or bus, or any cluster of parallel V
   // traces) needs lanes assigned in monotonic order so the H exit runs
@@ -1188,31 +1655,28 @@ function pickMidCol(
   // from-hi when target is below. Identical srcRow/tgtRow (rare) falls
   // back to midpoint.
   //
-  // Sibling override: when a prior edge to the same (src, tgt) pair
-  // already claimed a midCol, reverse the sweep so this edge picks the
-  // OPPOSITE end of the corridor. That places the two siblings on
-  // either side of their shared midpoint, preserving the slot ordering
-  // and avoiding the X-crossing where slot 1's V-leg cuts through slot
-  // 0's H-out (see ex 27 hwy→dst_x/dst_z; the master allocator gave
-  // both siblings the inner col, which crossed).
+  // Sibling rule: for 3+ V-V Z traces sharing the same (src, tgt) pair,
+  // each successive bend col must lie STRICTLY past the prior extremum
+  // so the corner chamfers form a clean stair instead of overlapping.
+  //   goingDown: new col < min(siblingCols)  (sweep leftward, ratcheting)
+  //   goingUp:   new col > max(siblingCols)  (sweep rightward, ratcheting)
+  // Two-sibling case still satisfies this — the second sibling lands
+  // one cell beyond the first. The original "sweep from opposite end"
+  // was a 2-trace approximation that broke at 3+: top picked hi-1,
+  // middle picked lo+1, bottom picked lo+1 → hi-1 (claim-pushed back)
+  // and clashed with top.
   const goingUp = row2 < row1;
   const goingDown = row2 > row1;
   let start: number;
   let step: number;
-  if (siblingCol !== undefined) {
-    // No-crossing rule for sibling V-V Z traces sharing the same
-    // (src, tgt) pair:
-    //   goingUp:   slot 0 col < slot 1 col   (slot 1 to the right)
-    //   goingDown: slot 0 col > slot 1 col   (slot 1 to the left)
-    // The sibling is slot 0 (it was picked first). This edge is slot 1,
-    // so sweep from the appropriate end of the corridor.
+  if (siblingCols !== undefined && siblingCols.length > 0) {
     if (goingUp) {
-      start = hi - 1;
-      step = -1;
-    } else {
-      // goingDown or flat: prefer leftward
-      start = lo + 1;
+      start = Math.max(...siblingCols) + 1;
       step = +1;
+    } else {
+      // goingDown or flat: ratchet leftward past the leftmost prior.
+      start = Math.min(...siblingCols) - 1;
+      step = -1;
     }
   } else {
     start = goingUp ? lo + 1 : goingDown ? hi - 1 : Math.round((srcCol + tgtCol) / 2);
@@ -1284,20 +1748,29 @@ function claimLegCells(
   hLegClaim: Map<string, number>,
 ): void {
   // Walk pairs and classify each segment: shared col → V move (claim
-  // both cells into vLegClaim); shared row → H move (claim into
-  // hLegClaim). A V trace crossing an H trace at the same cell is a
-  // legal crossing — they don't conflict in the same map.
+  // EVERY cell in the segment into vLegClaim, not just endpoints);
+  // shared row → H move (claim every cell into hLegClaim). A V trace
+  // crossing an H trace at the same cell is a legal crossing — they
+  // don't conflict in the same map.
   for (let i = 1; i < cellPath.length; i++) {
     const a = cellPath[i - 1]!;
     const b = cellPath[i]!;
-    const kA = cellKey(a.row, a.col);
-    const kB = cellKey(b.row, b.col);
     if (a.col === b.col) {
-      if (!vLegClaim.has(kA)) vLegClaim.set(kA, edgeIndex);
-      if (!vLegClaim.has(kB)) vLegClaim.set(kB, edgeIndex);
+      // V segment: claim every row between a and b at this col.
+      const lo = Math.min(a.row, b.row);
+      const hi = Math.max(a.row, b.row);
+      for (let r = lo; r <= hi; r++) {
+        const k = cellKey(r, a.col);
+        if (!vLegClaim.has(k)) vLegClaim.set(k, edgeIndex);
+      }
     } else if (a.row === b.row) {
-      if (!hLegClaim.has(kA)) hLegClaim.set(kA, edgeIndex);
-      if (!hLegClaim.has(kB)) hLegClaim.set(kB, edgeIndex);
+      // H segment: claim every col between a and b at this row.
+      const lo = Math.min(a.col, b.col);
+      const hi = Math.max(a.col, b.col);
+      for (let c = lo; c <= hi; c++) {
+        const k = cellKey(a.row, c);
+        if (!hLegClaim.has(k)) hLegClaim.set(k, edgeIndex);
+      }
     }
   }
 }
@@ -1579,7 +2052,35 @@ function pixelizeCellPath(
       return { axis, coord: axis === "V" ? srcSlotPx.x : srcSlotPx.y };
     }
     if (k === legStarts.length - 2) {
-      return { axis, coord: axis === "V" ? tgtSlotPx.x : tgtSlotPx.y };
+      // Last leg's perp coord: if the leg's channel cell aligns with the
+      // tgt slot's perp (within half a cell), snap to the slot pixel so
+      // the trailing segment lands square on the face. Otherwise the
+      // leg's channel pixel is at cellCx(a) — the routed channel — and
+      // the L-jog code below adds a final perp hop into the slot. This
+      // matters when findFreeLBend pushed the bend col away from the
+      // target's footprint (e.g. query→orders_rm.S routes around the
+      // body of orders_rm and approaches from below).
+      // Last leg's perp coord: when the cellPath's last leg sits in the
+      // same cell column/row as the target slot (or adjacent — within
+      // one cell), snap to the slot pixel so the arrow lands square on
+      // the face. This is the common case and lets fractional slots /
+      // shim-shifted slots still terminate dead-on the face.
+      //
+      // When the cellPath's last leg is FAR from the slot's col/row
+      // (>1 cell), `findFreeLBend` or `pickMidCol` deliberately routed
+      // the bend AWAY from the target — typically to avoid cutting
+      // through the target's own footprint (e.g. query→orders_rm.S
+      // entering from below with the V leg west of orders_rm). In that
+      // case keep the channel coord; the L-jog code below adds a final
+      // perp hop into the slot.
+      const slotPerp = axis === "V" ? tgtSlotPx.x : tgtSlotPx.y;
+      const slotCell = axis === "V"
+        ? Math.floor(tgtSlotPx.x / CELL_PX)
+        : Math.floor(tgtSlotPx.y / CELL_PX);
+      const channelCell = axis === "V" ? a.col : a.row;
+      const channelPerp = axis === "V" ? cellCx(a) : cellCy(a);
+      const useSlot = Math.abs(slotCell - channelCell) <= 1;
+      return { axis, coord: useSlot ? slotPerp : channelPerp };
     }
     return { axis, coord: axis === "V" ? cellCx(a) : cellCy(a) };
   };

@@ -124,6 +124,25 @@ function extentFor(id: string, ctx: PlaceCtx): { forward: number; perp: number }
   return extentOf(w, h, fwd);
 }
 
+/**
+ * Forward / perp cell-extent of a node id under a SPECIFIED forward,
+ * ignoring ctx.forward. Used when anchoring a construct (fan-out, bus,
+ * branch) that will assign a forward to its members — at anchor time
+ * the members' forward isn't in ctx yet, so `extentFor` would return
+ * the wrong perp (the default-forward perp instead of the about-to-be-
+ * assigned perp). Caller passes the eventual forward.
+ */
+function extentForAs(
+  id: string,
+  ctx: PlaceCtx,
+  fwd: Direction,
+): { forward: number; perp: number } {
+  const node = ctx.nodeOf.get(id);
+  const w = node?.size.width ?? 1;
+  const h = node?.size.height ?? 1;
+  return extentOf(w, h, fwd);
+}
+
 // --- direction helpers ----------------------------------------------------
 
 /**
@@ -373,6 +392,7 @@ function anchorPerpOf(
   sharedId: string,
   ctx: PlaceCtx,
   pStepSign: number, // -pStep's sign on the perp axis: +1 (LR) or -1 (TB)
+  asFwd?: Direction, // optional: compute perp under this forward instead of ctx.forward
 ): number {
   // Each member's leading-cell on the perp axis = pStepSign * po.
   // Members extend cell-positive from their leading cell regardless of
@@ -381,12 +401,17 @@ function anchorPerpOf(
   let maxCell = -Infinity;
   for (let i = 0; i < memberIds.length; i++) {
     const leading = pStepSign * perpOffsets[i]!;
-    const trailing = leading + extentFor(memberIds[i]!, ctx).perp - 1;
+    const memberPerp = asFwd !== undefined
+      ? extentForAs(memberIds[i]!, ctx, asFwd).perp
+      : extentFor(memberIds[i]!, ctx).perp;
+    const trailing = leading + memberPerp - 1;
     if (leading < minCell) minCell = leading;
     if (trailing > maxCell) maxCell = trailing;
   }
   const blockCentre = (minCell + maxCell) / 2;
-  const sharedPerp = extentFor(sharedId, ctx).perp;
+  const sharedPerp = asFwd !== undefined
+    ? extentForAs(sharedId, ctx, asFwd).perp
+    : extentFor(sharedId, ctx).perp;
   // shared.leading-cell = blockCentre - (sharedPerp - 1) / 2.
   const sharedLeadingCell = blockCentre - (sharedPerp - 1) / 2;
   // Convert back to a -pStep perpOffset: cell = pStepSign * po, so
@@ -409,15 +434,21 @@ function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
   const members = [f.shared, ...f.consumers];
   const offsets: Cell[] = [];
 
+  // Consumers haven't been anchored yet, so `ctx.forward.get(consumer)`
+  // returns undefined and `extentFor` falls back to the default forward
+  // — wrong when the fan-out direction has been rotated by an upstream
+  // branch (e.g. branch:right under lr → S). Compute extents under the
+  // fan-out's actual fwd so perp is the consumer's about-to-be-assigned
+  // perp axis. Same applies to `extentForAs(shared, fwd)` below.
   const perpOffsets: number[] = [];
   let perpAccum = 0;
   for (let i = 0; i < n; i++) {
     perpOffsets.push(perpAccum);
-    perpAccum += extentFor(f.consumers[i]!, ctx).perp;
+    perpAccum += extentForAs(f.consumers[i]!, ctx, fwd).perp;
     if (i < n - 1) perpAccum += MEMBER_GAP;
   }
   const pStepSign = -pStep.row !== 0 ? -pStep.row : -pStep.col;
-  const anchorPerp = anchorPerpOf(f.consumers, perpOffsets, f.shared, ctx, pStepSign);
+  const anchorPerp = anchorPerpOf(f.consumers, perpOffsets, f.shared, ctx, pStepSign, fwd);
 
   // Shared sits at -pStep * anchorPerp (perp-centered on consumers).
   offsets.push({ row: -pStep.row * anchorPerp, col: -pStep.col * anchorPerp });
@@ -427,7 +458,7 @@ function anchorFanOut(f: FanOut, ctx: PlaceCtx): void {
   // in the V-channel: PIPELINE_GAP works for small fans (≤4); larger
   // fans need n+1 cols to fit n lanes plus 1 col of clearance.
   const fanGap = Math.max(PIPELINE_GAP, n + 1);
-  const sharedFwdExtent = extentFor(f.shared, ctx).forward + fanGap;
+  const sharedFwdExtent = extentForAs(f.shared, ctx, fwd).forward + fanGap;
   for (let i = 0; i < n; i++) {
     const po = perpOffsets[i]!;
     offsets.push({
@@ -539,16 +570,33 @@ function anchorHighwayVia(
   // occupancy: each source's perp offset is the cumulative perp extent
   // of all earlier sources, centered on the median.
   const nSrc = m.sources.length;
+  // For dense intersect highways (2+ srcs × 2+ sinks), pack sources
+  // tight (no MEMBER_GAP) so the total source breadth matches the
+  // highway's perp face. Combined with the centred median, this means
+  // each source's slots align directly with its block of hwy.W face
+  // slots — every via-trace is a STRAIGHT east leg with no L-bend.
+  // Non-intersect highways keep MEMBER_GAP.
+  const inIntersectGroup = model.intersections.some((g) => g.highways.includes(m.name));
+  const allToAll = m.sources.length >= 2 && m.targets.length >= 2;
+  const srcMemberGap = inIntersectGroup && allToAll ? 0 : MEMBER_GAP;
   const srcPerpOffsets: number[] = [];
   {
     let acc = 0;
     for (let i = 0; i < nSrc; i++) {
       srcPerpOffsets.push(acc);
       acc += extentFor(m.sources[i]!, ctx).perp;
-      if (i < nSrc - 1) acc += MEMBER_GAP;
+      if (i < nSrc - 1) acc += srcMemberGap;
     }
   }
-  const srcMedianIdx = Math.floor((nSrc - 1) / 2);
+  // For dense intersect highways, anchor at the FIRST source (index 0)
+  // so the source stack starts at the highway's top edge — each
+  // source's slot block aligns directly with hwy.W slots [0..K-1],
+  // [K..2K-1], etc. With the centred median the middle source would
+  // sit AT hwy.row, and its source-row equals other sources' L-bend
+  // destination rows → axial overlap.
+  const srcMedianIdx = inIntersectGroup && allToAll
+    ? 0
+    : Math.floor((nSrc - 1) / 2);
   const srcMedianPerp = srcPerpOffsets[srcMedianIdx] ?? 0;
   // For the source's back-step: use the source's own forward extent so
   // the trailing edge of source-col touches the leading edge of hwy-col.
@@ -559,11 +607,46 @@ function anchorHighwayVia(
     const ext = extentFor(s, ctx).forward;
     if (ext > maxSrcFwd) maxSrcFwd = ext;
   }
-  // Channel-router runway: one PIPELINE_GAP cell between source's
-  // trailing edge and highway's leading edge.
-  const srcBackStep = maxSrcFwd + PIPELINE_GAP;
+  // Channel-router runway between source's trailing edge and
+  // highway's leading edge. For an intersect highway with N total
+  // via-edges (M sources × K sinks), the L-bend bundle on each side
+  // needs up to N distinct V-channel columns (one per trace). Scale
+  // the gap deterministically with N so the channel router always
+  // has enough columns. Non-intersect highways keep PIPELINE_GAP —
+  // single-bundle examples (16, 18, 20, 23) have side-by-side traces
+  // that fit in 5 cols with the existing lane allocator's row offset
+  // smarts. Only the perpendicular-crossing intersect topology needs
+  // the wider runway.
+  const inIntersect = model.intersections.some((g) => g.highways.includes(m.name));
+  const totalViaEdges = Math.max(1, m.sources.length) * Math.max(1, m.targets.length);
+  // Actual fan-out trace count: via-half edges leaving the highway. For
+  // a non-intersect highway, this is the precise number of V-V Z stair
+  // lanes that need distinct bend cols on the target side. We need
+  // `lanes + 2` corridor cells (the two face-adjacent cells are excluded
+  // bend cols by the picker, so usable bend cols = corridor - 2).
+  let fanOutEdges = 0;
+  for (const e of model.edges) {
+    if (e.source === "via-half" && e.from === m.name) fanOutEdges += 1;
+  }
+  const viaGap = inIntersect
+    ? Math.max(PIPELINE_GAP, totalViaEdges + 1)
+    : Math.max(PIPELINE_GAP, fanOutEdges + 2);
+  const srcBackStep = maxSrcFwd + viaGap;
+  // Centring shim along the perp axis (feedback-centring-shim-rule):
+  // a single source larger than the highway should align its CENTRE
+  // with the highway's centre, not its TOP-LEFT. For multiple sources
+  // the centred stack already handles balance; only the single-source
+  // case needs the shim. Sign: a SMALLER highway means a LARGER source
+  // overhangs by (src - hwy); shifting the source by floor((hwy - src)/2)
+  // in the perp+ direction moves its top edge to where the highway's
+  // top edge sits. Since `po` adds in the -pStep direction, the sign
+  // matches po directly.
+  const hwyPerp = extentFor(m.name, ctx).perp;
+  const srcCentreShim = nSrc === 1
+    ? Math.floor((hwyPerp - extentFor(m.sources[0]!, ctx).perp) / 2)
+    : 0;
   for (let i = 0; i < nSrc; i++) {
-    const po = srcPerpOffsets[i]! - srcMedianPerp;
+    const po = srcPerpOffsets[i]! - srcMedianPerp + srcCentreShim;
     offsets.push({
       row: -fStep.row * srcBackStep + -pStep.row * po,
       col: -fStep.col * srcBackStep + -pStep.col * po,
@@ -573,23 +656,33 @@ function anchorHighwayVia(
   }
 
   // Target-side: one (highway-extent)-step FORWARD from the highway.
+  // Same tight-pack rule for dense intersect highways.
   const nTgt = m.targets.length;
+  const tgtMemberGap = inIntersectGroup && allToAll ? 0 : MEMBER_GAP;
   const tgtPerpOffsets: number[] = [];
   {
     let acc = 0;
     for (let i = 0; i < nTgt; i++) {
       tgtPerpOffsets.push(acc);
       acc += extentFor(m.targets[i]!, ctx).perp;
-      if (i < nTgt - 1) acc += MEMBER_GAP;
+      if (i < nTgt - 1) acc += tgtMemberGap;
     }
   }
-  const tgtMedianIdx = Math.floor((nTgt - 1) / 2);
+  // Same first-element anchor for dense intersect targets.
+  const tgtMedianIdx = inIntersectGroup && allToAll
+    ? 0
+    : Math.floor((nTgt - 1) / 2);
   const tgtMedianPerp = tgtPerpOffsets[tgtMedianIdx] ?? 0;
   // Highway forward extent: how far targets must sit beyond the
   // highway's anchor cell to be east of the highway's east face.
-  const hwyFwdExtent = extentFor(m.name, ctx).forward + PIPELINE_GAP;
+  // Same intersect-aware widening as the source side.
+  const hwyFwdExtent = extentFor(m.name, ctx).forward + viaGap;
+  // Same single-target centring shim as the source side.
+  const tgtCentreShim = nTgt === 1
+    ? Math.floor((hwyPerp - extentFor(m.targets[0]!, ctx).perp) / 2)
+    : 0;
   for (let i = 0; i < nTgt; i++) {
-    const po = tgtPerpOffsets[i]! - tgtMedianPerp;
+    const po = tgtPerpOffsets[i]! - tgtMedianPerp + tgtCentreShim;
     offsets.push({
       row: fStep.row * hwyFwdExtent + -pStep.row * po,
       col: fStep.col * hwyFwdExtent + -pStep.col * po,
@@ -886,6 +979,183 @@ function applyIntersections(model: Model, ctx: PlaceCtx): void {
         bumpUntilFree(t, fStepOther.row, fStepOther.col);
       }
 
+      // Post-bump trace-path check: each member's trace from the highway
+      // box to its slot sweeps a corridor along this-highway's flow axis.
+      // If that corridor still crosses an obstacle (e.g. dst_z sitting
+      // between hwy_v and bot_p after a forward-only bump), the channel
+      // router will fail with E_NO_CHANNEL. Push the colliding member
+      // further along forward until the corridor is clear, AND if the
+      // forward push doesn't help past N steps, shift it perpendicular
+      // (away from the partner highway's flow axis) one cell at a time
+      // and retry. The bumped member ends up in a diagonal-outward
+      // corner cell when both axes are obstructed.
+      const thisHwyCell = tentative.get(otherName);
+      if (thisHwyCell !== undefined && (fStepOther.row !== 0 || fStepOther.col !== 0)) {
+        const thisHwyNode = ctx.nodeOf.get(otherName);
+        const thisHwyH = Math.max(1, Math.ceil(thisHwyNode?.size.height ?? 1));
+        const thisHwyW = Math.max(1, Math.ceil(thisHwyNode?.size.width ?? 1));
+
+        // Build the obstacle set: every cell occupied by a node NOT in
+        // toShift, expanded to include any partner-highway members
+        // already committed in earlier iterations of this group.
+        const blockers = new Set<string>();
+        for (const [id, c] of ctx.cells) {
+          if (toShift.has(id)) continue;
+          const node = ctx.nodeOf.get(id);
+          if (node === undefined) continue;
+          if (node.shape === "highway") continue;
+          const w = Math.max(1, Math.ceil(node.size.width));
+          const h = Math.max(1, Math.ceil(node.size.height));
+          for (let dr = 0; dr < h; dr++) {
+            for (let dc = 0; dc < w; dc++) {
+              blockers.add(`${c.row + dr},${c.col + dc}`);
+            }
+          }
+        }
+
+        const corridorClear = (
+          memberCell: Cell,
+          memberW: number,
+          memberH: number,
+          ignoreId?: string,
+        ): boolean => {
+          // Sweep cells from the member's footprint back to the highway
+          // along this-highway's flow axis. Members on the source side
+          // (negative-fwd-direction relative to highway) need the sweep
+          // from highway to member-near edge; targets the other way.
+          // Also block on other tentative members (sibling intersect
+          // members already placed in this iteration), since the channel
+          // router treats them as occupied cells the same as committed
+          // blockers.
+          const tentBlocks: Array<{ row: number; col: number; w: number; h: number }> = [];
+          for (const [oid, oc] of tentative) {
+            if (oid === ignoreId) continue;
+            const onode = ctx.nodeOf.get(oid);
+            if (onode === undefined) continue;
+            if (onode.shape === "highway") continue;
+            tentBlocks.push({
+              row: oc.row,
+              col: oc.col,
+              w: Math.max(1, Math.ceil(onode.size.width)),
+              h: Math.max(1, Math.ceil(onode.size.height)),
+            });
+          }
+          const cellBlockedByTent = (r: number, c: number): boolean => {
+            for (const t of tentBlocks) {
+              if (r >= t.row && r < t.row + t.h && c >= t.col && c < t.col + t.w) return true;
+            }
+            return false;
+          };
+          if (fStepOther.row !== 0) {
+            // Vertical flow: sweep rows between member and highway, in
+            // the member's column band.
+            const r0 = Math.min(memberCell.row, thisHwyCell.row + thisHwyH);
+            const r1 = Math.max(
+              memberCell.row + memberH - 1,
+              thisHwyCell.row - 1,
+            );
+            for (let dc = 0; dc < memberW; dc++) {
+              for (let r = r0; r <= r1; r++) {
+                const c = memberCell.col + dc;
+                if (blockers.has(`${r},${c}`)) return false;
+                if (cellBlockedByTent(r, c)) return false;
+              }
+            }
+          } else {
+            // Horizontal flow: sweep cols between member and highway,
+            // in the member's row band.
+            const c0 = Math.min(memberCell.col, thisHwyCell.col + thisHwyW);
+            const c1 = Math.max(
+              memberCell.col + memberW - 1,
+              thisHwyCell.col - 1,
+            );
+            for (let dr = 0; dr < memberH; dr++) {
+              for (let c = c0; c <= c1; c++) {
+                const r = memberCell.row + dr;
+                if (blockers.has(`${r},${c}`)) return false;
+                if (cellBlockedByTent(r, c)) return false;
+              }
+            }
+          }
+          return true;
+        };
+
+        // Resolve trace-path collisions by perpendicular diagonal bump.
+        // Perpendicular direction here = the partner highway's flow axis
+        // (perpendicular to this highway's flow). For each member that
+        // still has a blocked corridor, try shifting perpendicular by
+        // ±1 cell at a time until corridor is clear.
+        const perpDir = fStepOther.row !== 0
+          ? { row: 0, col: 1 } // this is vertical → perp is horizontal
+          : { row: 1, col: 0 }; // this is horizontal → perp is vertical
+        const resolveTrace = (id: string, fwdSign: number): void => {
+          const t = tentative.get(id);
+          if (t === undefined) return;
+          const node = ctx.nodeOf.get(id);
+          if (node === undefined) return;
+          const w = Math.max(1, Math.ceil(node.size.width));
+          const h = Math.max(1, Math.ceil(node.size.height));
+          if (corridorClear(t, w, h, id)) return;
+          // Try perpendicular bumps, preferring the "outward" direction
+          // (away from this-highway's anchor cell). For a member at
+          // col > hwy.col, that's +col; for col < hwy.col, that's -col.
+          // This keeps members spreading away from the centre rather
+          // than crowding into a sibling's lane.
+          const memberPerpCoord = perpDir.row !== 0 ? t.row : t.col;
+          const hwyPerpCoord = perpDir.row !== 0 ? thisHwyCell.row : thisHwyCell.col;
+          const outwardSign = memberPerpCoord >= hwyPerpCoord ? 1 : -1;
+          const otherTentIds = [...tentative.keys()].filter((k) => k !== id);
+          for (let mag = 1; mag <= 30; mag++) {
+            for (const sign of [outwardSign, -outwardSign]) {
+              const candidate: Cell = {
+                row: t.row + perpDir.row * sign * mag,
+                col: t.col + perpDir.col * sign * mag,
+              };
+              if (t.z !== undefined) candidate.z = t.z;
+              // Footprint must be free (committed blockers).
+              let fpFree = true;
+              for (let dr = 0; dr < h && fpFree; dr++) {
+                for (let dc = 0; dc < w && fpFree; dc++) {
+                  const key = `${candidate.row + dr},${candidate.col + dc}`;
+                  if (occupiedFiltered.has(key)) {
+                    fpFree = false;
+                    break;
+                  }
+                }
+              }
+              if (!fpFree) continue;
+              // Footprint must also not overlap any other tentative
+              // member's footprint.
+              let tentFree = true;
+              for (const oid of otherTentIds) {
+                const oc = tentative.get(oid)!;
+                const onode = ctx.nodeOf.get(oid);
+                if (onode === undefined) continue;
+                const ow = Math.max(1, Math.ceil(onode.size.width));
+                const oh = Math.max(1, Math.ceil(onode.size.height));
+                if (
+                  candidate.row < oc.row + oh && candidate.row + h > oc.row &&
+                  candidate.col < oc.col + ow && candidate.col + w > oc.col
+                ) {
+                  tentFree = false;
+                  break;
+                }
+              }
+              if (!tentFree) continue;
+              if (!corridorClear(candidate, w, h, id)) continue;
+              tentative.set(id, candidate);
+              return;
+            }
+          }
+          // Couldn't resolve — leave as-is; the channel router will
+          // error with a clear message.
+          void fwdSign;
+        };
+
+        for (const s of otherSources) resolveTrace(s, -1);
+        for (const t of otherTargets) resolveTrace(t, +1);
+      }
+
       // Commit tentative positions. The next iteration's
       // `occupiedFiltered` will pick these up from ctx.cells.
       for (const [id, cell] of tentative) {
@@ -1028,7 +1298,16 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
   // the buffer appears on all four sides.
   const BACK_EDGE_PAD = 2;
   const hasBackEdge = model.edges.some((e) => e.isBackEdge);
-  const pad = hasBackEdge ? BACK_EDGE_PAD : 0;
+  // Also pad when any edge has an explicit entry: side that points to
+  // an H-axis face (N or S) — the channel router uses a U-shape that
+  // needs rows OUTSIDE the diagram extent to route through. Without
+  // the pad, the U has no perimeter row to use and falls back to the
+  // standard L which cuts through the target's body.
+  const hasOuterEntry = model.edges.some((e) =>
+    e.entrySide === "N" || e.entrySide === "S" ||
+    e.entrySide === "E" || e.entrySide === "W",
+  );
+  const pad = (hasBackEdge || hasOuterEntry) ? BACK_EDGE_PAD : 0;
   const shifted: Map<string, Cell> = new Map();
   for (const [id, c] of ctx.cells) {
     const cell: Cell = { row: c.row - minRow + pad, col: c.col - minCol + pad };

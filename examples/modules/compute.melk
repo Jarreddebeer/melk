@@ -9,13 +9,12 @@ layout: lr
 
 worker_a { size: 9x5 }
 worker_b { size: 9x5 }
-worker_c { size: 9x5 }
 results { size: 7x5 }
 scheduler  { shape: rect, size: 9x5, label: "Scheduler" }
 aggregator { shape: rect, size: 11x5, label: "Aggregator" }
 
-fan-out work_split: scheduler -> [worker_a, worker_b, worker_c]
-bus     work_join:  [worker_a, worker_b, worker_c] -> aggregator
+fan-out work_split: scheduler -> [worker_a, worker_b]
+bus     work_join:  [worker_a, worker_b] -> aggregator
 
 dispatch { tags: [hot], size: 9x5 }
 

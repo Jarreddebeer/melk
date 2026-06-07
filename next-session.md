@@ -1,86 +1,134 @@
 # melk — next session handoff
 
-**Working tree:** clean at `9d8b92f` ("Per-node offset: + auto via-shim +
-channel-routing polish; docs"). Tests: **411 passing + 13 skipped.**
-43 examples, **40 rendering** (same 3 pre-existing failures: 28, 29, 35).
+**Version:** 0.1.3. Working tree may be dirty (CLI default-output,
+U-routing for `entry:`/`exit:`, stair-fix for highway fan-outs, fan-out
+perp computed under correct forward).
 
-Untracked: `scripts/probe-*.ts` — debug-only, don't commit.
+**Tests:** 411 passing + 13 skipped. **Examples: 42/43 rendering**.
+Only ex 29 fails — the original 5×5 PCB-mesh routing limit.
 
-## What landed in 9d8b92f
+## What landed in 0.1.3
 
-Read the commit body for the full picture (`git show 9d8b92f`). One-line summary:
+### CLI
+- `melk render <file>` now defaults `-o` to `<file-without-.melk>.svg`
+  next to input. No more stdout fallback.
+- Safety check: if `-o` resolves to the input path, melk appends
+  `.svg` and warns rather than overwriting source.
 
-- **Per-node `offset:` attribute** (Option 1) — quoted-string `"WxH"`,
-  integer part shifts grid cells, fractional part becomes a sub-cell
-  pixel shift via `Placement.pixelShift`. Author override for slot-cluster
-  alignment.
-- **Auto via-shim** (Option 2) — `src/layout/via-shim.ts:autoAlignViaShims`
-  runs after `assignSlots` and before `routeChannels`, picks each highway
-  via member's sub-cell pixel shift from the median Δ between hwy and
-  member slot pixels. Manual `offset:` wins. Uses `Math.trunc` for
-  whole-cell rounding (sign-preserving — `Math.round` would flip direction
-  at Δ = ±4).
-- **Channel routing polish** — pixelizer slot-coord fix, lane-clearance
-  tgt-bend exception, sibling-aware `pickMidCol` sweep.
-- **Docs** — README.md, SYNTAX.md (new §3.10 `offset:`, auto-shim callout
-  in placement model), EXAMPLES.md (offset recipe + ex 27 description).
+### Routing
+- **Stair-fix for highway fan-outs** ([src/layout/channels.ts](src/layout/channels.ts), [src/layout/place.ts](src/layout/place.ts)):
+  multi-trace V→V Z paths leaving a highway now ratchet monotonically
+  past the prior extremum, keyed by `srcId|direction` for via-half
+  edges. Non-intersect highways widen `viaGap` to `max(PIPELINE_GAP,
+  fanOutEdges + 2)` so the stair has one bend col per lane plus the
+  two face exclusions.
+- **U-routing for `entry:` / `exit:` overrides**
+  ([src/layout/channels.ts](src/layout/channels.ts)): when the
+  forced face is on the "wrong side" of the source, the router
+  builds a perimeter U-shape (H-V-H-V for V→H, V-H-V-H for H→V,
+  V-H-V for H→H same-side). Trace exits perpendicular to source
+  face, wraps around target's outer edge, enters perpendicular to
+  target face. The placer reserves a 2-cell perimeter pad
+  whenever any edge sets `exit:` or `entry:`.
+- **Fan-out perp bug fix** ([src/layout/place.ts](src/layout/place.ts)):
+  `anchorFanOut` and `anchorBus` were computing consumer extents
+  using `ctx.forward.get(consumer)` which defaulted to the layout
+  default (E for lr) before the consumer was anchored — wrong perp
+  when the fan-out direction is rotated by a branch (e.g. branch
+  `:right` under lr → S). Added `extentForAs(id, ctx, fwd)` that
+  computes extent under a specified forward. Affected ex 41 (CQRS
+  read-models collided at the same row).
 
-## Still-failing examples (pre-existing, unrelated)
+### Docs
+- README, SYNTAX, EXAMPLES, prompts/melk-author.md updated for the
+  new CLI default and `entry:`/`exit:` U-routing.
+
+## The remaining failure: ex 29
+
+29 is the canonical 5×5 PCB-mesh test: 5 sources × 5 sinks on each of
+hwy_h and hwy_v, all-to-all = 25 surface traces + 25 underground = 50
+traces through a single intersection.
+
+The placer gets the geometry exactly right (tight-stack sources/sinks
+aligned with highway face slots, viaGap=26 cells of corridor on each
+side). The **channel router fails** with `E_AXIAL_OVERLAP` on crossing
+L-bend traces between hwy_h.E and dst_h cluster.
+
+### Why it fails (the geometric proof)
+
+The "intra-highway must be straight" constraint means the mirror rule
+(hwy.W slot row = hwy.E slot row) is non-negotiable. Combined with the
+slot allocator's natural sort (by destination perp), this gives:
+
+- src_h1's 5 traces enter at W@0..4 (rows 31..35) and exit at E@0..4 (same rows)
+- src_h2's 5 traces enter at W@5..9 (rows 36..40) and exit at E@5..9 (same rows)
+- ...
+
+Then on the exit side, dst_h1 receives traces from E@0 (row 31), E@5 (row 36),
+E@10 (row 41), E@15 (row 46), E@20 (row 51) — entering dst_h1.W@0..4
+(rows 31..35).
+
+That means:
+- src_h1→dst_h2: V→V Z path from row 32 (E@1) to row 36 (dst_h2.W@0)
+- src_h2→dst_h1: V→V Z path from row 36 (E@5) to row 32 (dst_h1.W@1)
+
+These two traces **swap rows**. Each is a 2-bend Z, so each has H segments at
+BOTH row 32 and row 36. No matter how you place their V-leg mid-cols, at one
+of the two shared rows their H ranges will overlap. This is geometrically
+unavoidable with 2-bend Z paths.
+
+### The fix: 4-bend stair routing for crossing V→V Z traces
+
+When two via-traces would swap rows, at least one needs a **4-bend stair**
+route through an intermediate row that's not used by other traces:
 
 ```
-examples/28-highway-intersect.melk          (E_NO_CHANNEL inside intersect group)
-examples/29-highway-intersect-large.melk    (same family — highway via cells colliding with sibling nodes)
-examples/35-modules-platform.melk           (E_LANE_FULL between module boxes)
+srcExit → (srcRow, X1) → (midRow, X1) → (midRow, X2) → (tgtRow, X2) → tgtExit
 ```
 
-## How to start
+The intermediate `midRow` must be **outside the highway's footprint** (so the
+stair doesn't run through hwy_h's body) and **outside dst_h's row band** (so
+it doesn't hit dst_h's footprint). For 5×5 that means a row above or below
+the intersection — i.e. the placer needs to reserve extra rows IN ADDITION to
+the viaGap columns.
 
-1. Read this file.
-2. `git status` → clean except untracked probe scripts.
-3. `npx vitest run` → 411 passing, 13 skipped.
-4. `for f in examples/*.melk; do svg="${f%.melk}.svg"; npx tsx src/cli.ts render "$f" -o "$svg" 2>&1 | head -1; done`
-   → 40 silent, 3 fail (28, 29, 35).
-5. Pick a topic. No in-flight work.
+## How to resume
+
+1. `git status` → confirm clean.
+2. `npx vitest run` → 411 pass + 13 skipped.
+3. `npx tsx src/cli.ts render examples/29-highway-intersect-large.melk`
+   → `E_AXIAL_OVERLAP: edges 'hwy_h -> dst_h2' and 'hwy_h -> dst_h1' share a 152-px horizontal segment at y=260`.
+4. **Implement 4-bend stair routing in channels.ts** for V→V Z paths whose
+   `srcRow` and `tgtRow` rows are both already claimed by other edges'
+   L-bends. The midRow needs to be OUTSIDE the highway's row range and
+   OUTSIDE the dst row band — so the placer must also reserve extra rows
+   above/below the hwy_h cluster.
 
 ## Decisions worth NOT relitigating
 
-- **Slot-clearance asymmetry** (tgt relaxed at tgt-bend, src stays strict
-  at src-bend). The symmetric version breaks ex 23. The sibling-aware
-  sweep is what handles the dst side. Keep this asymmetric.
-- **Offset uses quoted string** not bare cells syntax. Quoted lets us
-  accept fractions and negatives without inventing new lexer tokens.
-  `"WxH"` is the only accepted form.
-- **Offset's fractional part is a render-time pixel shift, not a
-  fractional cell on the grid.** The grid stays integer; `colX[col]` /
-  `rowY[row]` lookups don't break. Only endpoints + rendered box pick up
-  the shift.
-- **Manual `offset:` wins over auto shim.** `autoAlignViaShims` skips
-  any node already in `placement.pixelShift`. Don't change this — the
-  author needs the override to handle cases where the median heuristic
-  picks wrong.
-- **Auto shim uses `Math.trunc` for whole-cell rounding, NOT
-  `Math.round`.** Both are mod-8 valid, but `Math.round(0.5) = 1` flips
-  the residual sign and shifts the member to the ADJACENT hwy slot —
-  the trace stays bent instead of going straight. `Math.trunc(0.5) = 0`
-  keeps the residual sign aligned with `medianΔ`, so the shim shifts
-  the member toward the matching slot.
+- **Highway intra-traces MUST be straight** (mirror rule stays). The user
+  explicitly stated this constraint. Don't try to skip the mirror or add
+  diagonals inside the highway.
+- **viaGap = N+1** for intersect highways is correct. Don't apply
+  it to non-intersect highways at that magnitude — they use
+  `max(PIPELINE_GAP, fanOutEdges + 2)` now.
+- **claimLegCells must claim ALL cells**, not just endpoints.
+- **Single-source/target centring shim only fires when nSrc=1 or nTgt=1**.
+- **Tight-stack with first-elem anchor only for dense intersect**
+  (`m.sources.length >= 2 && m.targets.length >= 2`).
+- **28's structure is final** (1×3 hwy_h + 1×2 hwy_v, src_a 7x5).
+- **U-routing falls back to L if no perim row/col is free.** The placer
+  pad is 2 cells; that's enough for the common case but not arbitrarily
+  many overlapping U-routes.
 
-## Gotchas to keep in mind
+## Gotchas
 
-- **Don't symmetric-relax src clearance.** Tried it; ex 23 hits
-  E_LANE_FULL because every edge greedily grabs the col adjacent to
-  hwy and exhausts the corridor.
-- **Don't change `offset:` to accept bare cells.** The quoted form is
-  the only way to express `0x-0.5` without lexer surgery.
-- **`pixelShift` is empty when no node has a fractional offset.** Don't
-  add code that assumes a shift exists — check `.get(id)` and treat
-  undefined as `{dx: 0, dy: 0}`.
-- **Author owns collision risk on offsets.** The placer doesn't re-check
-  footprints after applying. If two nodes get overlapping cells from
-  offsets, the channel router will produce gibberish.
-- **Slot pixels in `routeChannels` are post-shift.** If you add another
-  consumer of slot pixels somewhere, look at the pattern in
-  `channels.ts` where `slotPixel()`'s return is wrapped with
-  `placement.pixelShift.get(id)` before use.
-- **Always render fresh into `examples/`, not `c:/tmp/`** — user views
-  previews in the editor; tmp is invisible to them.
+- The `denseIntersectHwys` test in slots.ts is gone. The mirror is
+  ON for all via-half edges. Don't re-add the mirror skip.
+- When you re-render 29 you'll see `E_AXIAL_OVERLAP` (either between
+  hwy_h→dst_h pair or hwy_v→dst_v pair). Both are the same root cause:
+  crossing 2-bend Z paths.
+- The placement for 5×5 (tight stack + first-element anchor) is the right
+  geometry. Don't revert the place.ts changes for intersect — they're the
+  reason entry-side traces are straight. The remaining problem is purely
+  in the channel router (exit-side L-bend crossing).

@@ -1282,24 +1282,36 @@ function autoSizeHighways(ctx: BindCtx): void {
       : layoutHoriz;
     // Flow-direction length expands to fit the LARGEST partner's
     // breadth (so all partner traces fit through the intersection).
+    // Length must ALSO parity-match the partner's edge count: the
+    // partner's traces cross this highway along its length axis, so
+    // they need cell-centre slots in this direction too. Without the
+    // partner-parity-match here, hwy_h and hwy_v end up with mismatched
+    // perpendicular extents (one expanded by 1 for its own breadth-
+    // parity, the other not), and hwy_h's east-exit cell falls inside
+    // hwy_v's footprint.
     let lengthCells = 1;
+    let partnerEdgeCount = 0;
     const partners = intersectPartners.get(node.id) ?? [];
     for (const p of partners) {
       const pb = breadthOf.get(p) ?? 1;
       if (pb > lengthCells) lengthCells = pb;
+      const pe = edgesPerHwy.get(p) ?? 0;
+      if (pe > partnerEdgeCount) partnerEdgeCount = pe;
     }
     // Final breadth must match edgeCount parity (see breadthOf computation).
     // If max() with default overrides the parity-matched breadth and
     // gives odd-when-F-is-even (or vice versa), bump by 1.
     const edgeCount = edgesPerHwy.get(node.id) ?? 0;
     const parityMatch = (n: number) => (n % 2 === edgeCount % 2) ? n : n + 1;
+    const partnerParityMatch = (n: number) =>
+      (n % 2 === partnerEdgeCount % 2) ? n : n + 1;
     if (horiz) {
-      const w = Math.max(node.size.width, lengthCells);
+      const w = partnerParityMatch(Math.max(node.size.width, lengthCells));
       const h = parityMatch(Math.max(node.size.height, breadthCells));
       node.size = { width: w, height: h };
     } else {
       const w = parityMatch(Math.max(node.size.width, breadthCells));
-      const h = Math.max(node.size.height, lengthCells);
+      const h = partnerParityMatch(Math.max(node.size.height, lengthCells));
       node.size = { width: w, height: h };
     }
   }

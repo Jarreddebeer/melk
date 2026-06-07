@@ -21,21 +21,21 @@ legend: on
 # Read models are durable (cylinders) and rebuildable from the log.
 
 client    { shape: rect,      label: "client", size: 7x5 }
-api       { shape: rect,      label: "API\ngateway", size: 7x7 }
+api       { shape: rect,      label: "API\ngateway", size: 9x7 }
 
 # Write side.
-cmd       { shape: rect,      label: "command\nhandler", size: 9x7 }
-aggregate { shape: rect,      label: "aggregate\nroot", size: 9x7 }
-events    { shape: cylinder,  label: "event store\n(append-only log)", size: 15x7 }
+cmd       { shape: rect,      label: "command\nhandler", size: 12x7 }
+aggregate { shape: rect,      label: "aggregate\nroot", size: 12x7 }
+events    { shape: cylinder,  label: "event store\n(append-only log)", size: 19x7 }
 
 # Read-model fan.
-projector { shape: rect, label: "projector\n(event consumer)", size: 15x7 }
-orders_rm { shape: cylinder,  label: "orders\nread-model", size: 11x7 }
-inv_rm    { shape: cylinder,  label: "inventory\nread-model", size: 11x7 }
-audit_rm  { shape: cylinder,  label: "audit\nread-model", tags: [critical], size: 11x7 }
+projector { shape: rect, label: "projector\n(event consumer)", size: 17x7 }
+orders_rm { shape: cylinder,  label: "orders\nread-model", size: 13x7 }
+inv_rm    { shape: cylinder,  label: "inventory\nread-model", size: 15x7 }
+audit_rm  { shape: cylinder,  label: "audit\nread-model", tags: [critical], size: 12x7 }
 
 # Query side.
-query     { shape: rect,      label: "query\nhandler", size: 7x7 }
+query     { shape: rect,      label: "query\nhandler", size: 9x7 }
 
 # Write spine: anchors client, api, cmd, aggregate, events on one row.
 pipeline write_path: client -> api -> cmd -> aggregate -> events
@@ -50,4 +50,4 @@ fan-out read-models: projector -> [orders_rm, inv_rm, audit_rm]
 # row below `api`; `orders_rm` is already placed by the fan-out so a
 # plain edge finds it.
 branch read-side:right: api -> query
-query -> orders_rm
+query -> orders_rm { entry: S, exit: S }

@@ -7,6 +7,12 @@ dist/
 
 # Generated example renders (regenerate via `npx tsx src/cli.ts render`).
 examples/*.svg
+examples/modules/*.svg
+
+# Ad-hoc probe scripts (debugging artefacts; not part of the toolchain).
+scripts/probe-*.ts
+scripts/probe-*.melk
+scripts/probe-*.svg
 
 # Tool-local Claude Code state.
 .claude/

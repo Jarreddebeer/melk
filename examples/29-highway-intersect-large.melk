@@ -1,55 +1,90 @@
 layout: lr
-crossings: 40
+crossings: 200
 theme:  schematic-dark
 
 # Larger `+` intersection (DESIGN-PHASE4.md §11.11/§11.13). hwy_h
-# carries 9 surface traces (3 sources × 3 sinks); hwy_v carries 9
-# underground traces (3 sources × 3 sinks). The intersection cell is
+# carries 25 surface traces (5 sources × 5 sinks); hwy_v carries 25
+# underground traces (5 sources × 5 sinks). The intersection cell is
 # shared between the two highways at different Z (surface vs
-# underground). The placer dodges member overlap by bumping the
-# underground highway's members outward along its flow axis until
-# they clear the surface highway's members.
-#
-# Themed schematic-dark: deep substrate, cyan PCB traces, no
-# arrowheads (direction comes from routing topology, as in real
-# schematics). The all-to-all crossings make this the canonical
-# circuit-board demonstration of the metaphor melk is built around.
+# underground). All-to-all fan-out on both axes means every surface
+# trace crosses every underground trace at the centre cell — the
+# canonical 5×5 PCB-style mesh.
 
-src_v1 { size: 7x5 }
-dst_v1 { size: 7x5 }
-dst_v2 { size: 7x5 }
-dst_v3 { size: 7x5 }
-src_v2 { size: 7x5 }
-src_v3 { size: 7x5 }
-src_h3 { shape: rect, size: 9x7 }
-src_h2 { shape: rect, size: 9x7 }
-dst_h3 { shape: rect, size: 9x7 }
-dst_h2 { shape: rect, size: 9x7 }
-dst_h1 { shape: rect, size: 9x7 }
-src_h1 { shape: rect, size: 9x7 }
+src_v1 { size: 5x5 }
+src_v2 { size: 5x5 }
+src_v3 { size: 5x5 }
+src_v4 { size: 5x5 }
+src_v5 { size: 5x5 }
+dst_v1 { size: 5x5 }
+dst_v2 { size: 5x5 }
+dst_v3 { size: 5x5 }
+dst_v4 { size: 5x5 }
+dst_v5 { size: 5x5 }
+src_h1 { shape: rect, size: 9x5 }
+src_h2 { shape: rect, size: 9x5 }
+src_h3 { shape: rect, size: 9x5 }
+src_h4 { shape: rect, size: 9x5 }
+src_h5 { shape: rect, size: 9x5 }
+dst_h1 { shape: rect, size: 9x5 }
+dst_h2 { shape: rect, size: 9x5 }
+dst_h3 { shape: rect, size: 9x5 }
+dst_h4 { shape: rect, size: 9x5 }
+dst_h5 { shape: rect, size: 9x5 }
 hwy_h { shape: highway }
 hwy_v { shape: highway, orient: vertical, render: underground }
 
 intersect hwy_h, hwy_v
 
-# Horizontal bundle: 9 surface traces.
+# Horizontal bundle: 25 surface traces (all-to-all 5×5).
 src_h1 -> dst_h1 { via: hwy_h }
 src_h1 -> dst_h2 { via: hwy_h }
 src_h1 -> dst_h3 { via: hwy_h }
+src_h1 -> dst_h4 { via: hwy_h }
+src_h1 -> dst_h5 { via: hwy_h }
 src_h2 -> dst_h1 { via: hwy_h }
 src_h2 -> dst_h2 { via: hwy_h }
 src_h2 -> dst_h3 { via: hwy_h }
+src_h2 -> dst_h4 { via: hwy_h }
+src_h2 -> dst_h5 { via: hwy_h }
 src_h3 -> dst_h1 { via: hwy_h }
 src_h3 -> dst_h2 { via: hwy_h }
 src_h3 -> dst_h3 { via: hwy_h }
+src_h3 -> dst_h4 { via: hwy_h }
+src_h3 -> dst_h5 { via: hwy_h }
+src_h4 -> dst_h1 { via: hwy_h }
+src_h4 -> dst_h2 { via: hwy_h }
+src_h4 -> dst_h3 { via: hwy_h }
+src_h4 -> dst_h4 { via: hwy_h }
+src_h4 -> dst_h5 { via: hwy_h }
+src_h5 -> dst_h1 { via: hwy_h }
+src_h5 -> dst_h2 { via: hwy_h }
+src_h5 -> dst_h3 { via: hwy_h }
+src_h5 -> dst_h4 { via: hwy_h }
+src_h5 -> dst_h5 { via: hwy_h }
 
-# Vertical bundle: 9 underground traces.
+# Vertical bundle: 25 underground traces (all-to-all 5×5).
 src_v1 -> dst_v1 { via: hwy_v }
 src_v1 -> dst_v2 { via: hwy_v }
 src_v1 -> dst_v3 { via: hwy_v }
+src_v1 -> dst_v4 { via: hwy_v }
+src_v1 -> dst_v5 { via: hwy_v }
 src_v2 -> dst_v1 { via: hwy_v }
 src_v2 -> dst_v2 { via: hwy_v }
 src_v2 -> dst_v3 { via: hwy_v }
+src_v2 -> dst_v4 { via: hwy_v }
+src_v2 -> dst_v5 { via: hwy_v }
 src_v3 -> dst_v1 { via: hwy_v }
 src_v3 -> dst_v2 { via: hwy_v }
 src_v3 -> dst_v3 { via: hwy_v }
+src_v3 -> dst_v4 { via: hwy_v }
+src_v3 -> dst_v5 { via: hwy_v }
+src_v4 -> dst_v1 { via: hwy_v }
+src_v4 -> dst_v2 { via: hwy_v }
+src_v4 -> dst_v3 { via: hwy_v }
+src_v4 -> dst_v4 { via: hwy_v }
+src_v4 -> dst_v5 { via: hwy_v }
+src_v5 -> dst_v1 { via: hwy_v }
+src_v5 -> dst_v2 { via: hwy_v }
+src_v5 -> dst_v3 { via: hwy_v }
+src_v5 -> dst_v4 { via: hwy_v }
+src_v5 -> dst_v5 { via: hwy_v }

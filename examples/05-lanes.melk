@@ -29,8 +29,8 @@ pipeline egress:  api -> client
 # Cross-lane signals. `transform -> auth` invokes the control plane
 # from data; `controller -> api` feeds an authorisation result onto
 # the egress lane.
-transform  -> auth
-controller -> api
+transform  -> auth { exit: S, entry: N }
+controller -> api { exit: S, entry: N }
 
 nodeset data-plane: ingest, transform, ods
 nodeset control:    auth, controller
