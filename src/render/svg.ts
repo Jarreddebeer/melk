@@ -1697,7 +1697,7 @@ function renderNode(
       groupOpen,
       ...(iconBorderRect ? [iconBorderRect] : []),
       `  ${iconBlock}`,
-      `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
+      `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${labelContent(n.label, cx, "alphabetic")}</text>`,
       `</g>`,
     ].join("\n");
   }
@@ -1712,7 +1712,7 @@ function renderNode(
       groupOpen,
       ...(iconBorderRect ? [iconBorderRect] : []),
       `  ${nodeShape(n.shape, iconBounds, theme, overrides, resolveFill)}`,
-      `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
+      `  <text x="${fmt(cx)}" y="${fmt(labelY)}" text-anchor="middle" dominant-baseline="alphabetic" fill="${textColour}"${textWeightAttr}>${labelContent(n.label, cx, "alphabetic")}</text>`,
       `</g>`,
     ].join("\n");
   }
@@ -1732,7 +1732,7 @@ function renderNode(
     groupOpen,
     `  ${nodeShape(n.shape, b, theme, overrides, resolveFill)}`,
     ...(badge ? [`  ${badge}`] : []),
-    `  <text x="${fmt(cx)}" y="${fmt(cy)}" text-anchor="middle" dominant-baseline="central" fill="${textColour}"${textWeightAttr}>${escapeText(n.label)}</text>`,
+    `  <text x="${fmt(cx)}" y="${fmt(cy)}" text-anchor="middle" dominant-baseline="central" fill="${textColour}"${textWeightAttr}>${labelContent(n.label, cx, "central")}</text>`,
     `</g>`,
   ].join("\n");
 }
@@ -2088,7 +2088,7 @@ function renderEdgeLabel(edge: ModelEdge, poly: Polyline, theme: Theme): string 
     baseline = "central";
   }
 
-  const txt = escapeText(edge.label!);
+  const txt = labelContent(edge.label!, x, baseline === "central" ? "central" : "alphabetic");
   const halo = theme.tokens["label-halo"];
   const ink = theme.tokens["ink-secondary"];
   const size = theme.typography.size.edge;
@@ -2128,6 +2128,45 @@ export function fmt(n: number): string {
 
 export function escapeText(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Render label content for a `<text>` element, handling `\n` line breaks.
+ * SVG ignores newlines inside `<text>`, so multi-line labels need
+ * `<tspan>` elements each at the original x with a `dy` line-height.
+ *
+ * - Single-line labels: returns the escaped text untouched.
+ * - Multi-line labels: emits one `<tspan>` per line. The first sits at
+ *   `dy=0`; subsequent lines step by `lineHeight` em. The caller's
+ *   `text-anchor` and `y` are inherited — `x` is restated per `<tspan>`
+ *   so each line wraps back to the same horizontal position.
+ * - For `dominant-baseline="central"` labels (the common in-box case),
+ *   the block is shifted up by half its total height so the visual
+ *   centre of the multi-line block sits on the original `y`.
+ */
+function labelContent(
+  s: string,
+  x: number,
+  baseline: "central" | "alphabetic" = "central",
+  lineHeightEm = 1.15,
+): string {
+  if (!s.includes("\n")) return escapeText(s);
+  const lines = s.split("\n");
+  const xs = fmt(x);
+  const n = lines.length;
+  // For central baseline, shift the block up so its visual centre aligns
+  // with the original y. For alphabetic baseline (e.g. icon-below labels),
+  // the original y is the baseline of the FIRST line, so just stack down.
+  const firstDy = baseline === "central"
+    ? `${(-(n - 1) * lineHeightEm) / 2}em`
+    : "0em";
+  return lines
+    .map((line, i) =>
+      i === 0
+        ? `<tspan x="${xs}" dy="${firstDy}">${escapeText(line)}</tspan>`
+        : `<tspan x="${xs}" dy="${lineHeightEm}em">${escapeText(line)}</tspan>`,
+    )
+    .join("");
 }
 
 export function escapeAttr(s: string): string {
