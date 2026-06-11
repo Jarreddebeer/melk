@@ -16,8 +16,8 @@
  *   - deprecated lane/group/tag → BindError
  *
  * Edge endpoints that aren't explicitly declared as nodes get
- * auto-declared as 1x1 rects (matching the Phase 3 behaviour the user
- * is used to). Pipeline / bus / fan-out members get the same treatment.
+ * auto-declared as 5x5 rects. Pipeline / bus / fan-out members get the
+ * same treatment.
  *
  * Validation done here:
  *   - duplicate node, pipeline, bus, fan-out, nodeset, path names
@@ -407,6 +407,7 @@ export function bind(program: Program, options: BindOptions = {}): Model {
     edgesets: [...ctx.edgesets.values()],
     highwayMemberships: [...ctx.highwayMemberships.values()],
     intersections: ctx.intersections,
+    autoDeclared: [...ctx.autoDeclared],
   };
 }
 
@@ -444,9 +445,11 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
   let offset: { dCol: number; dRow: number } | undefined;
   let orientSpan: { line: number; col: number; offset: number } | undefined;
   let renderSpan: { line: number; col: number; offset: number } | undefined;
+  let labelSeen = false;
   for (const prop of decl.properties) {
     if (prop.key === "orient") orientSpan = prop.span.start;
     if (prop.key === "render") renderSpan = prop.span.start;
+    if (prop.key === "label") labelSeen = true;
     if (prop.key === "icon") iconSeen = true;
     if (prop.key === "icon-position") iconPositionSeen = true;
     applyNodeProperty(
@@ -496,6 +499,17 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       decl.span,
     );
   }
+  // A highway is an invisible bundling channel — it has no body to draw a
+  // label on, so an explicit `label:` is silently dropped at render. Warn
+  // so the author isn't surprised by the missing text. (Use a `nodeset`
+  // or `path` name if you want a visible label near the channel.)
+  if (shapeBox.value === "highway" && labelSeen) {
+    process.stderr.write(
+      `W_HIGHWAY_LABEL_IGNORED: highway '${decl.name}' has a label, but ` +
+        `highways are invisible bundlers and render no body, so the label ` +
+        `is dropped. To label the channel, name a 'nodeset' or 'path' near it.\n`,
+    );
+  }
   // §11.11: orient: and render: are highway-only.
   if (shapeBox.value !== "highway") {
     if (orient !== undefined) {
@@ -532,6 +546,19 @@ function bindEdge(
 ): void {
   const fromRes = resolveNodeRefId(decl.from, ctx);
   const toRes = resolveNodeRefId(decl.to, ctx);
+  // Self-edge: melk has no self-loop glyph, and routing one draws the
+  // arrow buried inside the node with the label overprinting the node
+  // label. Reject it loudly rather than rendering garbage. Model a retry
+  // / feedback loop as a back-edge to an upstream stage instead.
+  if (fromRes.id === toRes.id && fromRes.internal === toRes.internal) {
+    throw new BindError(
+      `E_SELF_EDGE: edge from '${fromRes.id}' to itself. melk has no ` +
+        `self-loop glyph. Model a retry/feedback loop as a back-edge to an ` +
+        `upstream stage (e.g. \`${fromRes.id} >- <upstream>\`), or attach a ` +
+        `tag/annotation to the node.`,
+      decl.span,
+    );
+  }
   let label: string | undefined;
   let pivot: "source" | "target" | undefined;
   let avoidItems: AvoidRef[] | undefined;
@@ -608,7 +635,11 @@ function bindEdge(
       }
       tags = prop.value.items.map((it) => it.name);
     } else {
-      throw new BindError(`unknown edge property: '${prop.key}'`, prop.span);
+      throw new BindError(
+        `E_UNKNOWN_PROPERTY: unknown edge property '${prop.key}'. ` +
+          `Valid edge properties: label, pivot, avoid, via, exit, entry, tags.`,
+        prop.span,
+      );
     }
   }
   if (viaItems !== undefined && (exitSide !== undefined || entrySide !== undefined)) {
@@ -1666,9 +1697,57 @@ function applyNodeProperty(
       setOffset({ dCol, dRow });
       break;
     }
-    default:
-      throw new BindError(`unknown node property: '${prop.key}'`, prop.span);
+    default: {
+      const near = nearestNodeProperty(prop.key);
+      const hint = near
+        ? ` Did you mean '${near}'?`
+        : ` Valid properties: ${NODE_PROPERTY_LIST}.`;
+      throw new BindError(
+        `E_UNKNOWN_PROPERTY: unknown node property '${prop.key}'.${hint}`,
+        prop.span,
+      );
+    }
   }
+}
+
+/** Every attribute a node declaration block accepts. */
+const NODE_PROPERTIES = [
+  "shape",
+  "size",
+  "label",
+  "tags",
+  "icon",
+  "icon-position",
+  "border",
+  "orient",
+  "render",
+  "slot-order",
+  "offset",
+];
+const NODE_PROPERTY_LIST = NODE_PROPERTIES.join(", ");
+
+/** Closest valid property within edit-distance 2 (e.g. colour→? none; lable→label). */
+function nearestNodeProperty(key: string): string | undefined {
+  let best: string | undefined;
+  let bestDist = 3;
+  for (const p of NODE_PROPERTIES) {
+    const m = key.length;
+    const n = p.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i]![0] = i;
+    for (let j = 0; j <= n; j++) dp[0]![j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = key[i - 1] === p[j - 1] ? 0 : 1;
+        dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + cost);
+      }
+    }
+    if (dp[m]![n]! < bestDist) {
+      bestDist = dp[m]![n]!;
+      best = p;
+    }
+  }
+  return best;
 }
 
 function isShape(v: string): v is ShapeName {

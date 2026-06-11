@@ -30,6 +30,7 @@ import {
   extentOf,
   footprintCells,
 } from "./placement.js";
+import { CELL_PX } from "./slots.js";
 
 interface PlaceCtx {
   cells: Map<string, Cell>;
@@ -1215,16 +1216,80 @@ function detectCollisions(model: Model, ctx: PlaceCtx): void {
           `E_AMBIGUOUS_PLACEMENT: nodes '${prev}' and '${id}' both placed at ` +
             `(row ${fc.row}, col ${fc.col}). ` +
             `Add a structured-flow constraint to disambiguate, or split the source. ` +
-            `Hint: if '${id}' is a side-channel off a spine member, use ` +
-            `\`branch <name>:right: <spine> -> ${id}\` (or \`:left:\`) — a bare ` +
-            `edge to '${id}' makes the placer extend the spine and collide. ` +
-            `For multiple side-shoots off the same node, use \`fan-out\` instead of ` +
-            `several \`branch\`es with the same side.`,
+            ambiguousPlacementHint(model, prev, id),
         );
       }
       occupied.set(key, id);
     }
   }
+}
+
+/**
+ * Build a shape-aware fix hint for an E_AMBIGUOUS_PLACEMENT collision
+ * between nodes `a` and `b`. The static branch hint is right for the
+ * bare-side-channel case but actively misleading for converge/merge
+ * shapes (the most common collision an LLM hits), so classify first:
+ *
+ *  - Both are producers feeding a common target  → fold into one bus.
+ *  - Both are fan-out leaves of different parents → size the parents to
+ *    their subtree breadth.
+ *  - Two pipelines sharing a tail sink            → split at the shared node.
+ *  - Otherwise (side-channel)                     → the branch hint.
+ */
+function ambiguousPlacementHint(model: Model, a: string, b: string): string {
+  const targetsOf = (id: string) =>
+    new Set(model.edges.filter((e) => e.from === id).map((e) => e.to));
+  const sourcesOf = (id: string) =>
+    new Set(model.edges.filter((e) => e.to === id).map((e) => e.from));
+
+  // Converge: a and b both feed the same downstream node.
+  const aTgts = targetsOf(a);
+  const shared = [...targetsOf(b)].find((t) => aTgts.has(t));
+  if (shared) {
+    return (
+      `Hint: '${a}' and '${b}' both feed '${shared}' but sit in different ` +
+      `constructs, so they collide at the merge point. Put them in one ` +
+      `anchoring construct: \`bus <name>: [${a}, ${b}, ...] -> ${shared}\` ` +
+      `(and reach '${shared}' from any other producers with plain edges). ` +
+      `If '${shared}' is mid-pipeline, fold the upstream spine member into ` +
+      `that bus and start the tail pipeline at '${shared}'.`
+    );
+  }
+
+  // Shared tail sink: a and b are sources whose pipelines end at the same
+  // sink (they share a target that is itself a terminus).
+  const sharedSink = [...aTgts].find((t) => targetsOf(b).has(t));
+  if (sharedSink) {
+    return (
+      `Hint: '${a}' and '${b}' both terminate at '${sharedSink}'. Merge them ` +
+      `with \`bus <name>: [${a}, ${b}] -> ${sharedSink}\` instead of two ` +
+      `separate edges/pipelines.`
+    );
+  }
+
+  // Fan-out leaves of different parents: a and b each have a single source
+  // and those sources differ (two subtrees overlapping).
+  const aSrc = sourcesOf(a);
+  const bSrc = sourcesOf(b);
+  if (aSrc.size === 1 && bSrc.size === 1 && [...aSrc][0] !== [...bSrc][0]) {
+    const pa = [...aSrc][0];
+    const pb = [...bSrc][0];
+    return (
+      `Hint: '${a}' and '${b}' are leaves of different fan-outs ('${pa}' and ` +
+      `'${pb}') whose subtrees overlap. Size each parent to its subtree ` +
+      `breadth so the leaves get distinct rows — e.g. \`${pa} { size: 5xN }\` ` +
+      `(N ≈ 2× the number of leaves) in lr layout.`
+    );
+  }
+
+  // Default: the classic bare-edge-off-a-spine side-channel.
+  return (
+    `Hint: if '${b}' is a side-channel off a spine member, use ` +
+    `\`branch <name>:right: <spine> -> ${b}\` (or \`:left:\`) — a bare ` +
+    `edge to '${b}' makes the placer extend the spine and collide. ` +
+    `For multiple side-shoots off the same node, use \`fan-out\` instead of ` +
+    `several \`branch\`es with the same side.`
+  );
 }
 
 // --- normalisation --------------------------------------------------------
@@ -1255,7 +1320,7 @@ function normalise(model: Model, ctx: PlaceCtx): Placement {
       const fracRow = off.dRow - intRow;
       ctx.cells.set(id, { ...c, row: c.row + intRow, col: c.col + intCol });
       if (fracCol !== 0 || fracRow !== 0) {
-        pixelShift.set(id, { dx: fracCol * 8, dy: fracRow * 8 });
+        pixelShift.set(id, { dx: fracCol * CELL_PX, dy: fracRow * CELL_PX });
       }
     }
   }

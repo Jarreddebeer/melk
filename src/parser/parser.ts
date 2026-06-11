@@ -65,6 +65,50 @@ export class ParseError extends Error {
   }
 }
 
+/** Every `word:` form the parser accepts as a top-level directive. */
+const KNOWN_DIRECTIVES = new Set([
+  "layout",
+  "crossings",
+  "theme",
+  "legend",
+  "legend-position",
+  "title",
+  "subtitle",
+  "caption",
+  "icons",
+]);
+const KNOWN_DIRECTIVE_LIST = [...KNOWN_DIRECTIVES].join(", ");
+
+/** Levenshtein distance, capped — cheap enough for a one-off suggestion. */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i]![0] = i;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + cost);
+    }
+  }
+  return dp[m]![n]!;
+}
+
+/** Closest known directive within edit-distance 2, else undefined. */
+function nearestDirective(word: string): string | undefined {
+  let best: string | undefined;
+  let bestDist = 3;
+  for (const d of KNOWN_DIRECTIVES) {
+    const dist = editDistance(word, d);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = d;
+    }
+  }
+  return best;
+}
+
 class Parser {
   private pos = 0;
 
@@ -165,6 +209,37 @@ class Parser {
       // Deprecated: `lane "name": ...` — preserved for migration warnings.
       if (tok.value === "lane" && next.kind === "string") {
         return this.deprecatedLaneDecl();
+      }
+      // `lane <ident>` near-miss — the dedicated deprecation handler above
+      // only fires on `lane "<string>"`, so the unquoted form would
+      // otherwise fall into a generic parse error. Give it the same clear
+      // pointer. (`tag`/`group` near-misses already have handlers above.)
+      if (tok.value === "lane" && next.kind === "ident") {
+        throw new ParseError(
+          `E_DEPRECATED_LANE: 'lane' was removed in Phase 4. ` +
+            `Use 'nodeset' to group nodes, or 'path'/'edgeset' to highlight a flow`,
+          tok.span,
+        );
+      }
+      // An unknown bare `word: value` at statement start with no arrow on
+      // the line is almost always a mistyped directive (a graphviz/mermaid
+      // habit like `direction: lr`). Catch it here so it doesn't fall into
+      // nodeOrEdge() and surface as the misleading "node declaration cannot
+      // have a port". We require "no arrow before the newline" so genuine
+      // port-ref edges (`a:in -> b`) still parse as edges.
+      if (
+        next.kind === "colon" &&
+        !KNOWN_DIRECTIVES.has(tok.value) &&
+        !this.lineHasArrow()
+      ) {
+        const suggestion = nearestDirective(tok.value);
+        const hint = suggestion
+          ? ` Did you mean '${suggestion}:'?`
+          : ` Known directives: ${KNOWN_DIRECTIVE_LIST}.`;
+        throw new ParseError(
+          `E_UNKNOWN_DIRECTIVE: '${tok.value}:' is not a directive.${hint}`,
+          tok.span,
+        );
       }
       // Deprecated: `group <name> { ... }`.
       if (
@@ -703,6 +778,18 @@ class Parser {
     if (this.peek().kind === "arrow") {
       this.advance();
       const to = this.nodeRef();
+      // A chained edge `a -> b -> c` (a graphviz/mermaid habit) — melk
+      // expresses a linear chain as `pipeline <name>: a -> b -> c`. Catch
+      // the second arrow here with a concrete fix instead of the generic
+      // "expected ident, got arrow" the next statement would emit.
+      if (this.peek().kind === "arrow") {
+        throw new ParseError(
+          `E_CHAINED_EDGE: a bare edge takes exactly two nodes; ` +
+            `'${from.node} -> ${to.node} -> ...' chains three or more. ` +
+            `Wrap a chain in a pipeline: 'pipeline <name>: ${from.node} -> ${to.node} -> ...'`,
+          this.peek().span,
+        );
+      }
       const properties = this.optionalPropertyBlock();
       const end = properties.length > 0
         ? properties[properties.length - 1]!.span.end
@@ -1126,6 +1213,19 @@ class Parser {
 
   private isAtEnd(): boolean {
     return this.peek().kind === "eof";
+  }
+
+  /**
+   * Does the current logical line (from the cursor up to the next
+   * newline/EOF) contain an edge arrow? Used to tell a mistyped directive
+   * (`direction: lr`) from a port-ref edge (`a:in -> b`).
+   */
+  private lineHasArrow(): boolean {
+    for (let i = 0; ; i++) {
+      const t = this.peekAhead(i);
+      if (t.kind === "newline" || t.kind === "eof") return false;
+      if (t.kind === "arrow" || t.kind === "back-arrow") return true;
+    }
   }
 }
 

@@ -73,6 +73,39 @@ export class ChannelError extends Error {
   }
 }
 
+/**
+ * The four mutable claim maps the router threads through every routing
+ * helper. Bundled into one struct so they're passed as a single argument
+ * (not four positional ones) — three share the type `Map<string, number>`,
+ * so passing them positionally risked a silent transposition.
+ *
+ *  - cellOwner:  "row,col" -> nodeId whose footprint covers that cell
+ *  - bendOwner:  "row,col" -> edgeIndex that owns that bend cell
+ *  - vLegClaim:  "row,col" -> edgeIndex traversing that cell vertically
+ *  - hLegClaim:  "row,col" -> edgeIndex traversing that cell horizontally
+ */
+interface Claims {
+  cellOwner: Map<string, string>;
+  bendOwner: Map<string, number>;
+  vLegClaim: Map<string, number>;
+  hLegClaim: Map<string, number>;
+}
+
+/**
+ * Shared fix template for E_UNROUTABLE. The most common cause for an LLM
+ * author is a forward-written feedback/cycle edge (`a -> b -> c`, then
+ * `c -> a`): the trace must run back across nodes it already passed, and
+ * the corridor is blocked. The canonical fix is a back-edge (`c >- a`),
+ * which perimeter-routes around the outside. Failing that, raise the
+ * crossings budget or steer the trace with exit:/entry:.
+ */
+const E_UNROUTABLE_HINT =
+  " Hint: if this edge is a feedback/return path (its target sits upstream " +
+  "of its source), write it as a back-edge — `tgt >- src` — which routes " +
+  "around the perimeter. Otherwise add `crossings: N`, or steer the trace " +
+  "with `exit:`/`entry:` (SYNTAX.md §4.3), or pull the blocking node aside " +
+  "with `offset:`.";
+
 // --- entry point ----------------------------------------------------------
 
 export function routeChannels(
@@ -238,10 +271,9 @@ export function routeChannels(
       tgtEntry,
       slot.sourceSide,
       slot.targetSide,
-      effCellOwner,
-      bendOwner,
-      vLegClaim,
-      hLegClaim,
+      // Per-edge claims: cellOwner is the avoid-stamped variant for this
+      // edge; the other three claim maps are the shared originals.
+      { cellOwner: effCellOwner, bendOwner, vLegClaim, hLegClaim },
       i,
       edge.from,
       edge.to,
@@ -327,12 +359,80 @@ export function routeChannels(
     );
   }
 
+  // Final safety net: no routed trace may pass through the interior of a
+  // node that is not its own endpoint. This catches the "plain edge between
+  // two parked constructs routes backwards through node bodies" class —
+  // which otherwise renders silently-wrong output (validate says OK).
+  assertNoTraceThroughNode(model, placement, layout, polylines);
+
   return {
     polylines,
     crossings,
     width: layout.totalWidth,
     height: layout.totalHeight,
   };
+}
+
+/**
+ * Raise E_TRACE_THROUGH_NODE if any polyline segment crosses the interior
+ * of a non-endpoint node's footprint. Orthogonal traces legitimately touch
+ * a node's face (their endpoints sit on it) and may run flush along an
+ * outer edge, so we test against an interior shrunk by a small inset and
+ * skip the trace's own src/tgt boxes.
+ */
+function assertNoTraceThroughNode(
+  model: Model,
+  placement: Placement,
+  layout: PixelLayout,
+  polylines: Polyline[],
+): void {
+  const INSET = 2; // px — a face-flush run along an edge is fine; cutting through is not.
+  const rects: { id: string; x0: number; y0: number; x1: number; y1: number }[] = [];
+  for (const node of model.nodes) {
+    if (node.shape === "highway") continue; // invisible bundler, no body
+    const cell = placement.cells.get(node.id);
+    if (!cell) continue;
+    const W = Math.ceil(node.size.width);
+    const H = Math.ceil(node.size.height);
+    const x0 = layout.colX[cell.col]!;
+    const y0 = layout.rowY[cell.row]!;
+    const x1 = layout.colX[cell.col + W] ?? x0;
+    const y1 = layout.rowY[cell.row + H] ?? y0;
+    rects.push({ id: node.id, x0, y0, x1, y1 });
+  }
+  for (const pl of polylines) {
+    const edge = model.edges[pl.edgeIndex];
+    if (!edge) continue;
+    for (let i = 0; i + 1 < pl.points.length; i++) {
+      const a = pl.points[i]!;
+      const b = pl.points[i + 1]!;
+      const sx0 = Math.min(a.x, b.x);
+      const sx1 = Math.max(a.x, b.x);
+      const sy0 = Math.min(a.y, b.y);
+      const sy1 = Math.max(a.y, b.y);
+      for (const r of rects) {
+        if (r.id === edge.from || r.id === edge.to) continue;
+        // Overlap of the segment with the inset interior, with positive
+        // extent on both axes (a true interior crossing, not a graze).
+        const ox0 = Math.max(sx0, r.x0 + INSET);
+        const oy0 = Math.max(sy0, r.y0 + INSET);
+        const ox1 = Math.min(sx1, r.x1 - INSET);
+        const oy1 = Math.min(sy1, r.y1 - INSET);
+        if (ox1 > ox0 && oy1 > oy0) {
+          throw new ChannelError(
+            `E_TRACE_THROUGH_NODE: edge '${edge.from} -> ${edge.to}' routes ` +
+              `through the interior of node '${r.id}', which is neither of its ` +
+              `endpoints. This usually means the two endpoints belong to ` +
+              `separate constructs that the placer parked far apart, so the ` +
+              `plain edge spans the diagram. Hint: chain them with a shared ` +
+              `primitive (put '${edge.from}' and '${edge.to}' in the same ` +
+              `pipeline/bus/fan-out), or steer the trace with 'exit:'/'entry:' ` +
+              `to route it around '${r.id}'.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -477,15 +577,13 @@ function tryPerimeterRouteVV(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
   gridRows: number,
 ): Cell[] | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   void srcW; void tgtW;
   const loCol = Math.min(srcExit.col, tgtExit.col);
   const hiCol = Math.max(srcExit.col, tgtExit.col);
@@ -597,15 +695,13 @@ function tryUPathVtoH(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
   gridRows: number,
 ): Cell[] | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   void srcW; void srcAnchor; void srcH;
   const loCol = Math.min(srcExit.col, tgtExit.col);
   const hiCol = Math.max(srcExit.col, tgtExit.col);
@@ -738,15 +834,13 @@ function tryUPathHtoV(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
   gridCols: number,
 ): Cell[] | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   void srcAnchor; void srcW; void srcH; void tgtH;
   const loRow = Math.min(srcExit.row, tgtExit.row);
   const hiRow = Math.max(srcExit.row, tgtExit.row);
@@ -871,15 +965,13 @@ function tryUPathHHSameSide(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
   gridRows: number,
 ): Cell[] | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   void srcAnchor; void srcW; void srcH; void tgtW;
   const loCol = Math.min(srcExit.col, tgtExit.col);
   const hiCol = Math.max(srcExit.col, tgtExit.col);
@@ -975,15 +1067,13 @@ function tryPerimeterRouteHH(
   srcH: number,
   tgtW: number,
   tgtH: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
   gridCols: number,
 ): Cell[] | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   void srcH; void tgtH;
   const loRow = Math.min(srcExit.row, tgtExit.row);
   const hiRow = Math.max(srcExit.row, tgtExit.row);
@@ -1073,10 +1163,7 @@ function computeCellPath(
   tgtEntryPx: Point,
   srcSide: Side,
   tgtSide: Side,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
@@ -1092,6 +1179,7 @@ function computeCellPath(
   tgtH: number,
   siblingMidCols: Map<string, number[]>,
 ): Cell[] {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   const srcAxis: "V" | "H" = srcSide === "E" || srcSide === "W" ? "V" : "H";
   const tgtAxis: "V" | "H" = tgtSide === "E" || tgtSide === "W" ? "V" : "H";
 
@@ -1104,7 +1192,7 @@ function computeCellPath(
   if (isBackEdge && srcAxis === "V" && tgtAxis === "V") {
     const perimPath = tryPerimeterRouteVV(
       srcExit, tgtExit, srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
-      cellOwner, bendOwner, vLegClaim, hLegClaim,
+      claims,
       edgeIndex, srcId, tgtId, gridRows,
     );
     if (perimPath) return perimPath;
@@ -1112,7 +1200,7 @@ function computeCellPath(
   if (isBackEdge && srcAxis === "H" && tgtAxis === "H") {
     const perimPath = tryPerimeterRouteHH(
       srcExit, tgtExit, srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
-      cellOwner, bendOwner, vLegClaim, hLegClaim,
+      claims,
       edgeIndex, srcId, tgtId, gridCols,
     );
     if (perimPath) return perimPath;
@@ -1142,7 +1230,8 @@ function computeCellPath(
       const owner = cellOwner.get(cellKey(r, c));
       if (owner && owner !== srcId && owner !== tgtId) {
         throw new ChannelError(
-          `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' straight-line corridor at row ${r} is blocked by node '${owner}' at col ${c}`,
+          `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' straight-line corridor at row ${r} is blocked by node '${owner}' at col ${c}.` +
+            E_UNROUTABLE_HINT,
         );
       }
     }
@@ -1162,7 +1251,8 @@ function computeCellPath(
       const owner = cellOwner.get(cellKey(r, c));
       if (owner && owner !== srcId && owner !== tgtId) {
         throw new ChannelError(
-          `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' straight-line corridor at col ${c} is blocked by node '${owner}' at row ${r}`,
+          `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' straight-line corridor at col ${c} is blocked by node '${owner}' at row ${r}.` +
+            E_UNROUTABLE_HINT,
         );
       }
     }
@@ -1196,14 +1286,14 @@ function computeCellPath(
     if (wrongSide) {
       const uPath = tryUPathVtoH(srcExit, tgtExit, tgtSide,
                                   srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
-                                  cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                  claims,
                                   edgeIndex, srcId, tgtId, gridRows);
       if (uPath) return uPath;
       // Fall through to standard L if U couldn't find a perimeter row.
     }
     const bend: Cell = { row: srcExit.row, col: tgtExit.col };
     return claimLPath(srcExit, bend, tgtExit, /*via=*/ "row-then-col",
-                      cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
+                      claims, edgeIndex, srcId, tgtId);
   }
   if (srcAxis === "H" && tgtAxis === "V") {
     // Mirror of V→H. tgtSide=W/E and src is N/S of tgt.
@@ -1217,13 +1307,13 @@ function computeCellPath(
     if (wrongSide) {
       const uPath = tryUPathHtoV(srcExit, tgtExit, tgtSide,
                                   srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
-                                  cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                  claims,
                                   edgeIndex, srcId, tgtId, gridCols);
       if (uPath) return uPath;
     }
     const bend: Cell = { row: tgtExit.row, col: srcExit.col };
     return claimLPath(srcExit, bend, tgtExit, /*via=*/ "col-then-row",
-                      cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
+                      claims, edgeIndex, srcId, tgtId);
   }
   // Same axis, different perp — Z. Two bends, one at each end's channel.
   // The intermediate run is along the perp axis.
@@ -1251,13 +1341,13 @@ function computeCellPath(
     const pairKey = isViaHalf ? `${srcId}|${dirTag}` : `${srcId}|${tgtId}`;
     const siblingCols = siblingMidCols.get(pairKey);
     const candidate = pickMidCol(srcExit.col, tgtExit.col, srcExit.row, tgtExit.row,
-                                  cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId,
+                                  claims, edgeIndex, srcId, tgtId,
                                   siblingCols);
+    const bend1: Cell = { row: srcExit.row, col: candidate };
+    const bend2: Cell = { row: tgtExit.row, col: candidate };
     const arr = siblingMidCols.get(pairKey);
     if (arr) arr.push(candidate);
     else siblingMidCols.set(pairKey, [candidate]);
-    const bend1: Cell = { row: srcExit.row, col: candidate };
-    const bend2: Cell = { row: tgtExit.row, col: candidate };
     return claimZPath(srcExit, bend1, bend2, tgtExit, /*axis=*/ "V",
                       cellOwner, bendOwner, edgeIndex, srcId, tgtId);
   }
@@ -1279,12 +1369,12 @@ function computeCellPath(
   if (samesideWrong) {
     const uPath = tryUPathHHSameSide(srcExit, tgtExit, tgtSide,
                                       srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
-                                      cellOwner, bendOwner, vLegClaim, hLegClaim,
+                                      claims,
                                       edgeIndex, srcId, tgtId, gridRows);
     if (uPath) return uPath;
   }
   const candidate = pickMidRow(srcExit.row, tgtExit.row, srcExit.col, tgtExit.col,
-                                cellOwner, bendOwner, vLegClaim, hLegClaim, edgeIndex, srcId, tgtId);
+                                claims, edgeIndex, srcId, tgtId);
   // V-lane near search: shift bend1.col/bend2.col off srcExit.col/
   // tgtExit.col when those columns are claimed by another edge's V leg.
   // Skipped for highway via-half edges — those are intentionally packed
@@ -1346,22 +1436,21 @@ function claimLPath(
   bend: Cell,
   tgtExit: Cell,
   via: "row-then-col" | "col-then-row",
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   edgeIndex: number,
   srcId: string,
   tgtId: string,
 ): Cell[] {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // Bend at `bend`. If already claimed OR the long leg overlaps another
   // edge's claim, shift the bend along the leg's perp axis to spread
   // the traces into adjacent lanes.
   const finalBend = findFreeLBend(bend, srcExit, tgtExit, via,
-                                  cellOwner, bendOwner, vLegClaim, hLegClaim, srcId, tgtId);
+                                  claims, srcId, tgtId);
   if (finalBend === null) {
     throw new ChannelError(
-      `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' has no available bend cell near (${bend.row}, ${bend.col})`,
+      `E_UNROUTABLE: edge ${edgeIndex} '${srcId} -> ${tgtId}' has no available bend cell near (${bend.row}, ${bend.col}).` +
+        E_UNROUTABLE_HINT,
     );
   }
   bendOwner.set(cellKey(finalBend.row, finalBend.col), edgeIndex);
@@ -1545,13 +1634,11 @@ function findFreeLBend(
   srcExit: Cell,
   tgtExit: Cell,
   via: "row-then-col" | "col-then-row",
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   srcId: string,
   tgtId: string,
 ): Cell | null {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // For "row-then-col": long leg is V at `bend.col`, spanning rows
   // `bend.row..tgtExit.row`. Shifting bend.col moves the V leg.
   // For "col-then-row": long leg is H at `bend.row`, spanning cols
@@ -1632,15 +1719,13 @@ function pickMidCol(
   tgtCol: number,
   row1: number,
   row2: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   _edgeIndex: number,
   srcId: string,
   tgtId: string,
   siblingCols: number[] | undefined,
 ): number {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // Lane ordering: a fan-out (or bus, or any cluster of parallel V
   // traces) needs lanes assigned in monotonic order so the H exit runs
   // don't cross. The source-row already encodes that order (slot N
@@ -1775,8 +1860,6 @@ function claimLegCells(
   }
 }
 
-/** Cells of buffer between a V/H trace and the nearest node footprint. */
-const LANE_CLEARANCE = 2;
 
 function isVLaneFree(
   col: number,
@@ -1854,14 +1937,12 @@ function pickMidRow(
   tgtRow: number,
   col1: number,
   col2: number,
-  cellOwner: Map<string, string>,
-  bendOwner: Map<string, number>,
-  vLegClaim: Map<string, number>,
-  hLegClaim: Map<string, number>,
+  claims: Claims,
   _edgeIndex: number,
   srcId: string,
   tgtId: string,
 ): number {
+  const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // Lane ordering by target-col position (mirror of pickMidCol).
   const lo = Math.min(srcRow, tgtRow);
   const hi = Math.max(srcRow, tgtRow);
@@ -2015,13 +2096,10 @@ function pixelizeCellPath(
   // until the next bend or final slot.
   // The *last* leg uses the target slot's perp coord.
   //
-  // For a single-bend L-shape: 4 waypoints total (slot, corner1,
-  // corner2, slot). corner1 = (bend.x, srcSlot.y). corner2 = (bend.x,
-  // tgtSlot.y) — same x, different y → vertical segment between them.
-  // Wait, that's wrong for an L: corner1 should = (bendCenterX,
-  // srcSlot.y) and corner2 should = (bendCenterX, tgtSlot.y) only when
-  // src side is V and tgt side is H. Each bend cell has ONE corner
-  // point: the intersection of the trace's two perpendicular legs.
+  // Each bend cell contributes ONE corner point: the intersection of the
+  // trace's two perpendicular legs. For a single-bend L (src side V, tgt
+  // side H) that corner is (bendCenterX, srcSlot.y) → the trace runs
+  // horizontally to the bend column, then vertically to the target slot.
 
   const out: Point[] = [srcSlotPx];
 

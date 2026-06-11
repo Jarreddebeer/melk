@@ -1,13 +1,10 @@
 /**
- * SKIPPED entirely after Phase 4 channel-routing rewrite. These tests
- * assert on legacy router pixel coords; the new channel router emits
- * different (also-correct) geometry. The variation-detection logic
- * itself still ships; these tests need rewriting against fresh goldens
- * before being re-enabled. See DESIGN-PHASE4.md §3 + next-session.md.
- *
- * Original docstring below.
- *
  * Bend-intersection value-variation tests.
+ *
+ * Re-enabled and rewritten against the Phase-4 channel router (the suite
+ * was parked at the rewrite). Now drives the canonical compileToSVG
+ * pipeline and asserts the real invariants: parallel-stairstep fan-out
+ * bends get NO variation, but a collinear axial overlap (ex 18) DOES.
  *
  * The rule (from user feedback):
  *
@@ -30,22 +27,11 @@
  *   → BOTH bends MUST get value variation.
  */
 import { describe, expect, it } from "vitest";
-import { tokenize } from "../src/parser/lexer.js";
-import { parse } from "../src/parser/parser.js";
-import { bind } from "../src/bind/bind.js";
-import { place } from "../src/layout/place.js";
-import { applyTextFit } from "../src/layout/text-fit.js";
-import { assignSlots } from "../src/layout/slots.js";
-import { routeChannels } from "../src/layout/channels.js";
-import { renderSVG } from "../src/render/svg.js";
-import { loadTheme } from "../src/theme/theme.js";
+import { compileToSVG } from "../src/compile.js";
 
+// Drive the canonical pipeline so this suite can't diverge from the CLI.
 function render(src: string): string {
-  const m = bind(parse(tokenize(src)));
-  const p = applyTextFit(place(m), m, loadTheme("document-light"));
-  const slots = assignSlots(m, p);
-  const routing = routeChannels(m, p, slots);
-  return renderSVG(m, p, routing, loadTheme("document-light"));
+  return compileToSVG(src).svg;
 }
 
 function lumpsFor(svg: string, edge: string): string[] {
@@ -69,7 +55,7 @@ function countLumps(svg: string): number {
   return m ? m.length : 0;
 }
 
-describe.skip("bend intersections: ex 24 ext_2 stairstep (canonical)", () => {
+describe("bend intersections: ex 24 ext_2 stairstep (canonical)", () => {
   // Verbatim from examples/24-mixed-bundle-bypass.melk — the case
   // the user has repeatedly pointed at.
   const src = [
@@ -98,16 +84,13 @@ describe.skip("bend intersections: ex 24 ext_2 stairstep (canonical)", () => {
     expect(lumps.length).toBe(0);
   });
 
-  it("CRITICAL: hwy->sink_b and hwy->sink_c bends interlock at (236,28) — variation on lower trace only", () => {
-    // Under multi-cell occupancy the bend coordinates shift, so the
-    // exact (236,28) interlock may no longer occur. The invariant the
-    // test guards is: lump count remains non-negative (no negative
-    // lumps means the variation logic itself didn't malfunction).
-    // Re-validate against actual coords next time goldens are regenerated.
+  it("ex 24's parallel fan-out bends produce NO spurious variation anywhere", () => {
+    // Under the Phase-4 router ex 24's chamfers are parallel-offset and
+    // never share an axial segment, so the WHOLE diagram is variation-free.
+    // (The old test guarded a specific (236,28) interlock that the new
+    // router doesn't produce; the real invariant is zero lumps.)
     const svg = render(src);
-    const sinkB = lumpsFor(svg, "hwy->sink_b");
-    const sinkC = lumpsFor(svg, "hwy->sink_c");
-    expect(sinkB.length + sinkC.length).toBeGreaterThanOrEqual(0);
+    expect(countLumps(svg)).toBe(0);
   });
 
   it("probe_1 → hwy_m fan parallel bends MUST NOT have variation (same logic as ext_2)", () => {
@@ -117,7 +100,7 @@ describe.skip("bend intersections: ex 24 ext_2 stairstep (canonical)", () => {
   });
 });
 
-describe.skip("non-intersection cases: NO value variation expected", () => {
+describe("non-intersection cases: NO value variation expected", () => {
   it("lone bend (single trace, single bend) gets NO variation", () => {
     // Pipeline a -> b in a column layout produces a straight line,
     // but a -> b -> c (with explicit cells) often produces a bend.
@@ -146,7 +129,7 @@ describe.skip("non-intersection cases: NO value variation expected", () => {
   });
 });
 
-describe.skip("bend intersections: ex 18 collinear axial overlap", () => {
+describe("bend intersections: ex 18 collinear axial overlap", () => {
   // Verbatim from examples/18-highway-tb.melk. In this diagram,
   // hwy->dst_z and hwy->dst_y emit traces that, after their chamfers,
   // share the SAME axial column (x=92) over an 8px span (y∈[140,148]).
@@ -169,14 +152,16 @@ describe.skip("bend intersections: ex 18 collinear axial overlap", () => {
     "src_c -> dst_z { via: hwy }",
   ].join("\n");
 
-  it("CRITICAL: hwy->dst_z and hwy->dst_y overlap at x=92, y∈[140,148] — variation on both", () => {
-    // Multi-cell routing shifts where the overlap occurs (or removes
-    // it entirely if traces no longer cross). Re-validate against
-    // current rendered geometry after the next golden regen.
+  it("CRITICAL: a collinear axial overlap produces variation (unlike ex 24's parallel offset)", () => {
+    // Under the Phase-4 router this fixture's hwy->dst_y trace shares an
+    // axial segment with another trace, so the variation gradient fires —
+    // exactly the case the feature exists for. (ex 24, parallel-offset,
+    // stays clean — see above.) The real invariant: this diagram has
+    // variation and ex 24 does not.
     const svg = render(src);
     const dstZ = lumpsFor(svg, "hwy->dst_z");
     const dstY = lumpsFor(svg, "hwy->dst_y");
-    expect(dstZ.length + dstY.length).toBeGreaterThanOrEqual(0);
+    expect(dstZ.length + dstY.length).toBeGreaterThan(0);
   });
 });
 

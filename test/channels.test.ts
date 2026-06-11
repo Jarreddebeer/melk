@@ -285,6 +285,35 @@ describe("channel routing — axial overlap detection", () => {
     // fan-out/fan-in patterns, this test catches it.
     expect(routing.polylines.length).toBeGreaterThan(0);
   });
+
+  it("a dense 3x3 highway intersect DOES raise E_AXIAL_OVERLAP (the ex-29 limit)", () => {
+    // Positive fixture for the detector: a 3×3 all-to-all highway fan-out
+    // forces two via-half traces to swap rows, so their 2-bend Z paths
+    // share an H segment — the documented limit (next-session.md). This
+    // pins the failure so that when the 4-bend stair routing lands, this
+    // test flips to assert a clean route instead.
+    const src = `
+      layout: lr
+      crossings: 40
+      src_h1 { shape: rect, size: 9x5 }
+      src_h2 { shape: rect, size: 9x5 }
+      src_h3 { shape: rect, size: 9x5 }
+      dst_h1 { shape: rect, size: 9x5 }
+      dst_h2 { shape: rect, size: 9x5 }
+      dst_h3 { shape: rect, size: 9x5 }
+      hwy_h { shape: highway }
+      src_h1 -> dst_h1 { via: hwy_h }
+      src_h1 -> dst_h2 { via: hwy_h }
+      src_h1 -> dst_h3 { via: hwy_h }
+      src_h2 -> dst_h1 { via: hwy_h }
+      src_h2 -> dst_h2 { via: hwy_h }
+      src_h2 -> dst_h3 { via: hwy_h }
+      src_h3 -> dst_h1 { via: hwy_h }
+      src_h3 -> dst_h2 { via: hwy_h }
+      src_h3 -> dst_h3 { via: hwy_h }
+    `;
+    expect(() => route(src)).toThrow(/E_AXIAL_OVERLAP/);
+  });
 });
 
 describe("placer — TB bus/fan-out median producer column-aligns with hub", () => {

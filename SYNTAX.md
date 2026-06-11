@@ -94,7 +94,7 @@ override earlier ones — "last wins"). Order is otherwise free.
 
 ### 2.1 `layout: <mode>`
 
-`mode` is `lr` (left-to-right) or `tb` (top-to-bottom). Default: `tb`.
+`mode` is `lr` (left-to-right) or `tb` (top-to-bottom). Default: `lr`.
 
 ```melk
 layout: lr
@@ -106,8 +106,13 @@ diagram with no other edits required.
 ### 2.2 `crossings: <n>`
 
 Integer ≥ 0. Caps the number of edge crossings the router will accept.
-Default is unlimited. Useful for hand-tuned diagrams where you want
-the compiler to fail-loudly if a re-layout introduces tangles.
+**Default is `0`** — the router rejects *any* crossing unless you opt in.
+A topology whose edges must cross (most non-planar diagrams: meshes,
+all-to-all fan-ins, ≥20-node graphs) fails routing with
+`E_CROSSINGS_OVER_BUDGET` until you raise the budget. The error message
+names the exact number required, e.g. `crossings: 8`. Set it generously
+(`crossings: 10`) and let the compiler still fail-loudly only if a
+re-layout introduces *more* tangles than you allowed.
 
 ### 2.3 `theme: <name-or-path>`
 
@@ -230,7 +235,7 @@ hot_path    { tags: [hot, critical] }
 ```
 
 A node referenced from an edge or composition primitive but never
-explicitly declared is **auto-declared as `2x2` `rect`** at bind time.
+explicitly declared is **auto-declared as `5x5` `rect`** at bind time.
 That's a feature, not a warning — you can sketch the topology first
 and add attributes later. (Note: §3.2 — default to `rect`. The `roundrect`
 shape is a stylistic alternative; mixing them on one diagram reads as
@@ -1117,13 +1122,33 @@ errors as ground truth and re-emit with the suggested fix in mind.
 
 ### 10.6 Layout / routing
 
-| code                              | when                                                                |
-|-----------------------------------|---------------------------------------------------------------------|
-| `E_ANCHOR_CONFLICT`               | A node anchored to two different cells by different primitives      |
-| `E_AMBIGUOUS_PLACEMENT`           | Source doesn't determine a unique placement                         |
-| `E_SIDE_OVERSUBSCRIBED`           | Too many edges demand the same node face                            |
-| `E_CROSSINGS_OVER_BUDGET`         | Edge crossings exceed the `crossings:` cap                          |
-| `E_AVOID_UNROUTABLE`              | `avoid:` constraint blocks every viable route                       |
+**Placement** (the *positions* of nodes are ambiguous or over-constrained):
+
+| code                              | when                                                                | author fix |
+|-----------------------------------|---------------------------------------------------------------------|------------|
+| `E_ANCHOR_CONFLICT`               | A node anchored to two different cells by different primitives      | Drop the node from one construct, or split it. See EXAMPLES.md §5. |
+| `E_AMBIGUOUS_PLACEMENT`           | Source doesn't determine a unique placement                         | Wrap the colliding edge in a `branch`/`fan-out`/`bus`, or split the spine. EXAMPLES.md §5 lists the five shapes. |
+| `E_SIDE_OVERSUBSCRIBED`           | More than 6 edges demand one node face                              | Grow the hub on the perpendicular axis (`size: 5x9`). EXAMPLES.md §5. |
+
+**Routing** (positions are fine, but no clean orthogonal path fits). These
+were undocumented before v0.1.5; the fixes below are the author-controllable
+levers — the router has no per-edge width knob:
+
+| code                              | when                                                                | author fix |
+|-----------------------------------|---------------------------------------------------------------------|------------|
+| `E_CROSSINGS_OVER_BUDGET`         | Routing needs more crossings than the `crossings:` budget (default `0`) | Add `crossings: N` at the file top; the message names the exact `N`. |
+| `E_UNROUTABLE`                    | An edge's straight corridor is blocked by a node in between, or no bend cell is free | If the edge points *against* the flow (target upstream of source), write it as a back-edge `c >- a`. Otherwise add `crossings:`, set `exit:`/`entry:` to route the trace around the obstacle (§4.3), or move the obstacle with `offset:`. |
+| `E_NO_CHANNEL`                    | An edge's exit/entry cell at a node face is occupied (slot opens into a wall) | Insert a gap between the touching nodes — grow `size:` on a neighbour or pull them apart with `offset:`. |
+| `E_LANE_FULL`                     | No free channel row/column exists in the band an edge must cross     | Widen the gap the trace crosses (resize/`offset:` the flanking nodes), or reduce trace density (fewer via-edges per highway face). |
+| `E_AXIAL_OVERLAP`                 | Two distinct edges' orthogonal polylines would draw on the same pixels | Reduce trace density across the shared corridor (split a dense highway, drop a via-edge), or give one edge an `exit:`/`entry:` override so its path diverges. |
+| `E_CLEARANCE`                     | A routed segment violates the minimum clearance from a node body     | Add space around the node (`offset:` / larger neighbours). |
+| `E_AVOID_UNROUTABLE`              | `avoid:` constraint blocks every viable route                       | Relax or remove the `avoid:`. |
+
+> A note on routing errors: unlike placement errors, these depend on the
+> *density* of traces through a region, so the fix is usually "make more
+> room" (resize/offset neighbours, split a dense bundle) rather than a
+> topology change. melk has no syntax to insert a bare empty row/column —
+> create the gap by sizing or offsetting the nodes that flank it.
 
 Warnings (don't fail the build):
 

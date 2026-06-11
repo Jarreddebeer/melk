@@ -1,5 +1,41 @@
 # melk — next session handoff
 
+**Branch `review-fixes` (post code-review, 2026-06-11).** A large
+review-driven pass landed: docs corrected, diagnostics unified, a public
+`compileToSVG` API, silent-output guards, a `Claims` routing refactor,
+and a much bigger test suite. See [REVIEW-FINDINGS.md](REVIEW-FINDINGS.md)
+"Resolution status" for the full list.
+
+**Tests:** 500 passing + 6 skipped (was 411 + 13). **Examples: 42/43
+rendering**, all goldens byte-identical after the refactors. Only ex 29
+fails — the 5×5 PCB-mesh routing limit (below).
+
+## The ex-29 stair feature — refined guidance after a failed attempt
+
+The 4-bend stair was attempted in the review pass and **reverted**. Two
+concrete lessons for the next attempt:
+
+1. **The swap-detection gate must be tight.** A detector that fires
+   whenever a V→V via-half edge's H-leg overlaps an existing claim is too
+   broad — it caught ex-27's legitimate half-cell-offset trace and broke
+   its test. Gate strictly on the dense-intersect case (an `intersect`
+   group with ≥2 sources AND ≥2 sinks on the highway), not on H-leg
+   overlap alone.
+2. **The mid-row search must be bounded.** An outward row scan with
+   per-row corridor checks went O(rows²) and OOM'd on the 4×4 reduction.
+   Pre-compute the free rows once, or cap the search window.
+
+The `Claims` struct (now in channels.ts) means the new stair helper takes
+one `claims` arg, not four maps. A positive `E_AXIAL_OVERLAP` test
+(`test/channels.test.ts` "a dense 3x3 highway intersect DOES raise…")
+pins the current failure — flip it to assert a clean route when the stair
+lands. The mirror problem also surfaces on the underground `hwy_v` exit
+side, so the fix must work for both axes.
+
+---
+
+## (Historical) Version 0.1.3 handoff
+
 **Version:** 0.1.3. Working tree may be dirty (CLI default-output,
 U-routing for `entry:`/`exit:`, stair-fix for highway fan-outs, fan-out
 perp computed under correct forward).

@@ -39,11 +39,25 @@ warns rather than clobbering the source.
 CLI subcommands: `parse`, `bind`, `validate`, `format`, `render`. Run
 with no args for full usage.
 
-Library import:
+Library import — one call, source string in, SVG string out:
 
 ```js
-import { tokenize, parse, bind, renderSVG } from "@jarreddebeer/melk";
+import { compileToSVG } from "@jarreddebeer/melk";
+
+const { svg } = compileToSVG("pipeline main: a -> b -> c");
+// pass { filePath } if your source uses `import` or relative theme paths
+
+// Non-throwing variants for an agent loop:
+import { tryCompileToSVG, validateSource } from "@jarreddebeer/melk";
+const r = tryCompileToSVG(src);          // { ok, svg } | { ok:false, diagnostic }
+const diag = validateSource(src);        // null on success, else { code, stage, message, hint }
 ```
+
+`compileToSVG` runs the exact pipeline the CLI runs (including module
+bodies and label-fit) — the older "compose `tokenize`/`parse`/`bind`/
+`renderSVG` yourself" recipe silently dropped module content and is no
+longer recommended. The individual stage functions are still exported
+for advanced use, but must be composed in `compile.ts`'s order.
 
 Or run from a local checkout:
 
@@ -105,8 +119,10 @@ A typical LLM-driven authoring loop:
 
 ```
 1. User describes the architecture.
-2. LLM reads SYNTAX.md + EXAMPLES.md (first session only; subsequent
-   sessions remember the rules).
+2. LLM reads prompts/melk-author.md (the condensed authoring card),
+   reaching for SYNTAX.md + EXAMPLES.md only for the details it needs.
+   (A stateless API session re-reads each turn — keep the card in the
+   system prompt and the two big files available as references.)
 3. LLM writes <name>.melk.
 4. Run `melk validate <name>.melk`.
 5. If non-OK, the error's Hint: tells the LLM what to fix. Iterate.

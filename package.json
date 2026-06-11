@@ -1,6 +1,6 @@
 {
   "name": "@jarreddebeer/melk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publishConfig": {
     "access": "public"
   },
@@ -46,7 +46,8 @@
     "LICENSE",
     "SYNTAX.md",
     "EXAMPLES.md",
-    "prompts"
+    "prompts",
+    "examples/**/*.melk"
   ],
   "scripts": {
     "build": "tsc",

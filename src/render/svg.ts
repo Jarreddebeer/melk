@@ -31,6 +31,8 @@ import type { ModulePlacedBody } from "../layout/module-place.js";
 import type { ShapeName } from "../parser/ast.js";
 import type { Placement } from "../layout/placement.js";
 import { CELL_PX } from "../layout/slots.js";
+import { computePixelLayout, type PixelLayout } from "../layout/pixels.js";
+import { estimateLabelWidth } from "../layout/text-fit.js";
 import type { ChannelRouting, Point, Polyline } from "../layout/channels.js";
 import type { TagRule, Theme } from "../theme/theme.js";
 import {
@@ -115,8 +117,15 @@ export function renderSVG(
     opts.allowNetwork ?? true,
   );
 
-  const layout = pixelLayout(placement);
+  const layout = computePixelLayout(placement);
   const boxes = boxBounds(model, placement, layout);
+
+  // Non-fatal label-overflow check: the placer takes `size:` at face
+  // value and never grows a box to fit its label, so a too-long label
+  // silently overflows — invisible to a text-only agent. Warn (with the
+  // exact recommended size) so the author can fix it without eyeballing
+  // the SVG.
+  warnLabelOverflow(model, boxes, theme);
 
   // Pre-compute nodeset rects so we can both (a) draw them and (b) extend
   // the SVG canvas to cover them. With a tight diagram and a nodeset
@@ -453,36 +462,9 @@ function canvasBounds(
 }
 
 // --- pixel layout ---------------------------------------------------------
-
-/**
- * Per-row / per-col pixel positions. Mirrors the computation inside
- * polyline.ts so the renderer can place boxes and nodeset rectangles
- * at the same pixel coords as the polyline waypoints.
- */
-interface PixelLayout {
-  colX: number[];
-  rowY: number[];
-  colWidthPx: number[];
-  rowHeightPx: number[];
-}
-
-function pixelLayout(placement: Placement): PixelLayout {
-  const colWidthPx = placement.colUnits.map((u) => u * CELL_PX);
-  const rowHeightPx = placement.rowUnits.map((u) => u * CELL_PX);
-  const colX: number[] = [];
-  let x = 0;
-  for (let c = 0; c < placement.colUnits.length; c++) {
-    colX.push(x);
-    x += colWidthPx[c]!;
-  }
-  const rowY: number[] = [];
-  let y = 0;
-  for (let r = 0; r < placement.rowUnits.length; r++) {
-    rowY.push(y);
-    y += rowHeightPx[r]!;
-  }
-  return { colX, rowY, colWidthPx, rowHeightPx };
-}
+// Pixel positions come from the shared computePixelLayout (src/layout/
+// pixels.ts) — the single source of truth, also used by the router so
+// boxes and polyline waypoints land on identical coords.
 
 interface BoxBounds {
   x: number;
@@ -648,9 +630,9 @@ function collectCircleLabelExtents(
     if (!b) continue;
     const cx = b.x + b.width / 2;
     const labelY = b.y + b.height + fontSize * 0.9 + 4;
-    // Same width heuristic the text-fit pass uses, kept in sync via a
-    // local copy (cheap to reuse the import would create a cycle).
-    const halfWidth = estimateLabelWidthPx(n.label, fontSize) / 2;
+    // Shared width heuristic from the text-fit pass (no local copy — the
+    // old "would create a cycle" claim was wrong; layout never imports render).
+    const halfWidth = estimateLabelWidth(n.label, fontSize) / 2;
     out.push({
       x: cx,
       y0: b.y + b.height,
@@ -661,19 +643,59 @@ function collectCircleLabelExtents(
   return out;
 }
 
+// Shapes whose label renders BELOW the glyph (not inside the box), so a
+// long label never overflows the box itself — skip them.
+const LABEL_BELOW_SHAPES = new Set<ShapeName>(["circle", "icon", "highway"]);
+
 /**
- * Pixel-width estimate for a label at `fontSize`. Mirrors the text-fit
- * pass's heuristic — keep these two in sync. Used here only for canvas
- * expansion (circle labels rendered below the shape).
+ * Warn (non-fatal) for any node whose label is wider than its box. The
+ * placer never grows a box to fit its label, so this is the only feedback
+ * a text-only author gets that a size is too small. The warning carries
+ * the minimum width in cells that would fit, so the fix is mechanical.
  */
-function estimateLabelWidthPx(label: string, fontSize: number): number {
-  let units = 0;
-  for (const ch of label) {
-    if (/[A-Z]/.test(ch)) units += 1.4;
-    else if (ch === " " || /[iljt!.,;:'`|]/.test(ch)) units += 0.4;
-    else units += 1;
+function warnLabelOverflow(
+  model: Model,
+  boxes: Map<string, BoxBounds>,
+  theme: Theme,
+): void {
+  const fontSize = theme.typography.size.body;
+  for (const n of model.nodes) {
+    if (!n.label) continue;
+    if (LABEL_BELOW_SHAPES.has(n.shape)) continue;
+    const b = boxes.get(n.id);
+    if (!b) continue;
+    // Per-line: a multi-line label overflows if its WIDEST line does.
+    const widest = n.label
+      .split("\n")
+      .reduce((mx, line) => Math.max(mx, estimateLabelWidth(line, fontSize)), 0);
+    // Inner width = box width minus a small horizontal padding either side.
+    const innerWidth = b.width - fontSize * 0.6;
+    if (widest <= innerWidth) continue;
+    // Minimum width in cells: enough px for the label + padding, rounded
+    // up to a whole cell. Diamonds/cylinders need their shape's text inset,
+    // but a width-cell suggestion is the dominant lever, so keep it simple.
+    const neededPx = widest + fontSize * 0.6;
+    const neededCells = Math.ceil(neededPx / CELL_PX);
+    const heightCells = Math.round(b.height / CELL_PX);
+    labelOverflowWarn(
+      `W_LABEL_OVERFLOW: label of '${n.id}' (${widest.toFixed(0)}px) ` +
+        `overflows its ${Math.round(b.width)}px box. ` +
+        `Grow it: \`${n.id} { size: ${neededCells}x${heightCells} }\` ` +
+        `(SYNTAX.md §3.3 has the size-from-label table).`,
+    );
   }
-  return units * fontSize * 0.6;
+}
+
+const labelOverflowSeen = new Set<string>();
+function labelOverflowWarn(message: string): void {
+  if (labelOverflowSeen.has(message)) return;
+  labelOverflowSeen.add(message);
+  process.stderr.write(message + "\n");
+}
+
+/** Reset the label-overflow dedup table; called from tests. */
+export function resetLabelOverflowWarnings(): void {
+  labelOverflowSeen.clear();
 }
 
 function nodesetRect(
@@ -1837,7 +1859,7 @@ function renderModuleBody(
   // top-level renderer does. We can't call renderSVG recursively
   // because it emits a full <svg> document; instead we replay the
   // node/edge emission loops inside our own <g>.
-  const subLayout = pixelLayout(body.placement);
+  const subLayout = computePixelLayout(body.placement);
   const subBoxes = boxBounds(subModel, body.placement, subLayout);
 
   // The icon registry is built per-render in the main entry; modules

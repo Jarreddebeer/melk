@@ -16,7 +16,7 @@
  * the whole thing and writes an SVG.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { tokenize } from "./parser/lexer.js";
 import { parse } from "./parser/parser.js";
 import { formatProgram } from "./parser/format.js";
@@ -29,13 +29,16 @@ import { applyModulePortEndpoints } from "./layout/module-route.js";
 import { applyModuleAlignment, placeModules } from "./layout/module-place.js";
 import { autoAlignViaShims } from "./layout/via-shim.js";
 import { renderSVG } from "./render/svg.js";
-import {
-  BUILTIN_THEME_NAMES,
-  DEFAULT_THEME_NAME,
-  loadTheme,
-  type Theme,
-} from "./theme/theme.js";
+import { BUILTIN_THEME_NAMES } from "./theme/theme.js";
+import { resolveTheme, validateSource, parseDiagnostic, type Diagnostic } from "./compile.js";
 import type { Model } from "./bind/model.js";
+
+/** Format a diagnostic as `message[. Hint: ...]`, no double period. */
+function formatDiag(diag: Diagnostic): string {
+  const base = diag.message.replace(/\s*$/, "");
+  const tail = diag.hint ? ` Hint: ${diag.hint}` : "";
+  return `${base}${tail}`;
+}
 
 function usage(): never {
   process.stderr.write("usage: melk <command> <file.melk> [options]\n");
@@ -80,31 +83,6 @@ function resolveLegendFlag(
   return undefined;
 }
 
-/**
- * Pick a theme value from CLI flag (highest priority) or model directive,
- * resolve it to a Theme. Paths are resolved against `baseDir` (the .melk
- * file's directory) when the value originated from the source directive;
- * CLI-flag paths resolve against cwd. Built-in names take precedence over
- * file paths in both cases — `--theme=document-light` always finds the
- * built-in, even if `./document-light.json` happens to exist.
- */
-function resolveTheme(
-  cliValue: string | undefined,
-  modelValue: string | undefined,
-  baseDir: string,
-): Theme {
-  if (cliValue !== undefined) {
-    if (BUILTIN_THEME_NAMES.includes(cliValue)) return loadTheme(cliValue);
-    const path = isAbsolute(cliValue) ? cliValue : resolve(process.cwd(), cliValue);
-    return loadTheme(path);
-  }
-  if (modelValue !== undefined) {
-    if (BUILTIN_THEME_NAMES.includes(modelValue)) return loadTheme(modelValue);
-    const path = isAbsolute(modelValue) ? modelValue : resolve(baseDir, modelValue);
-    return loadTheme(path);
-  }
-  return loadTheme(DEFAULT_THEME_NAME);
-}
 
 /**
  * DESIGN-PHASE5-TITLES §5.4. CLI override for one of the three text
@@ -143,8 +121,42 @@ function findFlag(argv: string[], name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Top-level entry. Wraps the whole dispatch in ONE clean error handler
+ * so every command — not just validate/format — reports failures as a
+ * single `[stage] E_CODE: message. Hint: ...` line and exits 1, instead
+ * of leaking a Node stack trace (noise when an LLM reads the output).
+ * Pass `--debug` to re-throw and get the full stack while iterating on a
+ * compiler bug. A missing input file is reported as a clean
+ * `E_FILE_NOT_FOUND` rather than a raw ENOENT stack.
+ */
 function main(): void {
   const argv = process.argv.slice(2);
+  const debug = argv.includes("--debug");
+  try {
+    dispatch(argv);
+  } catch (err) {
+    if (debug) throw err;
+    // ENOENT on the input read → clean E_FILE_NOT_FOUND.
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === "ENOENT" &&
+      (err as NodeJS.ErrnoException).syscall === "open"
+    ) {
+      const path = (err as NodeJS.ErrnoException).path ?? "<input>";
+      process.stderr.write(`E_FILE_NOT_FOUND: no such file '${path}'\n`);
+      process.exit(1);
+    }
+    // Any other thrown pipeline error: format it like validate does.
+    const raw = err instanceof Error ? err.message : String(err);
+    const diag = parseDiagnostic("render", raw);
+    process.stderr.write(`[${diag.stage}] ${formatDiag(diag)}\n`);
+    process.stderr.write(`(re-run with --debug for a full stack trace)\n`);
+    process.exit(1);
+  }
+}
+
+function dispatch(argv: string[]): void {
   const command = argv[0];
   const fileArg = argv[1];
   if (!command || !fileArg) usage();
@@ -152,12 +164,6 @@ function main(): void {
   const filePath = resolve(fileArg!);
   const source = readFileSync(filePath, "utf8");
 
-  // `validate` and `format` need their own dispatch because they
-  // want to catch errors at any pipeline stage (parse / bind / place)
-  // and print them as clean E_CODE: message lines without a stack
-  // trace. Everything else lets exceptions bubble (which Node prints
-  // with a stack — useful when iterating on a bug, noisy when an LLM
-  // is reading the output).
   if (command === "validate") {
     const code = runValidate(source, filePath);
     process.exit(code);
@@ -282,36 +288,18 @@ function main(): void {
  * valid?" check without 16 KB of SVG noise in the response.
  */
 function runValidate(source: string, filePath: string): number {
-  let stage = "parse";
-  try {
-    const ast = parse(tokenize(source));
-    stage = "bind";
-    const model = bind(ast, { importerPath: filePath });
-    stage = "place";
-    // Run the same pipeline `render` runs, minus the SVG emission.
-    // Use the default theme — `validate` is about structural
-    // correctness, not theme-resolution edge cases (which `render`
-    // surfaces). If you want theme errors caught too, run `render`.
-    const theme = resolveTheme(undefined, model.themeName, dirname(filePath));
-    placeModules(model, (imported) =>
-      resolveTheme(undefined, imported.model.themeName, dirname(filePath)),
-    );
-    applyTextFitToSizes(model, theme);
-    const rawPlacement = place(model);
-    const placement = applyTextFit(rawPlacement, model, theme);
-    stage = "assignSlots";
-    const slots = assignSlots(model, placement);
-    applyModuleAlignment(model, placement, slots);
-    autoAlignViaShims(model, placement, slots);
-    stage = "routeChannels";
-    routeChannels(model, placement, slots);
+  // Delegate to the canonical pipeline (src/compile.ts) so `validate`
+  // and `render` can never diverge. validateSource renders internally
+  // (discarding the SVG) so tag/legend/theme errors surface here too —
+  // the documented checkpoint. Returns a structured diagnostic; we print
+  // it in the same `[stage] message[. Hint: ...]` shape as before.
+  const diag = validateSource(source, { filePath });
+  if (!diag) {
     process.stdout.write("OK\n");
     return 0;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[${stage}] ${msg}\n`);
-    return 1;
   }
+  process.stderr.write(`[${diag.stage}] ${formatDiag(diag)}\n`);
+  return 1;
 }
 
 /**

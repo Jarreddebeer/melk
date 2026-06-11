@@ -474,6 +474,13 @@ export interface Model {
   highwayMemberships: HighwayMembership[];
   /** Highway co-placement groups (§11.11). */
   intersections: Intersection[];
+  /**
+   * IDs of nodes that were auto-declared (created because an edge or
+   * primitive referenced a name with no explicit declaration). Used by
+   * the typo-detection warning and a future strict mode. Not load-bearing
+   * for layout.
+   */
+  autoDeclared: string[];
 }
 
 /**

@@ -294,7 +294,8 @@ bus cache-reads: [web1, web2, web3] -> cache    # cache lands at col N+1
 bus db-writes:   [web1, web2, web3] -> db       # db wants col N+1 too — collision!
 ```
 
-Triggers `E_ANCHOR_CONFLICT` or `E_AMBIGUOUS_PLACEMENT`.
+Triggers `E_AMBIGUOUS_PLACEMENT` (the shared producers `web1..web3`
+collide before either sink is anchored).
 
 **Right** — pick *one* anchoring construct, let plain edges reach
 the other shared targets:
@@ -343,6 +344,62 @@ If you have two side-channels off the same spine node, put one
 `:right` and one `:left`. If you have three or more, root a
 `fan-out` on the spine node instead of declaring multiple
 branches.
+
+### Fan-in to a mid-pipeline stage (the merge / aggregator shape)
+
+A pipeline whose middle stage *also* receives feeds from outside the
+spine — a merge node, a shared queue, an aggregator. The instinct is
+to keep the pipeline whole and add a `bus` (or plain edges) into the
+middle node, but that collides: the spine already anchors the middle
+node, and the bus parks its producers in the same column as the spine
+head.
+
+**Wrong**:
+
+```melk
+pipeline main: ingest -> merge -> publish
+bus feeds: [ext_a, ext_b] -> merge    # ext_a collides with ingest at (0,0)
+```
+
+**Right** — make the merge node the *head* of the tail pipeline and let
+one `bus` absorb the upstream spine member alongside the external
+feeds:
+
+```melk
+bus feeds: [ingest, ext_a, ext_b] -> merge    # one anchor for the merge
+pipeline tail: merge -> publish               # tail starts at merge
+```
+
+The merge node now has a single owner (the bus), and the tail pipeline
+hangs off it cleanly. (For a single external feed you can instead use
+`branch fa:right: ext_a -> merge`.)
+
+### Trees (chained fan-outs, depth ≥ 2)
+
+A fan-out whose targets each fan out again — an org chart, a routing
+tier, a decision tree. The leaves of adjacent subtrees collide because
+each mid node only reserves one row.
+
+**Wrong**:
+
+```melk
+fan-out root: r -> [mid_a, mid_b]
+fan-out la: mid_a -> [leaf_a1, leaf_a2]
+fan-out lb: mid_b -> [leaf_b1, leaf_b2]    # leaf_a2 and leaf_b1 collide
+```
+
+**Right** — size each mid node to its **subtree breadth** so its leaves
+get distinct rows. A mid node with *k* leaves needs roughly `2k` cells
+on the breadth axis (height in `lr`, width in `tb`):
+
+```melk
+crossings: 20
+fan-out root: r -> [mid_a, mid_b]
+fan-out la: mid_a -> [leaf_a1, leaf_a2]
+fan-out lb: mid_b -> [leaf_b1, leaf_b2]
+mid_a { size: 5x11 }    # 2 leaves → ~11 cells tall in lr
+mid_b { size: 5x11 }
+```
 
 ### Lanes (parallel pipelines)
 
@@ -482,13 +539,22 @@ import "./modules/observability.melk" as observability
 
 pipeline data_plane: client -> edge -> ingest -> consumer
 
-# Cross-module tap to a specific internal node:
-ingest.audit -> observability.signals { tags: [critical] }
+# Cross-module tap to a specific internal node. `entry: N` makes the
+# trace approach observability's `signals` node from the north (the
+# module is laid out tb precisely so `signals` sits on its north face).
+# Without it the tap has no free channel between the two dense modules
+# and routing fails with E_LANE_FULL.
+ingest.audit -> observability.signals { tags: [critical], entry: N }
 ```
 
 Each imported file is a complete `.melk` with its own theme + layout.
 Parent-level edges land on the nearest internal node on the facing
 side automatically (or the qualified ref's exact internal node).
+
+When a tap between two dense modules can't find a channel
+(`E_LANE_FULL`), steer it onto an outer face with `entry:`/`exit:`
+(here `entry: N`), or pull the modules apart by giving the imported
+nodes more breathing room — see §4.3 and the module-gutter note.
 
 ---
 
@@ -584,26 +650,35 @@ plain edge from whichever worker is structurally appropriate.
 
 ### `E_ANCHOR_CONFLICT`
 
-One node is named as a sink by two anchoring busses (or by a bus
-and a fan-out). The placer can't put it in two columns at once.
+A node that one construct has *already placed* is re-anchored to a
+*different* cell by a second construct. The placer can't put it in two
+cells at once, so it names the node, both constructs, and both cells.
 
 ```melk
-bus a: [w1, w2] -> db
-bus b: [w3, w4] -> db    # db is already anchored by bus a
+pipeline main: a -> b -> c    # places b at (row 0, col 10)
+branch x:right: a -> b        # branch wants b at (row 10, col 0)
 ```
 
-Fix: keep `db` in one bus. The other producers reach it via plain
-edges (`w3 -> db`).
+Fix: drop the node from one of the constructs, or split it in two.
+
+> Note: two anchoring constructs aimed at the *same shared sink*
+> (`bus a: [..] -> db` / `bus b: [..] -> db`) do **not** reach this
+> error — their *producers* collide first and you get
+> `E_AMBIGUOUS_PLACEMENT` (Shape D above). The fix is the same: one
+> anchoring construct, plain edges for the rest.
 
 ### `E_SIDE_OVERSUBSCRIBED`
 
 A node's face holds 1 trace per cell-unit at default pitch
-(`CELL_PX = COMB_PITCH = 8`). A default `5x5` node therefore fits
-5 edges on any one face; the 6th overflows. Hub patterns trigger it:
+(`CELL_PX = COMB_PITCH = 8`). A `5x5` face is 5 cell-units, so it holds
+5 traces — but a hub (any bus/fan-out shared node) auto-parity-bumps its
+breadth by +1 when the trace count needs it, so a default hub absorbs
+**6** edges before overflowing. The **7th** is the first that needs
+explicit sizing. Hub patterns trigger it:
 
-- A `bus` aggregating 6+ producers into one sink.
-- A `fan-out` spraying 6+ targets from one source.
-- A node reached by a highway that has 6+ via-edges.
+- A `bus` aggregating 7+ producers into one sink.
+- A `fan-out` spraying 7+ targets from one source.
+- A node reached by a highway that has 7+ via-edges.
 
 Fix: grow the hub on the axis perpendicular to flow.
 
@@ -632,7 +707,10 @@ crossings: 6
 ```
 
 This isn't a topology problem; it's a routing budget. The default
-is conservative.
+budget is **`0`** — *any* crossing is rejected until you opt in. The
+error names the exact number required; set it at or above that
+(`crossings: 6`). Set it generously and the compiler still fails loudly
+only if a later re-layout introduces *more* crossings than you allowed.
 
 ### `E_HIGHWAY_AS_ENDPOINT`
 

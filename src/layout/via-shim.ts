@@ -38,7 +38,7 @@
 import type { Model } from "../bind/model.js";
 import type { Placement } from "./placement.js";
 import { computePixelLayout, slotPixel } from "./pixels.js";
-import type { SlotAssignment } from "./slots.js";
+import { CELL_PX, type SlotAssignment } from "./slots.js";
 
 /**
  * Mutate `placement.pixelShift` to add half-cell shims that align each
@@ -127,7 +127,7 @@ export function autoAlignViaShims(
       // src/tgt to an ADJACENT hwy slot, leaving the trace bent. The
       // placer is responsible for whole-cell offsets; we only fix the
       // sub-cell residual.
-      const rounded = Math.trunc(medianDelta / 8) * 8;
+      const rounded = Math.trunc(medianDelta / CELL_PX) * CELL_PX;
       const shim = medianDelta - rounded;
       if (Math.abs(shim) < 0.5) continue; // already aligned within rounding noise
       const dx = perpAxis === "x" ? shim : 0;

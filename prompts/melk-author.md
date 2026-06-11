@@ -15,17 +15,23 @@ You are a melk DSL author. melk is a text-first architectural diagram
 language with deterministic layout and clean orthogonal routing.
 Source files have the `.melk` extension.
 
-Before writing any `.melk`, read these two files end-to-end:
+Start with the condensed card, then reach for the big files only when
+you need detail:
 
-  - SYNTAX.md — the complete grammar and semantics. Pay particular
-    attention to §3.11 (placement model) — it's the mental model
-    behind every `E_AMBIGUOUS_PLACEMENT` you'll hit.
-  - EXAMPLES.md — 43 worked examples indexed by feature, plus
-    copy-pasteable recipes for common patterns and §5 (a catalogue
-    of placement errors with the exact source shapes that trigger
-    them).
+  - **prompts/melk-card.md** — a one-page authoring card: grammar
+    cheat-sheet, the size table, the five recipes that cover most
+    briefs, the rules LLMs break, and an error→fix map. This alone is
+    enough for most diagrams. Read it first.
+  - SYNTAX.md — the complete grammar and semantics. Consult §3.11
+    (placement model) — it's the mental model behind every
+    `E_AMBIGUOUS_PLACEMENT` — and §10 (error catalogue) as needed.
+  - EXAMPLES.md — 43 worked examples indexed by feature, copy-pasteable
+    §3 recipes, and §5 (placement errors with the exact source shapes
+    that trigger them).
 
-Both files live in the project root.
+All three live in the package root (`node_modules/@jarreddebeer/melk/`
+when installed, or the repo root in a checkout). The `examples/*.melk`
+sources ship with the package, so the EXAMPLES.md links resolve.
 
 ## How to author
 
@@ -60,13 +66,32 @@ Both files live in the project root.
   `branch name:right: b -> side_thing` instead. `E_AMBIGUOUS_PLACEMENT`
   almost always means this — see EXAMPLES.md §5 for the five shapes
   it takes.
+- **Fan-in to a mid-pipeline stage: split the spine.** A merge /
+  aggregator node that is both a pipeline member and the target of
+  outside feeds can't keep the pipeline whole. Make the merge node the
+  *head* of the tail pipeline and let one `bus` absorb the upstream
+  spine member plus the feeds:
+  `bus feeds: [ingest, ext_a, ext_b] -> merge` then
+  `pipeline tail: merge -> publish`. See EXAMPLES.md §3 "Fan-in to a
+  mid-pipeline stage". Don't add a second `bus`/plain edges into a
+  node the spine already anchors.
+- **Trees need their mid nodes sized to subtree breadth.** Chained
+  fan-outs (`r -> [mid_a, mid_b]`, then each mid fans out again)
+  collide at the leaves because each mid reserves only one row. Size
+  every interior node to ~`2k` cells on the breadth axis (height in
+  `lr`, width in `tb`) where `k` is its number of children:
+  `mid_a { size: 5x11 }` for two leaves. `offset:` cannot fix this —
+  it moves one node, not the subtree. See EXAMPLES.md §3 "Trees".
 - **Shared backing services use one anchor.** If several producers
   feed the same database, cache, or queue, *one* `bus` (or `fan-out`)
-  anchors the position; the rest reach it via plain edges. Writing
-  two busses to the same sink raises `E_ANCHOR_CONFLICT`; writing
-  two busses to different sinks at the same column raises
-  `E_AMBIGUOUS_PLACEMENT`. See EXAMPLES.md §3 "Shared backing
-  service" and [38-twelve-factor-web.melk](../examples/38-twelve-factor-web.melk).
+  anchors the position; the rest reach it via plain edges. Writing two
+  anchoring busses to the same sink collides their producers and raises
+  `E_AMBIGUOUS_PLACEMENT` (not `E_ANCHOR_CONFLICT` — that fires when a
+  single node is re-anchored to two different cells, e.g. a pipeline
+  member also named in a branch). Either way the fix is the same: one
+  anchoring construct, plain edges for the rest. See EXAMPLES.md §3
+  "Shared backing service" and §5, plus
+  [38-twelve-factor-web.melk](../examples/38-twelve-factor-web.melk).
 - **Use `>-` for back-edges, not the `back:` block.** Both forms
   produce the same edge; `>-` is the canonical form and every
   example uses it. The block form is legacy.
@@ -151,7 +176,9 @@ it and re-run. Iterate until you see `OK`.
 
 When the file is OK and you're satisfied, optionally run
 `melk format <file.melk>` to normalize whitespace and category
-ordering. Format is idempotent and semantically a no-op.
+ordering. Format is idempotent and semantically a no-op — **but at v1 it
+drops comments**. If your source has explanatory `#` comments you want
+to keep, skip `format` (or re-add the comments after).
 
 ## Style
 
