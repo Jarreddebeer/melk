@@ -469,6 +469,69 @@ describe("channel routing — slot pixel as boundary-leg perp coord", () => {
     }
   });
 
+  it("fan-out to 2-above + 2-below from one face routes planar (fan-chamfer lane order)", () => {
+    // Regression: a 4-way fan-out (two targets above the source row, two
+    // below) crossed within each turn-direction pair. pickMidCol's
+    // clearance-relaxation ladder let the SECOND sibling of a pair
+    // backfill a column the FIRST had swept past (first sibling's start
+    // col failed the 2-cell footprint clearance; the second took it at
+    // 0-cell clearance), inverting the chamfer nesting: the inner lane's
+    // V leg cut the outer lane's slot-row H run. Fan-chamfer bounds now
+    // keep same-face same-direction mid lanes monotone in slot row.
+    //
+    // Topology distilled from a real diagram (diamond policy node
+    // fanning to four view boxes); the sizes matter — they produce the
+    // clearance rejection that triggered the backfill.
+    const src = `
+      layout: lr
+      hub { shape: diamond, size: 13x7 }
+      up_far   { size: 9x7 }
+      up_near  { size: 9x7 }
+      dn_near  { size: 11x7 }
+      dn_far   { size: 13x7 }
+      fan-out reads: hub -> [up_far, up_near, dn_near, dn_far]
+    `;
+    const { model, routing } = route(src);
+    const targets = ["up_far", "up_near", "dn_near", "dn_far"];
+    const polys = targets.map((t) => polylineFor(routing, "hub", t, model));
+    for (let i = 0; i < polys.length; i++) {
+      for (let j = i + 1; j < polys.length; j++) {
+        expect(
+          polylinesIntersect(polys[i]!, polys[j]!),
+          `hub→${targets[i]} must not cross hub→${targets[j]}`,
+        ).toBe(false);
+      }
+    }
+    expect(routing.crossings.length, "fan-out needs no crossings").toBe(0);
+  });
+
+  it("fan-out fan-chamfer lane order holds under tb (pickMidRow mirror)", () => {
+    // Isometric mirror of the case above: under tb the fan-out leaves
+    // the S face, the Z routes are H→H, and the mid lane is a row picked
+    // by pickMidRow. Sizes transposed to produce the rotated geometry.
+    const src = `
+      layout: tb
+      hub { shape: diamond, size: 7x13 }
+      up_far   { size: 7x9 }
+      up_near  { size: 7x9 }
+      dn_near  { size: 7x11 }
+      dn_far   { size: 7x13 }
+      fan-out reads: hub -> [up_far, up_near, dn_near, dn_far]
+    `;
+    const { model, routing } = route(src);
+    const targets = ["up_far", "up_near", "dn_near", "dn_far"];
+    const polys = targets.map((t) => polylineFor(routing, "hub", t, model));
+    for (let i = 0; i < polys.length; i++) {
+      for (let j = i + 1; j < polys.length; j++) {
+        expect(
+          polylinesIntersect(polys[i]!, polys[j]!),
+          `hub→${targets[i]} must not cross hub→${targets[j]}`,
+        ).toBe(false);
+      }
+    }
+    expect(routing.crossings.length, "fan-out needs no crossings").toBe(0);
+  });
+
   it("hwy -> dst trace lands on the target face dead-vertical (arrow points down)", () => {
     // Regression: ex 18 hwy -> dst_x ended with a 4-px horizontal stub
     // because the LAST V leg's perp coord came from cellCx(bendCell)

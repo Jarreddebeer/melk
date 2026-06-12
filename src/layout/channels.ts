@@ -151,6 +151,17 @@ export function routeChannels(
   // bottom siblings land on the SAME bend col with the middle sibling
   // one cell off, and the chamfers visually overlap.
   const siblingMidCols = new Map<string, number[]>();
+  // Fan-chamfer ordering across DIFFERENT targets: for non-via Z routes
+  // leaving the same source face in the same turn direction, the mid-leg
+  // lanes must be monotone in slot position or the slot-row exit runs
+  // cross each other's mid legs (a fan-out to two-above + two-below from
+  // one face produced 2 avoidable crossings). Keyed by
+  // `srcId|<face exit row/col>|<dirTag>`; each entry remembers the slot
+  // perp coordinate and the picked mid lane so a later sibling can pick
+  // a lane on the correct side regardless of routing order. Distinct
+  // from `siblingMidCols`, which orders parallel edges to the SAME
+  // target (and via-half stairs).
+  const fanMidPicks = new Map<string, { perp: number; pick: number }[]>();
   // Channel lane bookkeeping for crossing detection. Keys:
   //   `V|<col>` and `H|<row>`. Value: list of {edgeIndex, rowSpan or
   //   colSpan} for crossings detection.
@@ -288,6 +299,7 @@ export function routeChannels(
       tgtW,
       tgtH,
       siblingMidCols,
+      fanMidPicks,
     );
 
     // Claim interior cells of long legs so subsequent edges shift to
@@ -1178,6 +1190,7 @@ function computeCellPath(
   tgtW: number,
   tgtH: number,
   siblingMidCols: Map<string, number[]>,
+  fanMidPicks: Map<string, { perp: number; pick: number }[]>,
 ): Cell[] {
   const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   const srcAxis: "V" | "H" = srcSide === "E" || srcSide === "W" ? "V" : "H";
@@ -1340,14 +1353,30 @@ function computeCellPath(
     const dirTag = srcExit.row < tgtExit.row ? "D" : srcExit.row > tgtExit.row ? "U" : "F";
     const pairKey = isViaHalf ? `${srcId}|${dirTag}` : `${srcId}|${tgtId}`;
     const siblingCols = siblingMidCols.get(pairKey);
+    // Fan-chamfer bounds: non-via edges leaving the same face
+    // (srcExit.col identifies the face — every slot on one face exits
+    // at the same col) in the same direction must keep their mid cols
+    // monotone in slot row: going UP the col grows with the slot row,
+    // going DOWN it shrinks. Computed against every already-routed
+    // sibling, so the constraint holds regardless of routing order.
+    const fanKey = `${srcId}|c${srcExit.col}|${dirTag}`;
+    const fanBounds = isViaHalf || dirTag === "F"
+      ? undefined
+      : fanBoundsFor(fanMidPicks.get(fanKey), srcExit.row, dirTag === "U");
     const candidate = pickMidCol(srcExit.col, tgtExit.col, srcExit.row, tgtExit.row,
                                   claims, edgeIndex, srcId, tgtId,
-                                  siblingCols);
+                                  siblingCols, fanBounds);
     const bend1: Cell = { row: srcExit.row, col: candidate };
     const bend2: Cell = { row: tgtExit.row, col: candidate };
     const arr = siblingMidCols.get(pairKey);
     if (arr) arr.push(candidate);
     else siblingMidCols.set(pairKey, [candidate]);
+    if (!isViaHalf && dirTag !== "F") {
+      const fanArr = fanMidPicks.get(fanKey);
+      const entry = { perp: srcExit.row, pick: candidate };
+      if (fanArr) fanArr.push(entry);
+      else fanMidPicks.set(fanKey, [entry]);
+    }
     return claimZPath(srcExit, bend1, bend2, tgtExit, /*axis=*/ "V",
                       cellOwner, bendOwner, edgeIndex, srcId, tgtId);
   }
@@ -1373,8 +1402,22 @@ function computeCellPath(
                                       edgeIndex, srcId, tgtId, gridRows);
     if (uPath) return uPath;
   }
+  // Fan-chamfer bounds, H→H mirror (tb-layout isometry of the V→V
+  // case): going LEFT the mid row grows with the slot col, going RIGHT
+  // it shrinks. Face identified by srcExit.row.
+  const hDirTag = tgtExit.col < srcExit.col ? "L" : tgtExit.col > srcExit.col ? "R" : "F";
+  const hFanKey = `${srcId}|r${srcExit.row}|${hDirTag}`;
+  const hFanBounds = isViaHalf || hDirTag === "F"
+    ? undefined
+    : fanBoundsFor(fanMidPicks.get(hFanKey), srcExit.col, hDirTag === "L");
   const candidate = pickMidRow(srcExit.row, tgtExit.row, srcExit.col, tgtExit.col,
-                                claims, edgeIndex, srcId, tgtId);
+                                claims, edgeIndex, srcId, tgtId, hFanBounds);
+  if (!isViaHalf && hDirTag !== "F") {
+    const fanArr = fanMidPicks.get(hFanKey);
+    const entry = { perp: srcExit.col, pick: candidate };
+    if (fanArr) fanArr.push(entry);
+    else fanMidPicks.set(hFanKey, [entry]);
+  }
   // V-lane near search: shift bend1.col/bend2.col off srcExit.col/
   // tgtExit.col when those columns are claimed by another edge's V leg.
   // Skipped for highway via-half edges — those are intentionally packed
@@ -1714,6 +1757,38 @@ function isBendFree(
   return true;
 }
 
+/**
+ * Monotone-lane bounds for a fan sibling. `siblings` are the mid lanes
+ * already picked by Z routes leaving the same source face in the same
+ * turn direction; `perp` is the new route's slot coordinate along that
+ * face (row for V→V, col for H→H). Planarity requires picked lanes
+ * monotone in perp: increasing when `growing` (turn direction up/left),
+ * decreasing otherwise (down/right). Returns exclusive bounds the new
+ * pick must satisfy, or undefined when no sibling constrains it.
+ */
+function fanBoundsFor(
+  siblings: { perp: number; pick: number }[] | undefined,
+  perp: number,
+  growing: boolean,
+): { gt?: number; lt?: number } | undefined {
+  if (!siblings || siblings.length === 0) return undefined;
+  let gt: number | undefined;
+  let lt: number | undefined;
+  for (const s of siblings) {
+    // Same slot coordinate = a parallel edge to the same target; the
+    // (src, tgt) sibling ratchet orders those, not the fan bounds.
+    if (s.perp === perp) continue;
+    const mustBeGreater = growing ? s.perp < perp : s.perp > perp;
+    if (mustBeGreater) {
+      if (gt === undefined || s.pick > gt) gt = s.pick;
+    } else {
+      if (lt === undefined || s.pick < lt) lt = s.pick;
+    }
+  }
+  if (gt === undefined && lt === undefined) return undefined;
+  return { gt, lt };
+}
+
 function pickMidCol(
   srcCol: number,
   tgtCol: number,
@@ -1724,6 +1799,7 @@ function pickMidCol(
   srcId: string,
   tgtId: string,
   siblingCols: number[] | undefined,
+  fanBounds?: { gt?: number; lt?: number },
 ): number {
   const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // Lane ordering: a fan-out (or bus, or any cluster of parallel V
@@ -1769,20 +1845,48 @@ function pickMidCol(
   }
   // Progressive relaxation: 2-cell clearance → 1-cell → 0-cell, then
   // drop the face-clearance rule. Each pass tries every column at the
-  // current clearance level before relaxing.
-  for (const clearance of [2, 1, 0]) {
-    for (let radius = 0; radius < 32; radius++) {
-      const cands = step !== 0 ? [start + step * radius] : (radius === 0 ? [start] : [start - radius, start + radius]);
-      for (const c of cands) {
-        if (c < lo || c > hi) continue;
-        if (Math.abs(c - tgtCol) < 1) continue;
-        if (Math.abs(c - srcCol) < 1) continue;
-        if (!midColFits(c, row1, row2, cellOwner, bendOwner, vLegClaim, srcId, tgtId, clearance)) continue;
-        return c;
+  // current clearance level before relaxing. With fan bounds, the sweep
+  // start shifts to the first in-bounds column so a clearance rejection
+  // can't push the pick onto a sibling's wrong side; out-of-bounds
+  // candidates are skipped throughout — without this, the relaxation
+  // ladder let a later fan sibling backfill a column an earlier sibling
+  // had swept past, inverting the chamfer nesting and crossing its H run.
+  const sweepStrict = (bounds: { gt?: number; lt?: number } | undefined): number | null => {
+    let s = start;
+    if (bounds) {
+      if (step > 0 && bounds.gt !== undefined) s = Math.max(s, bounds.gt + 1);
+      if (step < 0 && bounds.lt !== undefined) s = Math.min(s, bounds.lt - 1);
+    }
+    const inBounds = (c: number) =>
+      !bounds || ((bounds.gt === undefined || c > bounds.gt) && (bounds.lt === undefined || c < bounds.lt));
+    for (const clearance of [2, 1, 0]) {
+      for (let radius = 0; radius < 32; radius++) {
+        const cands = step !== 0 ? [s + step * radius] : (radius === 0 ? [s] : [s - radius, s + radius]);
+        for (const c of cands) {
+          if (c < lo || c > hi) continue;
+          if (!inBounds(c)) continue;
+          if (Math.abs(c - tgtCol) < 1) continue;
+          if (Math.abs(c - srcCol) < 1) continue;
+          if (!midColFits(c, row1, row2, cellOwner, bendOwner, vLegClaim, srcId, tgtId, clearance)) continue;
+          return c;
+        }
       }
     }
+    return null;
+  };
+  const bounded = sweepStrict(fanBounds);
+  if (bounded !== null) return bounded;
+  // Over-constrained fan corridor: degrade to the unbounded pick (a
+  // counted crossing, subject to the crossings budget) rather than
+  // failing the route. This must come BEFORE the loose fallback below:
+  // dropping the face-adjacency exclusions to satisfy fan bounds would
+  // pick the source face's own column and the V leg would hug the box.
+  if (fanBounds) {
+    const unbounded = sweepStrict(undefined);
+    if (unbounded !== null) return unbounded;
   }
-  // Final fallback: drop face clearance too.
+  // Final fallback: drop the face-adjacency exclusions too (unbounded —
+  // last resort before failing).
   for (let radius = 0; radius < 32; radius++) {
     const cands = step !== 0 ? [start + step * radius] : (radius === 0 ? [start] : [start - radius, start + radius]);
     for (const c of cands) {
@@ -1791,7 +1895,7 @@ function pickMidCol(
       return c;
     }
   }
-  // Pass 3: corridor genuinely full. Bail loudly so the placer/source
+  // Corridor genuinely full. Bail loudly so the placer/source
   // can be widened — silently overlapping traces is a worse outcome.
   throw new ChannelError(
     `E_LANE_FULL: edge '${srcId} -> ${tgtId}' has no free V-channel column ` +
@@ -1941,6 +2045,7 @@ function pickMidRow(
   _edgeIndex: number,
   srcId: string,
   tgtId: string,
+  fanBounds?: { gt?: number; lt?: number },
 ): number {
   const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   // Lane ordering by target-col position (mirror of pickMidCol).
@@ -1950,20 +2055,41 @@ function pickMidRow(
   const goingRight = col2 > col1;
   const start = goingLeft ? lo + 1 : goingRight ? hi - 1 : Math.round((srcRow + tgtRow) / 2);
   const step = goingLeft ? +1 : goingRight ? -1 : 0;
-  // Progressive relaxation: 2-cell clearance → 1-cell → 0-cell.
-  for (const clearance of [2, 1, 0]) {
-    for (let radius = 0; radius < 32; radius++) {
-      const cands = step !== 0 ? [start + step * radius] : (radius === 0 ? [start] : [start - radius, start + radius]);
-      for (const r of cands) {
-        if (r < lo || r > hi) continue;
-        if (Math.abs(r - tgtRow) < 1) continue;
-        if (Math.abs(r - srcRow) < 1) continue;
-        if (!midRowFits(r, col1, col2, cellOwner, bendOwner, hLegClaim, srcId, tgtId, clearance)) continue;
-        return r;
+  // Progressive relaxation: 2-cell clearance → 1-cell → 0-cell. Fan
+  // bounds keep same-face fan siblings' mid rows monotone in slot col —
+  // see pickMidCol for the rationale; this is its tb-isometric mirror.
+  const sweepStrict = (bounds: { gt?: number; lt?: number } | undefined): number | null => {
+    let s = start;
+    if (bounds) {
+      if (step > 0 && bounds.gt !== undefined) s = Math.max(s, bounds.gt + 1);
+      if (step < 0 && bounds.lt !== undefined) s = Math.min(s, bounds.lt - 1);
+    }
+    const inBounds = (r: number) =>
+      !bounds || ((bounds.gt === undefined || r > bounds.gt) && (bounds.lt === undefined || r < bounds.lt));
+    for (const clearance of [2, 1, 0]) {
+      for (let radius = 0; radius < 32; radius++) {
+        const cands = step !== 0 ? [s + step * radius] : (radius === 0 ? [s] : [s - radius, s + radius]);
+        for (const r of cands) {
+          if (r < lo || r > hi) continue;
+          if (!inBounds(r)) continue;
+          if (Math.abs(r - tgtRow) < 1) continue;
+          if (Math.abs(r - srcRow) < 1) continue;
+          if (!midRowFits(r, col1, col2, cellOwner, bendOwner, hLegClaim, srcId, tgtId, clearance)) continue;
+          return r;
+        }
       }
     }
+    return null;
+  };
+  const bounded = sweepStrict(fanBounds);
+  if (bounded !== null) return bounded;
+  // See pickMidCol: unbounded-strict before the loose fallback, so fan
+  // bounds degrade to a counted crossing, never a face-hugging leg.
+  if (fanBounds) {
+    const unbounded = sweepStrict(undefined);
+    if (unbounded !== null) return unbounded;
   }
-  // Final fallback: drop face clearance too.
+  // Final fallback: drop the face-adjacency exclusions too.
   for (let radius = 0; radius < 32; radius++) {
     const cands = step !== 0 ? [start + step * radius] : (radius === 0 ? [start] : [start - radius, start + radius]);
     for (const r of cands) {

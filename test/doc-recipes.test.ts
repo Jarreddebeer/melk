@@ -116,10 +116,15 @@ src -> hwy`),
   });
 
   it("E_CROSSINGS_OVER_BUDGET — crossing topology with default budget 0", () => {
-    // Two fan-outs from one source force a crossing; default budget is 0.
+    // Two parallel pipelines with crosswise edges between their middles
+    // (ex 14's shape) — topologically non-planar, so the router MUST
+    // spend crossings; default budget is 0. (A single-source fan-out no
+    // longer qualifies: the fan-chamfer lane ordering routes it clean.)
     expect(
-      code(`fan-out f1: hub -> [a, b]
-fan-out f2: hub -> [c, d, e]`),
+      code(`pipeline lhs: a -> x -> p
+pipeline rhs: b -> y -> q
+a -> y
+b -> x`),
     ).toBe("E_CROSSINGS_OVER_BUDGET");
   });
 });
