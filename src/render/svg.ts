@@ -249,6 +249,17 @@ export function renderSVG(
     if (o.border !== undefined) fillResolver(o.border);
     if (o["icon-color"] !== undefined) fillResolver(o["icon-color"]);
   }
+  // Legend swatches can carry the same gradient paints as nodes (a tag
+  // with a gradient `fill`/`border`/`trace`). Register them here too so
+  // their <linearGradient> defs exist before renderDefs runs below.
+  if (legendLayout) {
+    for (const placed of legendLayout.placed) {
+      const rule = placed.entry.rule;
+      if (rule.fill !== undefined) fillResolver(rule.fill);
+      if (rule.border !== undefined) fillResolver(rule.border);
+      if (rule.trace !== undefined) fillResolver(rule.trace);
+    }
+  }
 
   const parts: string[] = [];
   parts.push(
@@ -400,7 +411,7 @@ export function renderSVG(
 
   parts.push(`</g>`);
   if (legendLayout) {
-    parts.push(renderLegend(legendLayout, legendOriginX, legendOriginY, theme));
+    parts.push(renderLegend(legendLayout, legendOriginX, legendOriginY, theme, fillResolver));
   }
   if (headerLayout) {
     parts.push(renderTitleStrip(headerLayout, 0, 0, theme));
@@ -1771,11 +1782,11 @@ function renderIconAsBody(
   tint?: string,
 ): string {
   if (!n.icon || !iconRegistry) {
-    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
+    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme, tint);
   }
   const loaded = loadIcon(iconRegistry, n.icon);
   if (!loaded) {
-    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme);
+    return renderIconPlaceholder(b.x, b.y, b.width, b.height, theme, tint);
   }
   return renderIconBody(loaded, b.x, b.y, b.width, b.height, theme, tint);
 }
@@ -1798,7 +1809,7 @@ function renderIconAsBadge(
     // Small placeholder roughly where a badge would go.
     if (position === "corner") {
       const size = Math.min(24, Math.min(b.width, b.height) * 0.3);
-      return renderIconPlaceholder(b.x + 4, b.y + 4, size, size, theme);
+      return renderIconPlaceholder(b.x + 4, b.y + 4, size, size, theme, tint);
     }
     const size = Math.min(16, Math.min(b.width, b.height) * 0.3);
     return renderIconPlaceholder(
@@ -1807,6 +1818,7 @@ function renderIconAsBadge(
       size,
       size,
       theme,
+      tint,
     );
   }
   return renderIconBadge(loaded, b.x, b.y, b.width, b.height, position, undefined, theme, tint);

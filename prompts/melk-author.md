@@ -153,8 +153,10 @@ sources ship with the package, so the EXAMPLES.md links resolve.
   around the south of any boxes in between and approach `orders_rm`
   from below. Don't reach for `offset:` to dodge — that moves the
   node; `entry:`/`exit:` move the trace, which is almost always what
-  you actually want. Rejected on back-edges (already perimeter-routed)
-  and on via-edges (`E_EXIT_ON_VIA_EDGE`).
+  you actually want. On a back-edge they override the perpendicular
+  wrap face the router picks by default (e.g. `R >- S { exit: S, entry: S }`
+  wraps under the bottom instead of over the top). Rejected only on
+  via-edges (`E_EXIT_ON_VIA_EDGE`).
 
 ## Workflow
 

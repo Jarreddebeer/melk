@@ -97,6 +97,18 @@ export function assignSlots(
     sides: { sourceSide: Side; targetSide: Side };
   };
   const edgeCtxs: EdgeCtx[] = [];
+
+  // Diagram cell-extent (max row/col across every footprint). Used to pick
+  // the nearer grid edge for back-edge wrap faces below.
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const n of model.nodes) {
+    const c = placement.cells.get(n.id);
+    if (!c) continue;
+    maxRow = Math.max(maxRow, c.row + n.size.height - 1);
+    maxCol = Math.max(maxCol, c.col + n.size.width - 1);
+  }
+
   for (let i = 0; i < model.edges.length; i++) {
     const edge = model.edges[i]!;
     const src = placement.cells.get(edge.from);
@@ -127,7 +139,20 @@ export function assignSlots(
     } else {
       edgeFwd = tgtLocalFwd;
     }
-    const sides = assignSides(edgeFwd);
+    let sides = assignSides(edgeFwd);
+    // Back-edges wrap around the outside of the diagram. They should leave
+    // and re-enter on the face PERPENDICULAR to the flow axis (N/S for LR,
+    // E/W for TB), centered — not on the side faces, which would attach the
+    // wrap to a box edge instead of its top/bottom. Pick whichever of the
+    // two perpendicular faces is nearer a grid edge so the trace wraps over
+    // the closer margin; both endpoints share that face so the C-shape is
+    // symmetric. The perimeter router (channels.ts) honours the chosen face.
+    if (edge.isBackEdge) {
+      const wrap = backEdgeWrapSide(
+        placement.flowAxis, src, tgt, maxRow, maxCol,
+      );
+      sides = { sourceSide: wrap, targetSide: wrap };
+    }
     // DESIGN-PHASE5-MODULES.md §4.6 — for edges with a qualified module
     // endpoint, pick the module face that points toward the other
     // endpoint AND is closest to the internal node's position.
@@ -286,9 +311,11 @@ export function assignSlots(
       return a.edgeIndex - b.edgeIndex;
     };
 
-    // Segregate back-edges from forwards. Back-edges wrap through page
-    // margins so their face slot sits at the OUTER end of the centered
-    // forward cluster (above the cluster for north-wrap).
+    // Segregate back-edges from forwards. When a face carries both, the
+    // back-edge slots sit at the OUTER end of the centered forward cluster
+    // so the two families don't interleave; when a face carries only
+    // back-edges (the common case now that back-edges take a dedicated
+    // perpendicular-to-flow face) the back cluster centers on its own.
     const backs = pending.filter((p) => p.isBack).sort(sortKey);
     const forwards = pending.filter((p) => !p.isBack).sort(sortKey);
 
@@ -309,10 +336,19 @@ export function assignSlots(
         forwardClusterStart + k,
       );
     });
+    // Back-edges normally sit at the OUTER end of the forward cluster
+    // (so a face shared with forwards keeps them segregated). But on a
+    // face with no forward traffic — the common case now that back-edges
+    // take a dedicated perpendicular-to-flow face — center the back
+    // cluster on the face midpoint instead, so a lone back-edge exits/
+    // enters dead-center rather than half a cell off.
+    const backClusterStart = F === 0
+      ? (slotPositions - backs.length) / 2
+      : forwardClusterStart - 1;
     backs.forEach((p, k) => {
       slotMap.set(
         slotKey(nodeId, side, p.edgeIndex, p.endpoint),
-        forwardClusterStart - 1 - k,
+        F === 0 ? backClusterStart + k : backClusterStart - k,
       );
     });
   }
@@ -490,6 +526,32 @@ function preservesOrder(oldSlot: number, newSlot: number, face: Set<number>): bo
     if (s < newSlot) lessThanNew++;
   }
   return lessThanOld === lessThanNew;
+}
+
+/**
+ * Pick the perpendicular-to-flow face a back-edge wraps over. The trace
+ * goes AROUND the outside, so it should attach to the box face on the side
+ * it wraps toward: N or S for an LR diagram, W or E for TB. Choose whichever
+ * margin is nearer to the back-edge's two endpoints (so a back-edge near the
+ * top wraps over the top, one near the bottom wraps under the bottom). Ties
+ * resolve to the low side (N / W), matching the perimeter router's
+ * grid-edge-inward search which tries row 0 / col 0 first.
+ */
+function backEdgeWrapSide(
+  flowAxis: Placement["flowAxis"],
+  src: Cell,
+  tgt: Cell,
+  maxRow: number,
+  maxCol: number,
+): Side {
+  if (flowAxis === "east") {
+    // Perpendicular axis is vertical → N or S.
+    const mid = (src.row + tgt.row) / 2;
+    return mid <= maxRow - mid ? "N" : "S";
+  }
+  // flowAxis === "south": perpendicular axis is horizontal → W or E.
+  const mid = (src.col + tgt.col) / 2;
+  return mid <= maxCol - mid ? "W" : "E";
 }
 
 function opposite(d: Direction): Direction {

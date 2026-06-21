@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 304 280" width="304" height="280" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+</defs>
+<rect width="304" height="280" fill="#fafafa"/>
+<g transform="translate(32 32)">
+<g data-edge="src_a->hwy_h">
+  <path d="M 56 108 L 96 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="hwy_h->dst_x">
+  <path d="M 144 108 L 160 108 Q 164 108 164 104 L 164 40 Q 164 36 168 36 L 184 36" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="src_a->hwy_h">
+  <path d="M 56 116 L 96 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="hwy_h->dst_y">
+  <path d="M 144 116 L 184 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="src_a->hwy_h">
+  <path d="M 56 124 L 96 124" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="hwy_h->dst_z">
+  <path d="M 144 124 L 168 124 Q 172 124 172 128 L 172 192 Q 172 196 176 196 L 184 196" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="top_p->hwy_v">
+  <path d="M 124 40 L 124 96" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="hwy_v->bot_p">
+  <path d="M 124 136 L 124 176" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="top_p->hwy_v">
+  <path d="M 116 40 L 116 96" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="hwy_v->bot_q">
+  <path d="M 116 136 L 116 152 Q 116 156 112 156 L 48 156 Q 44 156 44 160 L 44 176" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-via-through="0"><path d="M 96 108 L 144 108" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="1"><path d="M 96 116 L 144 116" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="2"><path d="M 96 124 L 144 124" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="3" data-underground="1"><path d="M 124 96 L 124 136" fill="none" stroke="#94a3b8" stroke-width="0.75" stroke-opacity="0.45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="124" cy="96" r="2" fill="none" stroke="#94a3b8" stroke-width="1"/><circle cx="124" cy="136" r="2" fill="none" stroke="#94a3b8" stroke-width="1"/></g>
+<g data-via-through="4" data-underground="1"><path d="M 116 96 L 116 136" fill="none" stroke="#94a3b8" stroke-width="0.75" stroke-opacity="0.45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="116" cy="96" r="2" fill="none" stroke="#94a3b8" stroke-width="1"/><circle cx="116" cy="136" r="2" fill="none" stroke="#94a3b8" stroke-width="1"/></g>
+
+<g data-id="dst_x">
+  <rect x="184" y="16" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="36" text-anchor="middle" dominant-baseline="central" fill="#334155">dst_x</text>
+</g>
+<g data-id="dst_y">
+  <rect x="184" y="96" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">dst_y</text>
+</g>
+<g data-id="dst_z">
+  <rect x="184" y="176" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="196" text-anchor="middle" dominant-baseline="central" fill="#334155">dst_z</text>
+</g>
+<g data-id="top_p">
+  <rect x="92" y="0" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="120" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">top_p</text>
+</g>
+<g data-id="bot_p">
+  <rect x="96" y="176" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="124" y="196" text-anchor="middle" dominant-baseline="central" fill="#334155">bot_p</text>
+</g>
+<g data-id="bot_q">
+  <rect x="16" y="176" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="44" y="196" text-anchor="middle" dominant-baseline="central" fill="#334155">bot_q</text>
+</g>
+<g data-id="src_a">
+  <rect x="0" y="96" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">src_a</text>
+</g>
+
+</g>
+</svg>

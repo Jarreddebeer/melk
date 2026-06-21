@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 584 293" width="584" height="293" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+</defs>
+<rect width="584" height="293" fill="#fafafa"/>
+<g transform="translate(32 45)">
+<g data-nodeset="cluster">
+  <rect x="226" y="-2" width="68" height="204" rx="4" ry="4" fill="none" stroke="#cbd5e1" stroke-width="0.75" stroke-dasharray="4 3"/>
+  <text x="232" y="-4" text-anchor="start" font-size="9" fill="#64748b">cluster</text>
+</g>
+<g data-edge="ext_1->ingress">
+  <path d="M 56 20 L 104 20 Q 108 20 108 24 L 108 80 Q 108 84 112 84 L 120 84" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_a">
+  <path d="M 168 84 L 184 84 Q 188 84 188 80 L 188 24 Q 188 20 192 20 L 232 20" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ext_1->ingress">
+  <path d="M 56 28 L 96 28 Q 100 28 100 32 L 100 88 Q 100 92 104 92 L 120 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_b">
+  <path d="M 168 92 L 232 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ext_2->ingress">
+  <path d="M 56 100 L 120 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_b">
+  <path d="M 168 100 L 232 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ext_2->ingress">
+  <path d="M 56 108 L 120 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_c">
+  <path d="M 168 108 L 208 108 Q 212 108 212 112 L 212 168 Q 212 172 216 172 L 232 172" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ext_3->ingress">
+  <path d="M 56 172 L 72 172 Q 76 172 76 168 L 76 120 Q 76 116 80 116 L 120 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_a">
+  <path d="M 168 116 L 192 116 Q 196 116 196 112 L 196 32 Q 196 28 200 28 L 232 28" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ext_3->ingress">
+  <path d="M 56 180 L 80 180 Q 84 180 84 176 L 84 128 Q 84 124 88 124 L 120 124" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="ingress->svc_c">
+  <path d="M 168 124 L 200 124 Q 204 124 204 128 L 204 176 Q 204 180 208 180 L 232 180" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="svc_a->egress">
+  <path d="M 288 20 L 328 20 Q 332 20 332 24 L 332 80 Q 332 84 336 84 L 344 84" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="egress->sink_x">
+  <path d="M 392 84 L 408 84 Q 412 84 412 80 L 412 24 Q 412 20 416 20 L 448 20" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="svc_a->egress">
+  <path d="M 288 28 L 320 28 Q 324 28 324 32 L 324 88 Q 324 92 328 92 L 344 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="egress->sink_y">
+  <path d="M 392 92 L 448 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="svc_b->egress">
+  <path d="M 288 96 L 314 96 C 316 96 316 100 318 100 L 344 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="egress->sink_y">
+  <path d="M 392 100 L 448 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="svc_c->egress">
+  <path d="M 288 172 L 304 172 Q 308 172 308 168 L 308 112 Q 308 108 312 108 L 344 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="egress->sink_y">
+  <path d="M 392 108 L 448 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="svc_c->egress">
+  <path d="M 288 180 L 312 180 Q 316 180 316 176 L 316 120 Q 316 116 320 116 L 344 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g data-edge="egress->sink_z">
+  <path d="M 392 116 L 424 116 Q 428 116 428 120 L 428 192 Q 428 196 432 196 L 448 196" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-via-through="0"><path d="M 120 84 L 168 84" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="1"><path d="M 120 92 L 168 92" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="2"><path d="M 120 100 L 168 100" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="3"><path d="M 120 108 L 168 108" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="4"><path d="M 120 116 L 168 116" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="5"><path d="M 120 124 L 168 124" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="6"><path d="M 344 84 L 392 84" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="7"><path d="M 344 92 L 392 92" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="8"><path d="M 344 100 L 392 100" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="9"><path d="M 344 108 L 392 108" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-via-through="10"><path d="M 344 116 L 392 116" fill="none" stroke="#94a3b8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g data-id="ext_1">
+  <rect x="0" y="4" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="24" text-anchor="middle" dominant-baseline="central" fill="#334155">ext_1</text>
+</g>
+<g data-id="svc_a">
+  <rect x="232" y="4" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="260" y="24" text-anchor="middle" dominant-baseline="central" fill="#334155">svc_a</text>
+</g>
+<g data-id="svc_b">
+  <rect x="232" y="76" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="260" y="96" text-anchor="middle" dominant-baseline="central" fill="#334155">svc_b</text>
+</g>
+<g data-id="ext_2">
+  <rect x="0" y="84" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="104" text-anchor="middle" dominant-baseline="central" fill="#334155">ext_2</text>
+</g>
+<g data-id="svc_c">
+  <rect x="232" y="156" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="260" y="176" text-anchor="middle" dominant-baseline="central" fill="#334155">svc_c</text>
+</g>
+<g data-id="ext_3">
+  <rect x="0" y="156" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="176" text-anchor="middle" dominant-baseline="central" fill="#334155">ext_3</text>
+</g>
+<g data-id="sink_x">
+  <rect x="448" y="0" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="476" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">sink_x</text>
+</g>
+<g data-id="sink_z">
+  <rect x="448" y="176" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="476" y="196" text-anchor="middle" dominant-baseline="central" fill="#334155">sink_z</text>
+</g>
+<g data-id="sink_y">
+  <rect x="448" y="72" width="72" height="56" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="484" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">sink_y</text>
+</g>
+
+
+</g>
+</svg>

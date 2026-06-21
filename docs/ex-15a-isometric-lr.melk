@@ -1,0 +1,12 @@
+# Showcase copy of examples/15a-isometric-lr.melk for the README gallery.
+# Diagonal gradient on the hub.
+layout: lr
+crossings: 5
+theme: "./showcase.json"
+
+sidecar { size: 7x5 }
+hub { shape: rect, size: 5x7, label: "hub", tags: [gray-grad] }
+
+bus     into-hub:    [p1, p2, p3] -> hub
+fan-out out-of-hub:  hub -> [c1, c2, c3]
+branch  side-shoot:  hub -> sidecar

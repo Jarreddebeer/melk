@@ -1267,10 +1267,26 @@ function ambiguousPlacementHint(model: Model, a: string, b: string): string {
     );
   }
 
-  // Fan-out leaves of different parents: a and b each have a single source
-  // and those sources differ (two subtrees overlapping).
+  // Diverge: a and b share a single common SOURCE — one node feeds both with
+  // two plain edges, so the placer can't decide which sibling goes where and
+  // they collide. This is the commonest divergence collision an LLM creates
+  // (`x -> a` and `x -> b`); fold the siblings into one fan-out so the placer
+  // has a single anchoring construct to spread them from.
   const aSrc = sourcesOf(a);
   const bSrc = sourcesOf(b);
+  const commonSrc = [...aSrc].find((s) => bSrc.has(s));
+  if (commonSrc) {
+    return (
+      `Hint: '${a}' and '${b}' are both fed by '${commonSrc}' via separate ` +
+      `edges, so the placer can't order them and they collide. Fold them into ` +
+      `one fan-out: \`fan-out <name>: ${commonSrc} -> [ ${a}, ${b} ]\` ` +
+      `(add any other siblings to the same list). Replace the separate ` +
+      `\`${commonSrc} -> ${a}\` / \`${commonSrc} -> ${b}\` edges with that one line.`
+    );
+  }
+
+  // Fan-out leaves of different parents: a and b each have a single source
+  // and those sources differ (two subtrees overlapping).
   if (aSrc.size === 1 && bSrc.size === 1 && [...aSrc][0] !== [...bSrc][0]) {
     const pa = [...aSrc][0];
     const pb = [...bSrc][0];

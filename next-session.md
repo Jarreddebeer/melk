@@ -1,5 +1,41 @@
 # melk — next session handoff
 
+**v0.1.7 — README gallery + member styling (2026-06-21, branch `showcase-cleanup-and-backedge-faces`).**
+README now has a hero SVG and a 9-image gallery, all committed under
+`docs/` (gitignore exempts `examples/*.svg`, so the gallery uses `docs/`
+copies; `docs/**/*.svg` added to package.json `files` so they ship on
+npm). Five gallery examples are styled showcase copies under `docs/`
+(`ex-NN-*.melk` + the shared `docs/showcase.json` theme); the canonical
+`examples/*.melk` stay pristine. Two product features landed to enable
+the styling:
+- **Structural-edge attribute overlay** ([src/bind/bind.ts](src/bind/bind.ts)):
+  a plain edge restating a primitive's from→to pair (declared AFTER the
+  primitive) merges its `label`/`tags` onto the structural edge instead
+  of drawing a duplicate — the only way to style one member of a
+  fan-out / fan-in / pipeline. Routing props (via/avoid/exit/entry/pivot)
+  fall through to a distinct edge. Docs: SYNTAX §4.3 + §5.3. Tests:
+  `test/edge-overlay.test.ts`.
+- **Missing-icon placeholder tint** ([src/render/icons.ts](src/render/icons.ts),
+  [src/render/svg.ts](src/render/svg.ts)): `renderIconPlaceholder` takes an
+  optional `tint`; a tag's `icon-color` now tints the hatched placeholder
+  (e.g. flag a missing icon orange). Tests in `test/icons.test.ts`.
+
+**Back-edge wrap faces (2026-06-21, branch `showcase-cleanup-and-backedge-faces`).**
+Back-edges no longer exit/enter on the flow-axis side faces (W→E under LR,
+which attached the wrap to box corners with a sideways arrowhead). They now
+attach to the face *perpendicular* to flow — N/S under LR, E/W under TB —
+centred on whichever margin is nearer the two endpoints, and the perimeter
+router wraps over that margin. New `backEdgeWrapSide` in
+[src/layout/slots.ts](src/layout/slots.ts); the back-edge perimeter dispatch
+in [src/layout/channels.ts](src/layout/channels.ts) now keys off `flowAxis`,
+not the exit face. A lone back-edge on an empty face now centres (was ½-cell
+off). Docs synced: SYNTAX §4.2/§4.3, EXAMPLES, DESIGN-PHASE4 §2.5/§6.4/§11.10,
+both `prompts/`. `exit:`/`entry:` override the default face (e.g. force an LR
+back-edge under the bottom with `{ exit: S, entry: S }`); the phantom
+`E_EXIT_ON_BACK_EDGE` error was never shipped. Regression test added in
+`test/channels.test.ts`. Also: README now embeds a rendered hero SVG
+([docs/hero.svg](docs/hero.svg)).
+
 **Branch `review-fixes` (post code-review, 2026-06-11).** A large
 review-driven pass landed: docs corrected, diagnostics unified, a public
 `compileToSVG` API, silent-output guards, a `Claims` routing refactor,

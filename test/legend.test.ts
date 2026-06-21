@@ -349,4 +349,76 @@ describe("end-to-end render with legend", () => {
     expect(match![0]).toContain("<line");
     expect(match![0]).not.toContain("<rect");
   });
+
+  it("legend swatch with a gradient fill renders without throwing and references a gradient def", () => {
+    // Regression: a tag whose `fill` (or `border`) is a `linear ...`
+    // gradient used to crash the legend swatch renderer, which called
+    // resolveColour directly (hex/token only). The swatch must instead
+    // register the gradient into <defs> and reference it via url(#...).
+    const baseTheme = loadTheme("document-light");
+    const custom = validateTheme(
+      {
+        ...JSON.parse(JSON.stringify(baseTheme)),
+        tags: {
+          fancy: {
+            fill: "linear 135deg, #ccfbf1, #f0fdfa",
+            border: "linear 90deg, #0d9488, #06b6d4",
+            legend: "Gradient swatch",
+          },
+        },
+      },
+      "<test>",
+    );
+    const m = bind(
+      parse(tokenize(["legend: on", "a { tags: [fancy] }", "a -> b"].join("\n"))),
+    );
+    const p = place(m);
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    let out = "";
+    expect(() => {
+      out = renderSVG(m, p, routing, custom);
+    }).not.toThrow();
+    // The legend swatch rect must paint via a gradient reference, not a
+    // raw 'linear ...' string (which is invalid SVG and would have
+    // thrown at resolveColour).
+    const entry = out.match(/<g data-legend-entry="fancy">[\s\S]*?<\/g>/);
+    expect(entry).toBeTruthy();
+    expect(entry![0]).toContain("<rect");
+    expect(entry![0]).toMatch(/fill="url\(#tag-gradient-\d+\)"/);
+    expect(entry![0]).toMatch(/stroke="url\(#tag-gradient-\d+\)"/);
+    expect(entry![0]).not.toContain("linear ");
+    // The referenced gradient def must exist in the document.
+    expect(out).toContain("<linearGradient id=\"tag-gradient-0\"");
+  });
+
+  it("a gradient tag used on BOTH a node and the legend shares one gradient def", () => {
+    // The pre-walk registers node-tag gradients and legend-tag gradients
+    // through the same resolver, so an identical gradient string reuses a
+    // single <linearGradient> def (cached by raw fill string).
+    const baseTheme = loadTheme("document-light");
+    const custom = validateTheme(
+      {
+        ...JSON.parse(JSON.stringify(baseTheme)),
+        tags: {
+          shared: {
+            fill: "linear 180deg, #dbeafe, #eff6ff",
+            legend: "Shared gradient",
+          },
+        },
+      },
+      "<test>",
+    );
+    const m = bind(
+      parse(tokenize(["legend: on", "a { tags: [shared] }", "a -> b"].join("\n"))),
+    );
+    const p = place(m);
+    const slots = assignSlots(m, p);
+    const routing = routeChannels(m, p, slots);
+    const out = renderSVG(m, p, routing, custom);
+    // Exactly one linearGradient def even though the node body AND the
+    // legend swatch both paint with it.
+    const defs = out.match(/<linearGradient /g) ?? [];
+    expect(defs.length).toBe(1);
+  });
 });

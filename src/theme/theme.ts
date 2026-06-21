@@ -1088,9 +1088,15 @@ export function resolveTags(
   for (const name of tagNames) {
     const rule = theme.tags[name];
     if (rule === undefined) {
+      const defined = Object.keys(theme.tags);
       throw new ThemeError(
         `E_UNKNOWN_TAG: ${where} uses tag '${name}' which is not defined in theme '${theme.name}'. ` +
-          `Defined tags: ${Object.keys(theme.tags).join(", ") || "(none)"}.`,
+          `Defined tags: ${defined.join(", ") || "(none)"}. ` +
+          `Hint: tags are a FIXED vocabulary from the theme, not free-form labels. ` +
+          (defined.length
+            ? `Use one of [${defined.join(", ")}], or remove the tag entirely. ` +
+              `To convey '${name}' as descriptive text, use a label instead: \`{ label: "${name}" }\`.`
+            : `This theme defines no tags; remove the tag.`),
       );
     }
     Object.assign(out, rule);

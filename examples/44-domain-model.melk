@@ -1,0 +1,55 @@
+layout: tb
+crossings: 12
+theme: "./themes/uml-light.json"
+title: "Order domain model"
+subtitle: "Entities, value objects, and a payment-method hierarchy"
+caption: "Class compartments are multi-line labels; tags carry the stereotype vocabulary (interface / value object / PCI-sensitive)."
+legend: on
+
+# A UML-style domain model. melk draws boxes and orthogonal relations;
+# each class is a box whose multi-line label holds its compartments
+# (name / rule / members), and the UML stereotype («interface»,
+# «value») rides in the label's first line.
+#
+# The model has real depth:
+#   - an aggregate-root spine  Customer -> Order -> OrderLine -> Product
+#   - value objects hanging off entities (Address, Money)
+#   - a PaymentMethod interface realized by two concrete, PCI-sensitive
+#     implementations (CreditCard, PayPalAccount)
+#   - a Discount applied to the order
+#
+# Tags carry the vocabulary: `interface` (violet) for the abstract type,
+# `value` (teal) for value objects, `pci` (red) for the card data a PCI
+# audit cares about. Captions come from the custom uml-light theme.
+
+# --- aggregate root spine (top to bottom) ---------------------------
+customer  { shape: rect, label: "Customer\n― ― ― ― ―\n+id: UUID\n+name: string\n+email: string", size: 15x13 }
+order     { shape: rect, label: "Order\n― ― ― ― ―\n+id: UUID\n+placedAt: Date\n+status: enum\n+total(): Money", size: 15x15 }
+orderline { shape: rect, label: "OrderLine\n― ― ― ― ―\n+qty: int\n+unitPrice: Money\n+subtotal(): Money", size: 15x13 }
+product   { shape: rect, label: "Product\n― ― ― ― ―\n+sku: string\n+name: string\n+price: Money", size: 15x13 }
+
+# --- value objects + association classes ----------------------------
+address   { shape: rect, label: "«value»\nAddress\n― ― ― ― ―\n+line1: string\n+city: string\n+postcode: string", tags: [value], size: 15x13 }
+money     { shape: rect, label: "«value»\nMoney\n― ― ― ― ―\n+amount: decimal\n+currency: ccy", tags: [value], size: 13x11 }
+discount  { shape: rect, label: "Discount\n― ― ― ― ―\n+code: string\n+percent(): rate", size: 15x11 }
+
+# --- payment-method hierarchy ---------------------------------------
+paymethod { shape: rect, label: "«interface»\nPaymentMethod\n― ― ― ― ―\n+authorize()\n+capture()", tags: [interface], size: 17x13 }
+card      { shape: rect, label: "CreditCard\n― ― ― ― ―\n+pan: string\n+expiry: date\n+cvv: string", tags: [pci], size: 15x13 }
+paypal    { shape: rect, label: "PayPalAccount\n― ― ― ― ―\n+token: string\n+email: string", tags: [pci], size: 15x11 }
+
+# Aggregate root spine: Customer places Orders, composed of OrderLines,
+# which reference Products.
+pipeline aggregate: customer -> order -> orderline -> product
+
+# Value objects + association hang off the spine to the sides.
+branch ships:left:     customer  -> address    # Customer has a shipping Address
+branch priced:right:   product   -> money      # Product price is a Money value
+branch applies:right:  orderline -> discount   # an OrderLine carries a Discount
+
+# Order is paid via a PaymentMethod (association). The interface heads a
+# realization fan-out: its two concrete implementations sit directly
+# below it (side by side), so both realization edges leave PaymentMethod's
+# south face and bend symmetrically — no ragged stair.
+branch pays:left: order -> paymethod
+fan-out impls: paymethod -> [card, paypal]

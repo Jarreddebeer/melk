@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>melk in the browser</title>
+
+<!-- melk's dist/ calls process.stderr.write (for W_* warnings) and process.cwd()
+     on the render path. Browsers have no `process`, so provide a minimal global
+     BEFORE any module loads. stderr warnings are routed to console.warn. -->
+<script>
+  globalThis.process = globalThis.process || {
+    stderr: { write: (s) => console.warn(String(s).replace(/\n$/, "")) },
+    stdout: { write: (s) => console.log(String(s).replace(/\n$/, "")) },
+    cwd: () => "/",
+    env: {},
+    platform: "browser",
+    argv: [],
+    exit: () => {},
+  };
+</script>
+
+<!-- Import map: melk's published dist/ imports node:fs / node:path /
+     node:child_process at module top level. Map those specifiers onto the
+     browser node-shim so dist/ loads UNMODIFIED. The core compile path never
+     calls the fs/child_process shims. -->
+<script type="importmap">
+{
+  "imports": {
+    "node:fs": "./node-shim.js",
+    "node:path": "./node-shim.js",
+    "node:child_process": "./node-shim.js"
+  }
+}
+</script>
+
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 14px; border-bottom: 1px solid #8884; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  header strong { font-size: 15px; }
+  header select { font: inherit; padding: 3px 6px; }
+  #main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+  #left, #right { display: flex; flex-direction: column; min-width: 0; }
+  #left { border-right: 1px solid #8884; }
+  .pane-label { font-size: 12px; opacity: .65; padding: 6px 12px; border-bottom: 1px solid #8883; }
+  #src { flex: 1; font: 13px/1.45 ui-monospace, monospace; padding: 12px; border: 0; resize: none; outline: none; background: transparent; color: inherit; }
+  #out { flex: 1; overflow: auto; padding: 12px; display: flex; align-items: flex-start; justify-content: center; }
+  #out svg { max-width: 100%; height: auto; }
+  #status { font-size: 12px; padding: 6px 12px; border-top: 1px solid #8883; font-family: ui-monospace, monospace; }
+  #status.ok  { color: #1e8449; }
+  #status.err { color: #c0392b; }
+  .ex { font: inherit; padding: 3px 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <strong>melk in the browser</strong>
+    <span style="font-size:12px;opacity:.6">published dist/ · import-map + node-shim · no build step</span>
+    <span style="flex:1"></span>
+    <label style="font-size:12px">theme
+      <select id="theme"></select>
+    </label>
+    <label style="font-size:12px">example
+      <select id="example"></select>
+    </label>
+  </header>
+
+  <div id="main">
+    <div id="left">
+      <div class="pane-label">source (.melk) — edits render live</div>
+      <textarea id="src" spellcheck="false"></textarea>
+    </div>
+    <div id="right">
+      <div class="pane-label">rendered SVG</div>
+      <div id="out"></div>
+      <div id="status">loading melk…</div>
+    </div>
+  </div>
+
+<script type="module">
+import { tryCompileToSVG, validateSource, BUILTIN_THEME_NAMES } from "./melk-browser.js";
+
+const $ = (id) => document.getElementById(id);
+
+/* A few inline examples (no file imports / icons — pure browser path). */
+const EXAMPLES = {
+  "simple pipeline": `layout: lr
+title: "Payment platform"
+
+pipeline data_plane: client -> gateway -> auth -> ledger -> receipt
+
+branch audit-out:right: ledger -> audit_log
+audit_log { shape: cylinder, tags: [critical] }`,
+  "fan-out": `layout: lr
+title: "Ingest fan-out"
+
+fan-out dispatch: ingest -> [ validate, enrich, archive ]
+validate -> store
+enrich   -> store
+store { shape: cylinder }`,
+  "top-to-bottom": `layout: tb
+title: "Request flow"
+
+pipeline p: browser -> cdn -> origin -> db
+db { shape: cylinder, tags: [critical] }`,
+  "structured error": `theme: notreal
+pipeline p: client -> api -> db`,
+};
+
+function populate(sel, items, selected) {
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it; o.textContent = it;
+    if (it === selected) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+function render() {
+  const src = $("src").value;
+  const theme = $("theme").value;
+  const t0 = performance.now();
+  const res = tryCompileToSVG(src, { theme });           // melk's real agent-loop API
+  const ms = (performance.now() - t0).toFixed(1);
+
+  if (res.ok) {
+    $("out").innerHTML = res.svg;
+    const s = $("status");
+    s.className = "ok";
+    s.textContent = `OK · compiled in ${ms}ms · ${res.svg.length} bytes of SVG`;
+  } else {
+    const d = res.diagnostic;
+    const s = $("status");
+    s.className = "err";
+    // Show the STRUCTURED diagnostic exactly as an agent loop would consume it.
+    s.textContent = `[${d.stage}] ${d.code}: ${d.message}` + (d.hint ? `  —  Hint: ${d.hint}` : "");
+    // keep the last good SVG visible
+  }
+}
+
+/* boot */
+populate($("theme"), BUILTIN_THEME_NAMES, "document-light");
+populate($("example"), Object.keys(EXAMPLES), "simple pipeline");
+$("src").value = EXAMPLES["simple pipeline"];
+
+$("src").addEventListener("input", debounce(render, 120));
+$("theme").addEventListener("change", render);
+$("example").addEventListener("change", () => { $("src").value = EXAMPLES[$("example").value]; render(); });
+
+function debounce(fn, ms) {
+  let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+render();
+</script>
+</body>
+</html>

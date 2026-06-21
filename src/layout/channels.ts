@@ -257,7 +257,7 @@ export function routeChannels(
       const owner = cellOwner.get(cellKey(srcExitCell.row, srcExitCell.col));
       if (owner !== undefined && owner !== edge.from && owner !== edge.to) {
         throw new ChannelError(
-          `E_NO_CHANNEL: edge '${edge.from} -> ${edge.to}' exits ${edge.from}'s ${slot.sourceSide} face but cell (${srcExitCell.row}, ${srcExitCell.col}) is occupied by '${owner}'. Insert an empty row/col between the nodes (grow MEMBER_GAP, resize a neighbour, restructure).`,
+          `E_NO_CHANNEL: edge '${edge.from} -> ${edge.to}' exits ${edge.from}'s ${slot.sourceSide} face but cell (${srcExitCell.row}, ${srcExitCell.col}) is occupied by '${owner}'. Hint: '${owner}' sits where this edge needs to route. Move it out of the way with an \`offset:\` on a neighbour (e.g. \`${owner} { offset: "1x0" }\`), grow a neighbouring node's \`size:\` to push it aside, or restructure so the two endpoints aren't separated by '${owner}'.`,
         );
       }
     }
@@ -300,6 +300,7 @@ export function routeChannels(
       tgtH,
       siblingMidCols,
       fanMidPicks,
+      placement.flowAxis,
     );
 
     // Claim interior cells of long legs so subsequent edges shift to
@@ -1191,18 +1192,22 @@ function computeCellPath(
   tgtH: number,
   siblingMidCols: Map<string, number[]>,
   fanMidPicks: Map<string, { perp: number; pick: number }[]>,
+  flowAxis: "east" | "south",
 ): Cell[] {
   const { cellOwner, bendOwner, vLegClaim, hLegClaim } = claims;
   const srcAxis: "V" | "H" = srcSide === "E" || srcSide === "W" ? "V" : "H";
   const tgtAxis: "V" | "H" = tgtSide === "E" || tgtSide === "W" ? "V" : "H";
 
-  // Back-edge perimeter routing: when the back-edge's H-leg row (V→V) or
-  // V-leg col (H→H) would cut through a box on the same row/col as the
-  // source/target, lift the run to a perimeter row/col outside ALL box
-  // footprints in the corridor between src and tgt. Standard Z would
-  // walk srcExit.row / tgtExit.row, both of which sit INSIDE the box
-  // span of any neighbour on the same row as src/tgt.
-  if (isBackEdge && srcAxis === "V" && tgtAxis === "V") {
+  // Back-edge perimeter routing: lift the run to a perimeter row/col
+  // OUTSIDE all box footprints so the trace wraps around the diagram
+  // rather than threading interior gaps (feedback-back-edge-perimeter-
+  // routing). The wrap axis follows the FLOW, not the exit face: an LR
+  // diagram wraps over a perimeter ROW (top/bottom margin) and a TB
+  // diagram over a perimeter COLUMN (left/right margin). Back-edge exit
+  // faces are perpendicular to flow (N/S for LR, E/W for TB; see
+  // backEdgeWrapSide in slots.ts), so the C-shape's two stub legs run
+  // along the flow axis up to the wrap lane.
+  if (isBackEdge && flowAxis === "east") {
     const perimPath = tryPerimeterRouteVV(
       srcExit, tgtExit, srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
       claims,
@@ -1210,7 +1215,7 @@ function computeCellPath(
     );
     if (perimPath) return perimPath;
   }
-  if (isBackEdge && srcAxis === "H" && tgtAxis === "H") {
+  if (isBackEdge && flowAxis === "south") {
     const perimPath = tryPerimeterRouteHH(
       srcExit, tgtExit, srcAnchor, tgtAnchor, srcW, srcH, tgtW, tgtH,
       claims,

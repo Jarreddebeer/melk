@@ -520,11 +520,13 @@ target's outer edge, and approaches perpendicular to the target face
 query -> orders_rm { entry: S }
 ```
 
-`exit:` mirrors it for the source side. Both are rejected on
-back-edges (which already use perimeter routing) and on via-edges.
-The placer reserves a 2-cell perimeter pad whenever any edge uses
-either — without it, there's no row/col "outside" the diagram for
-the U to wrap through. See [41-cqrs-event-sourcing.melk](examples/41-cqrs-event-sourcing.melk).
+`exit:` mirrors it for the source side. On a back-edge they override
+the perpendicular wrap face the perimeter router picks by default
+(e.g. force a back-edge under the bottom with `{ exit: S, entry: S }`
+instead of over the top); they're rejected only on via-edges. The
+placer reserves a 2-cell perimeter pad whenever any edge uses either
+— without it, there's no row/col "outside" the diagram for the U to
+wrap through. See [41-cqrs-event-sourcing.melk](examples/41-cqrs-event-sourcing.melk).
 
 ### Composed modules
 

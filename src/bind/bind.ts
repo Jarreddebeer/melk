@@ -426,7 +426,11 @@ function bindNode(decl: NodeDecl, ctx: BindCtx): void {
       );
     }
     throw new BindError(
-      `duplicate node declaration: '${decl.name}'`,
+      `E_DUPLICATE_NODE: node '${decl.name}' is declared more than once. ` +
+        `Hint: a node has exactly ONE declaration block. Merge the attributes into a ` +
+        `single \`${decl.name} { ... }\` line and delete the others. A node is auto-created ` +
+        `the first time it's used in an edge/primitive, so you only declare it to set its ` +
+        `shape/tags/label — once.`,
       decl.span,
     );
   }
@@ -618,12 +622,6 @@ function bindEdge(
           prop.value.span,
         );
       }
-      if (isBack) {
-        throw new BindError(
-          `E_EXIT_ON_BACK_EDGE: ${prop.key}: is not supported on back-edges (DESIGN-PHASE4.md §11.10).`,
-          prop.span,
-        );
-      }
       if (prop.key === "exit") exitSide = v;
       else entrySide = v;
     } else if (prop.key === "tags") {
@@ -648,6 +646,44 @@ function bindEdge(
       decl.span,
     );
   }
+
+  // Attribute overlay onto a structural trace. A primitive (pipeline /
+  // bus / fan-out / branch) already created the edge for this from→to
+  // pair, but those member lists have nowhere to hang per-trace
+  // attributes. So a *plain* edge restating the same pair acts as an
+  // overlay: it doesn't draw a second trace, it merges its label/tags
+  // onto the structural edge. This is the only way to style one member
+  // of a fan-out / fan-in (e.g. `fan-out f: r -> [a, b]` then
+  // `r -> b { tags: [hot] }`). Only label/tags overlay; routing props
+  // (avoid/via/exit/entry/pivot) belong to a real free edge, so their
+  // presence means the author wants a distinct edge — fall through.
+  const overlayOnly =
+    source === "explicit" &&
+    !isBack &&
+    avoidItems === undefined &&
+    viaItems === undefined &&
+    exitSide === undefined &&
+    entrySide === undefined &&
+    pivot === undefined &&
+    fromRes.internal === undefined &&
+    toRes.internal === undefined;
+  if (overlayOnly) {
+    const structural = ctx.edges.find(
+      (e) =>
+        e.from === fromRes.id &&
+        e.to === toRes.id &&
+        e.source !== "explicit" &&
+        e.source !== "via-half",
+    );
+    if (structural !== undefined) {
+      if (label !== undefined) structural.label = label;
+      if (tags !== undefined && tags.length > 0) {
+        structural.tags = [...(structural.tags ?? []), ...tags];
+      }
+      return;
+    }
+  }
+
   const edge: ModelEdge = {
     from: fromRes.id,
     to: toRes.id,
@@ -1421,8 +1457,50 @@ function bindPath(decl: PathDecl, ctx: BindCtx): void {
 
 // --- helpers --------------------------------------------------------------
 
+/**
+ * Reserved words that cannot be node IDs because they introduce directives or
+ * primitives (SYNTAX.md §1.6), plus attribute keys an author commonly misuses
+ * as node names. Used to reject a keyword that reaches a node position via an
+ * edge/primitive endpoint — e.g. `label -> receipt`, where the parser treats
+ * `label` as a plain ident and would otherwise silently auto-declare it as a
+ * node, drawing a wrong diagram with NO error. This is a common LLM-authoring
+ * failure mode; catching it here turns a silent miss into an actionable
+ * diagnostic that a self-correct loop (or a human) can fix.
+ */
+// Directive/value keywords: when one of these reaches a node position, the
+// author almost always meant the DIRECTIVE (e.g. wrote `layout -> tb` instead of
+// `layout: tb`). The hint must lead with that — NOT a rename, which just makes a
+// second nonsense node (an LLM took the rename advice and produced
+// `layout_node -> tb`, still wrong).
+const RESERVED_DIRECTIVE_KEYWORDS = new Set([
+  "layout", "theme", "title", "subtitle", "caption", "crossings", "legend",
+  "legend-position", "icons", "import",
+]);
+// Primitive/attribute keywords: a rename is the right fix here.
+const RESERVED_OTHER_KEYWORDS = new Set([
+  "bus", "branch", "fan-out", "intersect", "nodeset", "path", "pipeline",
+  "label", "shape", "tags", "size", "icon", "border", "orient", "render",
+]);
+
 function ensureNode(id: string, ctx: BindCtx): void {
   if (ctx.nodes.has(id)) return;
+  if (RESERVED_DIRECTIVE_KEYWORDS.has(id)) {
+    throw new BindError(
+      `E_RESERVED_NODE_ID: '${id}' is a directive keyword and cannot be a node name. ` +
+        `Hint: you wrote something like \`${id} -> x\` (an edge), but '${id}' sets a ` +
+        `document setting. Use the directive form on its OWN line instead — e.g. ` +
+        `\`${id}: <value>\` (like \`layout: tb\` or \`theme: document-light\`). Do NOT make ` +
+        `it a node; delete the edge and add the directive at the top.`,
+    );
+  }
+  if (RESERVED_OTHER_KEYWORDS.has(id)) {
+    throw new BindError(
+      `E_RESERVED_NODE_ID: '${id}' is a reserved keyword and cannot be a node name. ` +
+        `Hint: '${id}' introduces a primitive or is an attribute key, so an edge endpoint ` +
+        `like \`${id} -> x\` is a mistake. Rename the node (e.g. '${id}_node'), or — if you ` +
+        `meant the construct — write it in its proper form.`,
+    );
+  }
   ctx.nodes.set(id, {
     id,
     label: id,

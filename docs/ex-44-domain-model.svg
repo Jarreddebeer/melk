@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 723 754" width="723" height="754" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569"/>
+  </marker>
+    <linearGradient id="tag-gradient-0" gradientUnits="objectBoundingBox" x1="0.5" y1="0" x2="0.5" y2="1">
+    <stop offset="0%" stop-color="#ecfeff"/>
+    <stop offset="100%" stop-color="#f0fdfa"/>
+  </linearGradient>
+    <linearGradient id="tag-gradient-1" gradientUnits="objectBoundingBox" x1="0.5" y1="0" x2="0.5" y2="1">
+    <stop offset="0%" stop-color="#ede9fe"/>
+    <stop offset="100%" stop-color="#f5f3ff"/>
+  </linearGradient>
+    <linearGradient id="tag-gradient-2" gradientUnits="objectBoundingBox" x1="0.15" y1="0.15" x2="0.85" y2="0.85">
+    <stop offset="0%" stop-color="#fee2e2"/>
+    <stop offset="100%" stop-color="#fff5f5"/>
+  </linearGradient>
+</defs>
+<rect width="723" height="754" fill="#ffffff"/>
+<g transform="translate(32 105)">
+<g data-edge="customer->order">
+  <path d="M 220 104 L 220 144" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="order->orderline">
+  <path d="M 220 264 L 220 304" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="orderline->product">
+  <path d="M 220 408 L 220 448" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="customer->address">
+  <path d="M 280 52 L 320 52" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="product->money">
+  <path d="M 160 500 L 104 500" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="orderline->discount">
+  <path d="M 160 356 L 120 356" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="order->paymethod">
+  <path d="M 280 204 L 320 204" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="paymethod->card">
+  <path d="M 464 200 L 480 200 Q 484 200 484 196 L 484 144 Q 484 140 488 140 L 504 140" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="paymethod->paypal">
+  <path d="M 464 208 L 480 208 Q 484 208 484 212 L 484 272 Q 484 276 488 276 L 504 276" stroke="#475569" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-id="customer">
+  <rect x="160" y="0" width="120" height="104" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="220" y="52" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="220" dy="-2.3em">Customer</tspan><tspan x="220" dy="1.15em">― ― ― ― ―</tspan><tspan x="220" dy="1.15em">+id: UUID</tspan><tspan x="220" dy="1.15em">+name: string</tspan><tspan x="220" dy="1.15em">+email: string</tspan></text>
+</g>
+<g data-id="order">
+  <rect x="160" y="144" width="120" height="120" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="220" y="204" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="220" dy="-2.875em">Order</tspan><tspan x="220" dy="1.15em">― ― ― ― ―</tspan><tspan x="220" dy="1.15em">+id: UUID</tspan><tspan x="220" dy="1.15em">+placedAt: Date</tspan><tspan x="220" dy="1.15em">+status: enum</tspan><tspan x="220" dy="1.15em">+total(): Money</tspan></text>
+</g>
+<g data-id="orderline">
+  <rect x="160" y="304" width="120" height="104" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="220" y="356" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="220" dy="-2.3em">OrderLine</tspan><tspan x="220" dy="1.15em">― ― ― ― ―</tspan><tspan x="220" dy="1.15em">+qty: int</tspan><tspan x="220" dy="1.15em">+unitPrice: Money</tspan><tspan x="220" dy="1.15em">+subtotal(): Money</tspan></text>
+</g>
+<g data-id="product">
+  <rect x="160" y="448" width="120" height="104" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="220" y="500" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="220" dy="-2.3em">Product</tspan><tspan x="220" dy="1.15em">― ― ― ― ―</tspan><tspan x="220" dy="1.15em">+sku: string</tspan><tspan x="220" dy="1.15em">+name: string</tspan><tspan x="220" dy="1.15em">+price: Money</tspan></text>
+</g>
+<g data-id="address">
+  <rect x="320" y="0" width="120" height="104" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="380" y="52" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="380" dy="-2.875em">«value»</tspan><tspan x="380" dy="1.15em">Address</tspan><tspan x="380" dy="1.15em">― ― ― ― ―</tspan><tspan x="380" dy="1.15em">+line1: string</tspan><tspan x="380" dy="1.15em">+city: string</tspan><tspan x="380" dy="1.15em">+postcode: string</tspan></text>
+</g>
+<g data-id="money">
+  <rect x="0" y="456" width="104" height="88" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="52" y="500" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="52" dy="-2.3em">«value»</tspan><tspan x="52" dy="1.15em">Money</tspan><tspan x="52" dy="1.15em">― ― ― ― ―</tspan><tspan x="52" dy="1.15em">+amount: decimal</tspan><tspan x="52" dy="1.15em">+currency: ccy</tspan></text>
+</g>
+<g data-id="discount">
+  <rect x="0" y="312" width="120" height="88" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="60" y="356" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="60" dy="-1.7249999999999999em">Discount</tspan><tspan x="60" dy="1.15em">― ― ― ― ―</tspan><tspan x="60" dy="1.15em">+code: string</tspan><tspan x="60" dy="1.15em">+percent(): rate</tspan></text>
+</g>
+<g data-id="paymethod">
+  <rect x="320" y="152" width="144" height="104" rx="2" ry="2" fill="url(#tag-gradient-1)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="392" y="204" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="392" dy="-2.3em">«interface»</tspan><tspan x="392" dy="1.15em">PaymentMethod</tspan><tspan x="392" dy="1.15em">― ― ― ― ―</tspan><tspan x="392" dy="1.15em">+authorize()</tspan><tspan x="392" dy="1.15em">+capture()</tspan></text>
+</g>
+<g data-id="card">
+  <rect x="504" y="88" width="120" height="104" rx="2" ry="2" fill="url(#tag-gradient-2)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="564" y="140" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="564" dy="-2.3em">CreditCard</tspan><tspan x="564" dy="1.15em">― ― ― ― ―</tspan><tspan x="564" dy="1.15em">+pan: string</tspan><tspan x="564" dy="1.15em">+expiry: date</tspan><tspan x="564" dy="1.15em">+cvv: string</tspan></text>
+</g>
+<g data-id="paypal">
+  <rect x="504" y="232" width="120" height="88" rx="2" ry="2" fill="url(#tag-gradient-2)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="564" y="276" text-anchor="middle" dominant-baseline="central" fill="#1e293b"><tspan x="564" dy="-1.7249999999999999em">PayPalAccount</tspan><tspan x="564" dy="1.15em">― ― ― ― ―</tspan><tspan x="564" dy="1.15em">+token: string</tspan><tspan x="564" dy="1.15em">+email: string</tspan></text>
+</g>
+</g>
+<g data-legend="1" transform="translate(0 689)">
+<line x1="0" y1="0" x2="688" y2="0" stroke="#cbd5e1" stroke-width="0.75"/>
+<g data-legend-entry="value">
+  <rect x="8" y="11" width="16" height="10" rx="1" ry="1" fill="url(#tag-gradient-0)" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="32" y="19.15" fill="#64748b" font-size="9" text-anchor="start" dominant-baseline="alphabetic" data-tag="value">Value object</text>
+</g>
+<g data-legend-entry="interface">
+  <rect x="121" y="11" width="16" height="10" rx="1" ry="1" fill="url(#tag-gradient-1)" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="145" y="19.15" fill="#64748b" font-size="9" text-anchor="start" dominant-baseline="alphabetic" data-tag="interface">«interface» / abstract</text>
+</g>
+<g data-legend-entry="pci">
+  <rect x="288" y="11" width="16" height="10" rx="1" ry="1" fill="url(#tag-gradient-2)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="312" y="19.15" fill="#64748b" font-size="9" text-anchor="start" dominant-baseline="alphabetic" data-tag="pci">PCI-sensitive</text>
+</g>
+</g>
+<g data-title-strip="1" transform="translate(0 0)">
+<text x="32" y="33" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#1e293b" data-row="title" text-anchor="start" dominant-baseline="alphabetic">Order domain model</text>
+<text x="32" y="59.05" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13" font-weight="500" fill="#64748b" data-row="subtitle" text-anchor="start" dominant-baseline="alphabetic">Entities, value objects, and a payment-method hierarchy</text>
+</g>
+<g data-title-strip="1" transform="translate(0 721)">
+<text x="32" y="15.65" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9" font-weight="500" fill="#64748b" data-row="caption" text-anchor="start" dominant-baseline="alphabetic">Class compartments are multi-line labels; tags carry the stereotype vocabulary (interface / value object / PCI-sensitive).</text>
+</g>
+</svg>

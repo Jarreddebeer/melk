@@ -581,6 +581,12 @@ describe("resolveTags", () => {
       /E_UNKNOWN_TAG.*nope.*document-light/,
     );
   });
+
+  it("E_UNKNOWN_TAG hint steers to the defined vocabulary or a label", () => {
+    expect(() => resolveTags(theme, ["nope"], "node x")).toThrow(
+      /Hint: tags are a FIXED vocabulary.*use a label instead/s,
+    );
+  });
 });
 
 describe("`theme:` directive + bind", () => {

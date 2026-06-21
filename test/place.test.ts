@@ -254,6 +254,21 @@ describe("placer — collisions", () => {
     // c by stepping back from b: c at (0,0) — colliding with a.
     expect(() => placement("a -> b\nc -> b")).toThrow(/E_AMBIGUOUS_PLACEMENT/);
   });
+
+  it("diverge collision (one source, two plain edges) hints fan-out", () => {
+    // `x -> a` puts a at (0,1); `x -> b` can't order b against a and they
+    // collide. The shape-aware hint should name the common source and steer
+    // to fan-out — the fix an LLM needs, not the generic side-channel hint.
+    let msg = "";
+    try {
+      placement("x -> a\nx -> b");
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg).toMatch(/E_AMBIGUOUS_PLACEMENT/);
+    expect(msg).toMatch(/both fed by 'x'/);
+    expect(msg).toMatch(/fan-out <name>: x -> \[ a, b \]/);
+  });
 });
 
 describe("placer — row/col cell units", () => {

@@ -1,0 +1,68 @@
+layout: lr
+crossings: 14
+theme: schematic-dark
+title: "Production deployment — multi-AZ"
+subtitle: "Active/active web tier · async workers · primary-replica Postgres · streaming replication"
+caption: "schematic-dark renders the board as an ops console; the critical-path tag rings the load balancer and primary datastore."
+legend: on
+
+# A production HA topology as an SRE would sketch it for a runbook.
+# Traffic enters through the CDN + WAF, hits a regional load balancer,
+# and fans across a horizontally-scaled web tier. Writes go to the
+# primary Postgres; the standby replica streams from it (replication
+# runs primary -> replica). Long work is queued to a worker pool.
+# Metrics stream from the primary to the observability stack.
+#
+# schematic-dark gives the board its "ops console" look: blue forward
+# traces, GitHub-dark surfaces, muted grid.
+
+internet { shape: roundrect, label: "Internet", size: 9x5 }
+cdn      { shape: rect,     label: "CDN +\nWAF", size: 9x7 }
+lb       { shape: rect,     label: "ALB\n(regional)", size: 11x7, tags: [critical] }
+
+web1     { shape: rect,     label: "web-1", size: 7x5 }
+web2     { shape: rect,     label: "web-2", size: 7x5 }
+web3     { shape: rect,     label: "web-3", size: 7x5 }
+
+queue    { shape: rect,     label: "SQS\n(jobs)", size: 9x7 }
+worker1  { shape: rect,     label: "worker-1", size: 9x5 }
+worker2  { shape: rect,     label: "worker-2", size: 9x5 }
+
+pg_pri   { shape: cylinder, label: "Postgres\nprimary", size: 11x9, tags: [critical] }
+pg_rep   { shape: cylinder, label: "Postgres\nreplica", size: 11x9 }
+redis    { shape: cylinder, label: "Redis\ncluster", size: 9x7 }
+
+obs      { shape: rect,     label: "Observability\n(Prometheus\n+ Grafana)", size: 15x11, tags: [future] }
+
+# --- ingress spine --------------------------------------------------
+pipeline ingress: internet -> cdn -> lb
+
+# Load balancer fans across the stateless web tier.
+fan-out web_tier: lb -> [web1, web2, web3]
+
+# The web tier funnels writes onto the primary DB (bus anchors the
+# primary at the median web row) and enqueues async jobs. The queue
+# branches off the *bottom* web node so it drops into open space below
+# the tier (branching off a middle node would collide with a sibling).
+bus writes: [web1, web2, web3] -> pg_pri
+branch enqueue:right: web3 -> queue
+
+# Workers drain the queue (async dispatch fan-out).
+fan-out workers: queue -> [worker1, worker2]
+
+# Read replica streams from the primary — streaming replication runs
+# primary -> replica. An up-branch places the replica directly above the
+# primary (the conventional "standby on top" stacking) and points the
+# arrow the right way.
+branch replica:left: pg_pri -> pg_rep
+
+# Redis sits above the web tier; web1 (the top node) warms it, branching
+# up into open space. The worker tier persists canonical results back to
+# the primary — a plain edge, since the bus above already anchored it.
+branch cache:left: web1 -> redis
+worker1 -> pg_pri
+
+# Metrics ship to the observability stack. The primary DB anchors obs
+# one column further right (it sits at the right edge, so the metrics
+# column is clear).
+pipeline metrics: pg_pri -> obs

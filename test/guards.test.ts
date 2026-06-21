@@ -26,6 +26,27 @@ describe("E_SELF_EDGE", () => {
   });
 });
 
+describe("E_RESERVED_NODE_ID", () => {
+  // A reserved keyword reaching a node position via an edge endpoint used to be
+  // silently auto-declared as a node (drawing a wrong diagram). A common LLM
+  // failure: writing `label -> x` or `theme -> dark` instead of the directive.
+  it("rejects a reserved word as an edge endpoint", () => {
+    expect(code(`pipeline m: a -> b\nlabel -> receipt`)).toBe("E_RESERVED_NODE_ID");
+  });
+  it("rejects a directive keyword used as an edge (theme -> dark)", () => {
+    expect(code(`theme -> dark`)).toBe("E_RESERVED_NODE_ID");
+  });
+  it("rejects a reserved word as a primitive member", () => {
+    expect(code(`pipeline m: client -> label -> db`)).toBe("E_RESERVED_NODE_ID");
+  });
+  it("allows a reserved word as a substring of a node name", () => {
+    expect(code(`pipeline m: label_service -> db`)).toBeNull();
+  });
+  it("does not reject ordinary node names", () => {
+    expect(code(`pipeline m: client -> gateway -> db`)).toBeNull();
+  });
+});
+
 describe("W_SUSPECTED_TYPO", () => {
   let warn: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>melk authoring — small model + grammar + self-correct</title>
+
+<!-- process polyfill for melk's dist/ (W_* warnings, cwd) -->
+<script>
+  globalThis.process = globalThis.process || {
+    stderr: { write: (s) => console.warn(String(s).replace(/\n$/, "")) },
+    stdout: { write: (s) => console.log(String(s).replace(/\n$/, "")) },
+    cwd: () => "/", env: {}, platform: "browser", argv: [], exit: () => {},
+  };
+</script>
+
+<!-- map melk's node:* imports onto the shim (one dir up, in ../) -->
+<script type="importmap">
+{
+  "imports": {
+    "node:fs": "../node-shim.js",
+    "node:path": "../node-shim.js",
+    "node:child_process": "../node-shim.js",
+    "@mlc-ai/web-llm": "https://esm.run/@mlc-ai/web-llm"
+  }
+}
+</script>
+
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 14px; border-bottom: 1px solid #8884; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  header strong { font-size: 15px; }
+  header select, header button, header input { font: inherit; padding: 4px 8px; }
+  #main { flex: 1; display: grid; grid-template-columns: 420px 1fr 1fr; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid #8884; }
+  .col:last-child { border-right: 0; }
+  .pane-label { font-size: 12px; opacity: .65; padding: 6px 12px; border-bottom: 1px solid #8883; }
+  #presets { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+  #presets button { font: 11px/1 inherit; padding: 5px 9px; border: 1px solid #8884; border-radius: 999px; background: #8881; color: inherit; cursor: pointer; }
+  #presets button:hover { background: #8883; }
+  #prompt { font: inherit; padding: 10px 12px; border: 0; outline: none; resize: none; background: transparent; color: inherit; height: 90px; border-bottom: 1px solid #8883; }
+  #go { margin: 8px 12px; }
+  #attempts { flex: 1; overflow: auto; padding: 8px 12px; }
+  .att { margin: 6px 0; padding: 8px; border-radius: 6px; background: #8881; font-size: 12px; }
+  .att.ok  { background: #2ecc7122; }
+  .att.bad { background: #e74c3c1a; }
+  .att .melk { font-family: ui-monospace, monospace; white-space: pre-wrap; margin: 4px 0; font-size: 11px; }
+  .att .diag { color: #c0392b; font-family: ui-monospace, monospace; font-size: 11px; }
+  .att .hint { opacity: .8; }
+  #melkout { flex: 1; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; padding: 12px; overflow: auto; }
+  #svgout { flex: 1; overflow: auto; padding: 12px; display: flex; align-items: flex-start; justify-content: center; }
+  #svgout svg { max-width: 100%; height: auto; }
+  #status { font-size: 12px; font-family: ui-monospace, monospace; padding: 6px 12px; border-top: 1px solid #8883; }
+  .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .7s linear infinite; vertical-align: -1px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <header>
+    <strong>melk authoring</strong>
+    <span style="font-size:12px;opacity:.6">small model · grammar-constrained · planner→render or raw-melk self-correct</span>
+    <span style="flex:1"></span>
+    <label style="font-size:12px;opacity:.85" title="Raw: model writes melk directly (self-corrects). Planner: model emits a {nodes,edges} plan and code generates valid melk.">mode
+      <select id="mode">
+        <option value="planner">planner (model → plan → code → melk)</option>
+        <option value="raw">raw melk (model writes melk)</option>
+      </select>
+    </label>
+    <select id="model"></select>
+    <button id="load">Load model</button>
+    <span id="modelstatus" style="font-size:12px;opacity:.7">pick a model</span>
+  </header>
+
+  <div id="main">
+    <div class="col">
+      <div class="pane-label">describe an architecture (natural language)</div>
+      <div id="presets"></div>
+      <textarea id="prompt" placeholder="e.g. A web request flow: browser hits a CDN, then an API gateway, then an auth service and a database. The database is critical.">A payment pipeline: client → gateway → auth → ledger → receipt. The ledger writes to an audit log (a critical datastore) off to the side.</textarea>
+      <button id="go" disabled>Author diagram</button>
+      <div class="pane-label">attempts (generate → validate → self-correct)</div>
+      <div id="attempts"></div>
+    </div>
+    <div class="col">
+      <div class="pane-label">final .melk source</div>
+      <div id="melkout"></div>
+    </div>
+    <div class="col">
+      <div class="pane-label">rendered SVG</div>
+      <div id="svgout"></div>
+    </div>
+  </div>
+  <div id="status">idle</div>
+
+<script type="module">
+import * as webllm from "@mlc-ai/web-llm";
+import { validateSource, tryCompileToSVG, resetLabelOverflowWarnings } from "../melk-browser.js";
+import { authorMelk, authorMelkViaPlanner } from "./authoring-harness.js";
+
+const $ = (id) => document.getElementById(id);
+
+/* Render `src` and return the W_* warning lines melk emitted to stderr. melk's
+ * label-overflow warnings (the only feedback for a too-small box) go ONLY to
+ * process.stderr.write — so we swap the polyfill's writer to capture them, then
+ * restore it. The harness uses these to auto-size overflowing boxes. */
+function collectWarnings(src) {
+  const lines = [];
+  const realWrite = globalThis.process.stderr.write;
+  globalThis.process.stderr.write = (s) => { lines.push(String(s).replace(/\n$/, "")); return true; };
+  try {
+    resetLabelOverflowWarnings();       // defeat per-process dedup across renders
+    tryCompileToSVG(src, { theme: "document-light" });
+  } catch { /* a render error isn't our concern here; validateSource owns that */ }
+  finally { globalThis.process.stderr.write = realWrite; }
+  return lines;
+}
+
+/* Compile `src` to a bound Model (nodes + edges) for the connectivity check, or
+ * null if it doesn't compile (validateSource owns that failure). melk expands
+ * pipeline/fan-out/bus into plain edges, so the Model's edge graph is exactly
+ * what we flood-fill to detect disconnected fragments. */
+function compileModel(src) {
+  try {
+    const r = tryCompileToSVG(src, { theme: "document-light" });
+    return r.ok ? r.model : null;
+  } catch { return null; }
+}
+
+/* models that support grammar-constrained decoding well + are small enough.
+   Surface a few; the user picks. (Hermes/Qwen handle grammars; small Llama too.) */
+function populateModels() {
+  const all = webllm.prebuiltAppConfig.model_list.map((m) => m.model_id);
+  const prefer = ["Qwen2.5-3B", "Qwen2.5-1.5B", "Llama-3.2-3B", "Llama-3.2-1B", "Hermes-2-Pro", "Qwen2-1.5B"];
+  const score = (id) => { const i = prefer.findIndex((p) => id.includes(p)); return i === -1 ? 99 : i; };
+  const sorted = [...all].sort((a, b) => score(a) - score(b) || a.localeCompare(b));
+  for (const id of sorted) {
+    const o = document.createElement("option"); o.value = id; o.textContent = id; $("model").appendChild(o);
+  }
+}
+
+/* Preset prompts — each deliberately stresses a DIFFERENT grammar primitive, so
+   re-running across them exercises the salvage / plausibility / auto-size nets on
+   more than the one pipeline+branch shape. */
+const PRESETS = [
+  ["pipeline + branch", "A payment pipeline: client → gateway → auth → ledger → receipt. The ledger writes to an audit log (a critical datastore) off to the side."],
+  ["fan-out", "An API gateway receives a request and fans it out to three downstream services in parallel: a users service, an orders service, and an inventory service."],
+  ["bus / many-to-one", "Three producers — a web app, a mobile app, and a batch job — all publish events onto a shared message queue, which a single consumer service reads from."],
+  ["labeled edges", "A user submits a form to a frontend. The frontend sends the data to an API over HTTPS. The API stores it in a database and emits an 'order.created' event to a queue."],
+  ["mixed + shapes", "A scheduler triggers a worker. The worker reads from a cache (fast store) and a database (system of record, critical), then writes results to an object store off to the side."],
+];
+function populatePresets() {
+  for (const [label, text] of PRESETS) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => { $("prompt").value = text; $("prompt").focus(); };
+    $("presets").appendChild(b);
+  }
+}
+
+const appConfig = { ...webllm.prebuiltAppConfig, cacheBackend: "indexeddb" };
+let engine = null;
+
+async function loadModel() {
+  const id = $("model").value;
+  $("load").disabled = true;
+  $("modelstatus").innerHTML = `<span class="spin"></span> loading…`;
+  try {
+    engine = await webllm.CreateMLCEngine(id, {
+      appConfig,
+      initProgressCallback: (p) => { $("modelstatus").textContent = p.text; },
+    });
+    $("modelstatus").textContent = `ready: ${id}`;
+    $("go").disabled = false;
+  } catch (e) {
+    $("modelstatus").textContent = `load failed: ${e?.message || e}`;
+    $("load").disabled = false;
+  }
+}
+
+function attemptEl({ attempt, melk, diag, ok }) {
+  const div = document.createElement("div");
+  div.className = "att " + (ok ? "ok" : "bad");
+  div.innerHTML = `<b>attempt ${attempt}</b> — ${ok ? "✓ valid" : "✗ invalid"}`
+    + `<div class="melk">${escapeHtml(melk)}</div>`
+    + (diag ? `<div class="diag">[${diag.stage}] ${diag.code}: ${escapeHtml(diag.message || "")}</div>`
+            + (diag.hint ? `<div class="diag hint">Hint: ${escapeHtml(diag.hint)}</div>` : "") : "");
+  return div;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+async function go() {
+  if (!engine) return;
+  $("go").disabled = true;
+  $("attempts").innerHTML = "";
+  $("melkout").textContent = "";
+  $("svgout").innerHTML = "";
+  const description = $("prompt").value.trim();
+
+  let grammarNote = "";
+  const onEvent = (ev) => {
+    if (ev.phase === "generating") $("status").innerHTML = `<span class="spin"></span> attempt ${ev.attempt}: generating…`;
+    if (ev.phase === "grammar-fallback") {
+      grammarNote = " ⚠ grammar NOT applied (model rejected it; unconstrained)";
+      const d = document.createElement("div");
+      d.className = "att bad";
+      d.innerHTML = `<b>⚠ grammar fallback</b><div class="diag">${escapeHtml(ev.error)}</div>`
+        + `<div class="hint">This model didn't accept the GBNF grammar — output is unconstrained, so runaway text is possible. Try a model with grammar support (Qwen2.5, Hermes-2-Pro).</div>`;
+      $("attempts").appendChild(d);
+    }
+    if (ev.phase === "generated" && ev.grammarApplied === false) grammarNote = grammarNote || " (unconstrained)";
+    if (ev.phase === "invalid")    {
+      const el = attemptEl({ attempt: ev.attempt, melk: ev.melk, diag: ev.diag, ok: false });
+      if (ev.repeat) el.innerHTML = `<b>↻ repeat — escalating</b> (same output as last attempt; raising temperature + forcing a simpler structure)` + el.innerHTML.replace(/^<b>attempt \d+<\/b>[^<]*/, "");
+      $("attempts").appendChild(el);
+      $("status").textContent = `attempt ${ev.attempt}: ${ev.repeat ? "stuck → escalating" : "invalid → self-correcting"}${grammarNote}`;
+    }
+    if (ev.phase === "salvaged") {
+      const trimmed = ev.original.slice(ev.melk.length).trim();
+      const d = document.createElement("div");
+      d.className = "att";
+      d.innerHTML = `<b>✂ salvaged</b> (model appended a runaway tail; recovered the clean diagram above it)`
+        + `<div class="hint">Trimmed: <code>${escapeHtml(trimmed.slice(0, 60))}${trimmed.length > 60 ? "…" : ""}</code></div>`;
+      $("attempts").appendChild(d);
+    }
+    if (ev.phase === "autosized") {
+      const d = document.createElement("div");
+      d.className = "att";
+      d.innerHTML = `<b>⤢ auto-sized</b> (grew boxes whose labels overflowed — a mechanical fix melk reports but the model shouldn't have to compute)`;
+      $("attempts").appendChild(d);
+    }
+    if (ev.phase === "planned") {
+      // Planner mode: show the model's structured IR and the melk code DERIVED
+      // from it. The model never wrote melk — code did, valid by construction.
+      const d = document.createElement("div");
+      d.className = "att " + (ev.ok ? "ok" : "bad");
+      const nodeCount = ev.ir?.nodes?.length ?? 0, edgeCount = ev.ir?.edges?.length ?? 0;
+      d.innerHTML = `<b>⚙ plan → melk</b> (model emitted a ${nodeCount}-node / ${edgeCount}-edge plan; code generated the melk)`
+        + (ev.ir ? `<div class="melk">${escapeHtml(JSON.stringify(ev.ir, null, 1))}</div>` : "")
+        + (ev.melk ? `<div class="hint">→ generated:</div><div class="melk">${escapeHtml(ev.melk)}</div>` : "");
+      $("attempts").appendChild(d);
+    }
+    if (ev.phase === "valid")      { $("attempts").appendChild(attemptEl({ attempt: ev.attempt, melk: ev.melk, ok: true })); }
+    $("attempts").scrollTop = $("attempts").scrollHeight;
+  };
+
+  const t0 = performance.now();
+  const mode = $("mode").value;
+  const res = mode === "planner"
+    ? await authorMelkViaPlanner({ engine, validateSource, collectWarnings, onEvent }, description, { maxAttempts: 3 })
+    : await authorMelk({ engine, validateSource, collectWarnings, compileModel, onEvent }, description, { maxAttempts: 4 });
+  const ms = (performance.now() - t0).toFixed(0);
+
+  $("melkout").textContent = res.melk;
+  if (res.ok) {
+    const r = tryCompileToSVG(res.melk, { theme: "document-light" });
+    if (r.ok) $("svgout").innerHTML = r.svg;
+    $("status").textContent = `✓ done in ${ms}ms · ${res.attempts.length} attempt(s) · valid melk rendered`;
+  } else {
+    $("status").textContent = `✗ ${res.attempts.length} attempts, still invalid (showing last). ${ms}ms`;
+  }
+  $("go").disabled = false;
+}
+
+$("load").addEventListener("click", loadModel);
+$("go").addEventListener("click", go);
+if (!navigator.gpu) $("modelstatus").textContent = "WebGPU not available — use Chrome/Edge 113+";
+populateModels();
+populatePresets();
+</script>
+</body>
+</html>

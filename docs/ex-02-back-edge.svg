@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 296" width="472" height="296" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+    <linearGradient id="tag-gradient-0" gradientUnits="objectBoundingBox" x1="0.15" y1="0.15" x2="0.85" y2="0.85">
+    <stop offset="0%" stop-color="#f8fafc"/>
+    <stop offset="100%" stop-color="#cbd5e1"/>
+  </linearGradient>
+</defs>
+<rect width="472" height="296" fill="#fafafa"/>
+<g transform="translate(32 32)">
+<g data-edge="src->fanout">
+  <path d="M 56 116 L 96 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="fanout->a">
+  <path d="M 152 108 L 168 108 Q 172 108 172 104 L 172 40 Q 172 36 176 36 L 192 36" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="fanout->b">
+  <path d="M 152 116 L 192 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="fanout->c">
+  <path d="M 152 124 L 168 124 Q 172 124 172 128 L 172 192 Q 172 196 176 196 L 192 196" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="a->join">
+  <path d="M 232 36 L 248 36 Q 252 36 252 40 L 252 104 Q 252 108 256 108 L 272 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="b->join">
+  <path d="M 232 116 L 272 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="c->join">
+  <path d="M 232 196 L 248 196 Q 252 196 252 192 L 252 128 Q 252 124 256 124 L 272 124" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="join->sink">
+  <path d="M 312 116 L 352 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="sink->fanout">
+  <path d="M 372 96 L 372 8 Q 372 4 368 4 L 128 4 Q 124 4 124 8 L 124 96" stroke="#cbd5e1" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+</g>
+<g data-id="fanout">
+  <rect x="96" y="96" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="124" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">fanout</text>
+</g>
+<g data-id="join">
+  <rect x="272" y="96" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="292" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">join</text>
+</g>
+<g data-id="a">
+  <rect x="192" y="16" width="40" height="40" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="36" text-anchor="middle" dominant-baseline="central" fill="#334155">a</text>
+</g>
+<g data-id="b">
+  <rect x="192" y="96" width="40" height="40" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">b</text>
+</g>
+<g data-id="c">
+  <rect x="192" y="176" width="40" height="40" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#334155" stroke-width="1"/>
+  <text x="212" y="196" text-anchor="middle" dominant-baseline="central" fill="#334155">c</text>
+</g>
+<g data-id="src">
+  <rect x="16" y="96" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="36" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">src</text>
+</g>
+<g data-id="sink">
+  <rect x="352" y="96" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="372" y="116" text-anchor="middle" dominant-baseline="central" fill="#334155">sink</text>
+</g>
+<g data-edge-label="sink->fanout">
+  <text x="248" y="-1" text-anchor="middle" dominant-baseline="alphabetic" font-size="9" fill="#fafafa" stroke="#fafafa" stroke-width="3" stroke-linejoin="round">retry</text>
+  <text x="248" y="-1" text-anchor="middle" dominant-baseline="alphabetic" font-size="9" fill="#64748b">retry</text>
+</g>
+</g>
+</svg>

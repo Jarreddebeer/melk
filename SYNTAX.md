@@ -614,8 +614,13 @@ publish >- ingest    # back-edge: ingest <- publish
 ```
 
 The `>-` operator is the flipped `->`. Both endpoints are *node
-references* (§4.4). Back-edges route through a rear-facing
-corridor lane so they don't tangle with forward flow.
+references* (§4.4). A back-edge wraps around the **outside** of the
+diagram rather than threading the forward corridors. It leaves and
+re-enters on the face *perpendicular* to the flow axis — the top/bottom
+(N/S) faces in an `lr` diagram, the left/right (E/W) faces in `tb` —
+attaching centred on whichever margin is nearer, so the trace wraps over
+that edge instead of cutting back through the middle. Override the faces
+with `exit:`/`entry:` (§4.3) if you need a specific wrap side.
 
 Attributes work the same way as forward edges:
 
@@ -634,9 +639,32 @@ a comment header — there is no block form.
 | `tags`   | identifier or `[a, b, ...]`             | Theme tag list (same semantics as node tags). For edges, `trace`/`trace-width`/`dash`/`opacity` apply. |
 | `via`    | highway-node identifier (single)        | Route through this highway. Multi-highway `via: [a, b]` is not supported (`E_VIA_MULTI_NOT_SUPPORTED`). |
 | `pivot`  | `source` or `target`                    | Z-route pivot side override. Rejected on structural edges (those produced by primitives).            |
-| `exit`   | `N`, `E`, `S`, `W`                      | Force the source face. Rejected on back-edges and via-edges. See note on U-routing below.            |
+| `exit`   | `N`, `E`, `S`, `W`                      | Force the source face. Rejected on via-edges. On a back-edge, overrides the perpendicular wrap face the perimeter router would pick (§4.2). See note on U-routing below. |
 | `entry`  | `N`, `E`, `S`, `W`                      | Force the target face. Same restrictions. See note on U-routing below.                               |
 | `avoid`  | name or edge ref or `[a, b -> c, ...]`  | Routing must avoid these obstacles. Members can be node ids, primitive names, edgeset names, or `a -> b` edge refs. |
+
+#### Styling one member of a primitive (attribute overlay)
+
+A primitive's member list (`fan-out f: r -> [a, b, c]`, `bus`,
+`pipeline`) has no place to attach per-trace attributes. To style a
+single member, restate that pair as a plain edge **after** the
+primitive and give it the attributes:
+
+```melk
+fan-out channels: router -> [metrics, audit, snapshots]
+router -> audit { tags: [deprecated] }   # overlays onto the fan-out trace
+```
+
+(`tags:` draws from the theme's fixed vocabulary — `deprecated` here is
+one of the built-in document-light tags; define your own in the theme.)
+The overlay does **not** draw a second trace — it merges `label` and
+`tags` onto the existing structural edge. Rules:
+
+- The primitive must be declared **before** the overlay line.
+- Only `label` and `tags` overlay. A line carrying a routing property
+  (`via`, `avoid`, `exit`, `entry`, `pivot`) is treated as a distinct
+  free edge, not an overlay.
+- Works for `pipeline`, `bus` (fan-in), `fan-out`, and `branch` members.
 
 #### `exit:` / `entry:` and U-routing
 
@@ -667,6 +695,13 @@ source box" artefacts).
 If a perimeter row/col isn't free, the router falls back to the
 standard L/Z — which may cut through the obstacle. Re-check your
 layout if the U doesn't materialise.
+
+**On back-edges.** A back-edge (`>-`) wraps around the perimeter on the
+face perpendicular to flow, centred on the nearer margin (§4.2).
+`exit:`/`entry:` override which faces it attaches to — e.g. for an `lr`
+diagram whose back-edge would default to wrapping over the top,
+`R >- S { exit: S, entry: S }` instead sends the return flow under the
+bottom (out of R's south face, into S's south face).
 
 ### 4.4 Node references
 
@@ -737,6 +772,9 @@ fan-out <name>: shared -> [a, b, c, ...]
 ```melk
 fan-out dispatch: scheduler -> [worker_a, worker_b, worker_c]
 ```
+
+To style one member's trace, overlay attributes with a plain edge after
+the `fan-out` line — see *Styling one member of a primitive* in §4.3.
 
 ### 5.4 `branch`
 
@@ -899,7 +937,7 @@ A tag is a named override rule keyed by name (e.g. `critical`, `hot`,
 | `trace-width`  | number ≥ 0                                            | edge only                 |
 | `dash`         | `null` (solid) or `number[]`                          | both                      |
 | `opacity`      | number 0-1                                            | both                      |
-| `icon-color`   | token name, hex, or gradient string                   | node icon only            |
+| `icon-color`   | token name, hex, or gradient string                   | node icon (or its missing-icon placeholder) |
 | `legend`       | single-line string (caption shown in legend strip)    | enables tag in legend     |
 | `swatch`       | `"box"` or `"line"`                                   | explicit legend swatch shape |
 
@@ -1059,6 +1097,7 @@ errors as ground truth and re-emit with the suggested fix in mind.
 |-----------------------------------------|--------------------------------------------------------------------------------------------|
 | `E_DUPLICATE_PIPELINE/BUS/FAN_OUT/BRANCH/NODESET/PATH/EDGESET` | Same name reused within a category                              |
 | `E_NAME_CONFLICT`                       | A name shadows another declaration                                                         |
+| `E_RESERVED_NODE_ID`                    | A reserved keyword (`layout`, `theme`, `label`, `pipeline`, …) reached a node position via an edge/primitive endpoint (e.g. `label -> x`) — use the directive form, or rename the node |
 | `E_NODESET_UNKNOWN_NODE`                | A nodeset member isn't a declared node                                                     |
 | `E_PATH_MISSING_EDGE`                   | A path link doesn't correspond to a declared edge                                          |
 | `E_EDGESET_UNKNOWN_EDGE`                | An edgeset member edge doesn't exist                                                       |
@@ -1067,7 +1106,7 @@ errors as ground truth and re-emit with the suggested fix in mind.
 | `E_VIA_UNKNOWN_HIGHWAY` / `_NOT_HIGHWAY` / `_MULTI_NOT_SUPPORTED` / `_FIRST_HALF` | `via:` problems                                            |
 | `E_HIGHWAY_AS_ENDPOINT`                 | A highway is used as an edge source/target (use `via:`)                                    |
 | `E_HIGHWAY_ATTR_ON_NON_HIGHWAY`         | `orient:` or `render:` on a non-highway                                                    |
-| `E_EXIT_INVALID_VALUE` / `_ON_BACK_EDGE` / `_ON_VIA_EDGE` | `exit:` or `entry:` value/context invalid                                   |
+| `E_EXIT_INVALID_VALUE` / `_ON_VIA_EDGE` | `exit:` or `entry:` value invalid, or set on a via-edge                                   |
 | `E_PIVOT_ON_STRUCTURAL_EDGE`            | `pivot:` on an edge created by a primitive                                                 |
 | `E_INVALID_ICON_POSITION`               | `icon-position:` not `inline` or `corner`                                                  |
 | `E_INVALID_BORDER_VALUE`                | `border:` not `true` or `false`                                                            |

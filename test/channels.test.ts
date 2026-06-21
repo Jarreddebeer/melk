@@ -260,6 +260,94 @@ describe("channel routing — back-edge perimeter routing", () => {
       }
     }
   });
+
+  it("a back-edge defaults to the perpendicular face and wraps over the margin", () => {
+    // Regression (ex 02): in an LR diagram the sink>-fanout back-edge was
+    // leaving sink's WEST face and entering fanout's EAST face, so the
+    // wrap attached to the side edges and the arrowhead pointed sideways
+    // into a box corner. A back-edge should default to the face
+    // PERPENDICULAR to flow (N/S for LR) and wrap over the nearer margin,
+    // entering its target's top face centred — no `exit:`/`entry:` needed.
+    const src = `
+      layout: lr
+      crossings: 2
+      fanout { shape: rect, size: 7x5 }
+      join   { shape: rect, size: 5x5 }
+      src    -> fanout
+      fan-out broadcast: fanout -> [a, b, c]
+      bus    converge:   [a, b, c] -> join
+      join   -> sink
+      sink   >- fanout { label: "retry" }
+    `;
+    const { model, placement, routing } = route(src);
+    const backEdge = polylineFor(routing, "sink", "fanout", model);
+
+    // Every waypoint sits at or above the top of the source/target boxes:
+    // the back-edge attaches to the N faces and wraps over the top.
+    const sinkCell = placement.cells.get("sink")!;
+    const boxTop = sinkCell.row * 8;
+    for (const pt of backEdge) {
+      expect(
+        pt.y <= boxTop,
+        `back-edge waypoint y=${pt.y} should be at or above box top y=${boxTop}`,
+      ).toBe(true);
+    }
+
+    // First/last waypoints attach inside each box's COLUMN span (the N
+    // face), not at the left/right extreme (an E/W face). For odd-width
+    // faces with a single back-edge they land dead-centre.
+    const checkCentredOnNFace = (id: string, x: number) => {
+      const cell = placement.cells.get(id)!;
+      const node = model.nodes.find((n) => n.id === id)!;
+      const left = cell.col * 8;
+      const right = left + Math.ceil(node.size.width) * 8;
+      expect(x).toBeGreaterThan(left);
+      expect(x).toBeLessThan(right);
+      // Single back-edge on an empty perpendicular face → exact centre.
+      expect(x).toBe(Math.round((left + right) / 2));
+    };
+    checkCentredOnNFace("sink", backEdge[0]!.x);
+    checkCentredOnNFace("fanout", backEdge[backEdge.length - 1]!.x);
+  });
+
+  it("exit:/entry: on a back-edge force its faces (N/N runs over the top)", () => {
+    // `exit:`/`entry:` are now accepted on back-edges and override the
+    // rear face the perimeter router would otherwise pick. With N/N the
+    // return flow leaves the source's north face and enters the target's
+    // north face, so the whole back-edge sits ABOVE both boxes.
+    const src = `
+      layout: lr
+      crossings: 4
+      S { shape: circle, size: 9x9 }
+      E { shape: circle, size: 9x9 }
+      R { shape: circle, size: 9x9 }
+      pipeline p: S -> E -> R
+      R >- S { exit: N, entry: N }
+    `;
+    const { model, placement, routing } = route(src);
+    const backEdge = polylineFor(routing, "R", "S", model);
+    // The spine sits on row 0; with N/N faces the whole back-edge runs
+    // at or above the top of those boxes (it attaches to the north faces
+    // and runs over the top, never dipping into the side rows).
+    const sCell = placement.cells.get("S")!;
+    const spineTop = sCell.row * 8;
+    for (const pt of backEdge) {
+      expect(
+        pt.y <= spineTop,
+        `back-edge waypoint y=${pt.y} should be at or above the spine top y=${spineTop}`,
+      ).toBe(true);
+    }
+    // The endpoints attach near R's and S's horizontal centres (the N
+    // face), not at their E/W edges — so the first and last x sit inside
+    // each box's column span rather than at its left/right extreme.
+    const rCell = placement.cells.get("R")!;
+    const rLeft = rCell.col * 8;
+    const rNode = model.nodes.find((n) => n.id === "R")!;
+    const rRight = rLeft + Math.ceil(rNode.size.width) * 8;
+    const startX = backEdge[0]!.x;
+    expect(startX).toBeGreaterThan(rLeft);
+    expect(startX).toBeLessThan(rRight);
+  });
 });
 
 describe("channel routing — axial overlap detection", () => {

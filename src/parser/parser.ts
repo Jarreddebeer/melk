@@ -565,8 +565,20 @@ class Parser {
     const consumers = this.identCommaList();
     const end = this.expect("rbracket");
     if (consumers.length < 2) {
+      // The common LLM mistake is reaching for fan-out with a SINGLE target.
+      // Don't just restate the 2+ rule — name the one target and give the exact
+      // single-edge / branch replacement, which is what the author actually wants.
+      const only = consumers.length === 1 ? consumers[0] : undefined;
+      const shared = sharedTok.value;
       throw new ParseError(
-        "fan-out requires at least two consumers (use `fan-out name: shared -> [a, b, ...]`)",
+        `E_FANOUT_TOO_FEW: fan-out '${nameTok.value}' has ${consumers.length} target` +
+          `${consumers.length === 1 ? "" : "s"}; it needs at least two. ` +
+          (only
+            ? `Hint: for the SINGLE target '${only}', don't use fan-out — use a plain edge ` +
+              `\`${shared} -> ${only}\`, or \`branch ${nameTok.value}:right: ${shared} -> ${only}\` ` +
+              `if it sits off to the side. Use fan-out only when '${shared}' splits to 2+ targets ` +
+              `at once: \`fan-out ${nameTok.value}: ${shared} -> [ ${only}, other ]\`.`
+            : `Hint: use a plain edge \`${shared} -> target\` for one target; fan-out is for 2+.`),
         start.span,
       );
     }

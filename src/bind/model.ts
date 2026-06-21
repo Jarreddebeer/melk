@@ -228,8 +228,12 @@ export interface ModelEdge {
    * of the side §3.3 would derive from `edgeFwd`. The target side is
    * still derived from `edgeFwd` unless `entrySide` is also set.
    *
-   * Rejected at bind time for back-edges (`E_EXIT_ON_BACK_EDGE`), via-
-   * edges (`E_EXIT_ON_VIA_EDGE`), and structural-edge members
+   * On a back-edge this overrides the perpendicular-to-flow wrap face
+   * the perimeter router picks by default (N/S for LR, E/W for TB —
+   * see backEdgeWrapSide in slots.ts); e.g. `R >- S { exit: S, entry: S }`
+   * forces an LR back-edge under the bottom instead of over the top.
+   * Rejected at bind time for via-edges
+   * (`E_EXIT_ON_VIA_EDGE`) and structural-edge members
    * (`E_EXIT_ON_STRUCTURAL_EDGE` — currently unreachable syntactically).
    */
   exitSide?: EdgeSide;

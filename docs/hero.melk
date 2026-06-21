@@ -1,0 +1,9 @@
+layout: lr
+title: "Payment platform"
+
+pipeline data_plane: client -> gateway -> auth -> ledger -> receipt
+gateway { size: 6x5 }
+receipt { size: 6x5 }
+
+branch audit-out:right: ledger -> audit_log
+audit_log { shape: cylinder, size: 7x5, tags: [critical] }

@@ -427,8 +427,12 @@ export function renderIconPlaceholder(
   width: number,
   height: number,
   theme: Theme,
+  tint?: string,
 ): string {
-  const stroke = theme.tokens["border-subtle"];
+  // A tag-rule `icon-color` tints the placeholder too, so a missing
+  // icon can be flagged (e.g. orange) instead of always reading as the
+  // muted border-subtle hatch.
+  const stroke = tint ?? theme.tokens["border-subtle"];
   const sw = theme.strokes.frame;
   // Diagonal hatch lines, 4px apart, NW→SE.
   const lines: string[] = [];

@@ -1,0 +1,18 @@
+# Showcase copy of examples/02-back-edge.melk for the README gallery.
+# Adds the `showcase` theme + a diagonal gradient on the three workers.
+layout: lr
+crossings: 2
+theme: "./showcase.json"
+
+fanout { shape: rect, size: 7x5 }
+join   { shape: rect, size: 5x5 }
+
+a { tags: [gray-grad] }
+b { tags: [gray-grad] }
+c { tags: [gray-grad] }
+
+src    -> fanout
+fan-out broadcast: fanout -> [a, b, c]
+bus    converge:   [a, b, c] -> join
+join   -> sink
+sink   >- fanout { label: "retry" }

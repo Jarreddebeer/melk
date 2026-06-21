@@ -387,18 +387,30 @@ function placeEntry(
  * placed coords are interpreted in local strip space (matching the
  * LegendLayout's coordinate system).
  */
+/**
+ * Resolves a tag-rule paint value (solid colour or `linear ...`
+ * gradient) to an SVG paint string. `svg.ts` supplies a resolver that
+ * registers gradients into `<defs>` and returns `url(#...)`; without
+ * one we fall back to `resolveColour`, which only accepts hex/token
+ * (so a gradient swatch would throw — but standalone callers never
+ * pass gradient tags).
+ */
+export type PaintResolver = (value: string) => string;
+
 export function renderLegend(
   layout: LegendLayout,
   originX: number,
   originY: number,
   theme: Theme,
+  paint?: PaintResolver,
 ): string {
+  const resolve: PaintResolver = paint ?? ((v) => resolveColour(theme, v));
   const parts: string[] = [];
   parts.push(`<g data-legend="1" transform="translate(${fmt(originX)} ${fmt(originY)})">`);
   // Separator on the inner edge (the edge facing the diagram).
   parts.push(renderSeparator(layout, theme));
   for (const placed of layout.placed) {
-    parts.push(renderEntry(placed, theme));
+    parts.push(renderEntry(placed, theme, resolve));
   }
   parts.push(`</g>`);
   return parts.join("\n");
@@ -424,8 +436,8 @@ function renderSeparator(layout: LegendLayout, theme: Theme): string {
   }
 }
 
-function renderEntry(placed: PlacedEntry, theme: Theme): string {
-  const swatch = renderSwatch(placed, theme);
+function renderEntry(placed: PlacedEntry, theme: Theme, paint: PaintResolver): string {
+  const swatch = renderSwatch(placed, theme, paint);
   const captionColour = theme.tokens["ink-secondary"];
   const fontSize = theme.typography.size.edge;
   const caption =
@@ -437,14 +449,14 @@ function renderEntry(placed: PlacedEntry, theme: Theme): string {
   return `<g data-legend-entry="${escapeAttr(placed.entry.tag)}">\n  ${swatch}\n  ${caption}\n</g>`;
 }
 
-function renderSwatch(placed: PlacedEntry, theme: Theme): string {
+function renderSwatch(placed: PlacedEntry, theme: Theme, paint: PaintResolver): string {
   const rule = placed.entry.rule;
   if (placed.entry.swatch === "line") {
     // Line swatch: short horizontal segment styled per the tag's edge
     // properties. Trace colour: use `trace` override → token; fallback
     // to trace-default. Width: `trace-width` → fallback to theme trace.
     const stroke = rule.trace !== undefined
-      ? resolveColour(theme, rule.trace)
+      ? paint(rule.trace)
       : theme.tokens["trace-default"];
     const sw = rule["trace-width"] ?? theme.strokes.trace;
     const yMid = placed.swatchY + SWATCH_LINE_HEIGHT / 2;
@@ -461,13 +473,15 @@ function renderSwatch(placed: PlacedEntry, theme: Theme): string {
     );
   }
   // Box swatch: rect styled per the tag's node properties. Fill: `fill`
-  // → token; fallback to surface-raised. Stroke: `border` → token;
-  // fallback to border-strong. Width: `border-width` → outline.
+  // → token/gradient; fallback to surface-raised. Stroke: `border` →
+  // token/gradient; fallback to border-strong. Width: `border-width` →
+  // outline. `paint` registers gradients into <defs> and returns a
+  // url(#...) reference.
   const fill = rule.fill !== undefined
-    ? resolveColour(theme, rule.fill)
+    ? paint(rule.fill)
     : theme.tokens["surface-raised"];
   const stroke = rule.border !== undefined
-    ? resolveColour(theme, rule.border)
+    ? paint(rule.border)
     : theme.tokens["border-strong"];
   const sw = rule["border-width"] ?? theme.strokes.outline;
   let dashAttr = "";

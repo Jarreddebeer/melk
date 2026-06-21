@@ -26,7 +26,4 @@ gateway  { shape: rect, icon: basic/server, icon-position: corner, label: "Gatew
 # Demonstrate the missing-icon placeholder (deliberately wrong name).
 mystery  { shape: icon(basic/does-not-exist), label: "missing" }
 
-pipeline traffic: gateway -> api -> store
-
-# Off-spine branch — anchors `mystery` perpendicular to `store`.
-branch fallback:right: store -> mystery
+pipeline traffic: gateway -> api -> store -> mystery

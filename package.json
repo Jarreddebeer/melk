@@ -1,10 +1,10 @@
 {
   "name": "@jarreddebeer/melk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publishConfig": {
     "access": "public"
   },
-  "description": "Text-first architectural diagramming with circuit-board-style orthogonal routing.",
+  "description": "A lightweight DSL for your LLM to infer, document, and maintain your project's architecture as text, not diagrams.",
   "type": "module",
   "license": "MIT",
   "author": "Jarred de Beer <jarr2000@gmail.com>",
@@ -47,7 +47,8 @@
     "SYNTAX.md",
     "EXAMPLES.md",
     "prompts",
-    "examples/**/*.melk"
+    "examples/**/*.melk",
+    "docs/**/*.svg"
   ],
   "scripts": {
     "build": "tsc",

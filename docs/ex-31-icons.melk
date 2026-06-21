@@ -1,0 +1,17 @@
+# Showcase copy of examples/31-icons.melk for the README gallery.
+# API icon tinted blue; the missing-icon placeholder tinted orange.
+layout: lr
+title: "Icon Pack Demo"
+caption: "Demonstrates shape: icon(...) body form and icon: badge form"
+theme: "./showcase.json"
+
+icons: basic from "../examples/icons/basic/"
+
+api      { shape: icon(basic/server),    label: "API", tags: [icon-blue] }
+store    { shape: icon(basic/database),  label: "Store" }
+
+gateway  { shape: rect, icon: basic/server, icon-position: corner, label: "Gateway", size: 9x5 }
+
+mystery  { shape: icon(basic/does-not-exist), label: "missing", tags: [icon-orange] }
+
+pipeline traffic: gateway -> api -> store -> mystery

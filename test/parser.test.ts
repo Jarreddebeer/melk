@@ -176,6 +176,14 @@ describe("parser — structured flow", () => {
     }
   });
 
+  it("rejects a single-target fan-out with an actionable E_FANOUT_TOO_FEW hint", () => {
+    // The common LLM mistake: fan-out with one target. The error must name the
+    // target and steer to a plain edge / branch, not just restate the 2+ rule.
+    expect(() => ast("fan-out cache: worker -> [ fast_store ]")).toThrow(
+      /E_FANOUT_TOO_FEW.*Hint:.*SINGLE target 'fast_store'.*worker -> fast_store/s,
+    );
+  });
+
   it("parses a branch declaration", () => {
     const tree = ast("branch hangers: spine -> enrich");
     const stmt = tree.statements[0]!;
@@ -241,7 +249,7 @@ describe("parser — annotations", () => {
 
 describe("bind — node + edge property errors", () => {
   it("rejects duplicate node declarations", () => {
-    expect(() => run("a\na")).toThrow(/duplicate node declaration/);
+    expect(() => run("a\na")).toThrow(/E_DUPLICATE_NODE/);
   });
 
   it("rejects unknown shape", () => {

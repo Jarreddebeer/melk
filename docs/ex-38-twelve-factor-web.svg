@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 728 426" width="728" height="426" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+    <linearGradient id="tag-gradient-0" gradientUnits="objectBoundingBox" x1="0.5" y1="0" x2="0.5" y2="1">
+    <stop offset="0%" stop-color="#f8fafc"/>
+    <stop offset="100%" stop-color="#cbd5e1"/>
+  </linearGradient>
+</defs>
+<rect width="728" height="426" fill="#fafafa"/>
+<g transform="translate(32 105)">
+<g data-edge="client->lb">
+  <path d="M 56 100 L 96 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="lb->web1">
+  <path d="M 200 92 L 216 92 Q 220 92 220 88 L 220 24 Q 220 20 224 20 L 240 20" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="lb->web2">
+  <path d="M 200 100 L 240 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="lb->web3">
+  <path d="M 200 108 L 216 108 Q 220 108 220 112 L 220 176 Q 220 180 224 180 L 240 180" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="web1->queue">
+  <path d="M 296 20 L 312 20 Q 316 20 316 24 L 316 88 Q 316 92 320 92 L 336 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="web2->queue">
+  <path d="M 296 100 L 336 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="web3->queue">
+  <path d="M 296 180 L 312 180 Q 316 180 316 176 L 316 112 Q 316 108 320 108 L 336 108" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="queue->worker1">
+  <path d="M 408 96 L 424 96 Q 428 96 428 92 L 428 64 Q 428 60 432 60 L 448 60" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="queue->worker2">
+  <path d="M 408 104 L 424 104 Q 428 104 428 108 L 428 136 Q 428 140 432 140 L 448 140" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="worker1->db">
+  <path d="M 520 60 L 536 60 Q 540 60 540 64 L 540 88 Q 540 92 544 92 L 560 92" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="worker2->db">
+  <path d="M 520 140 L 536 140 Q 540 140 540 136 L 540 104 Q 540 100 544 100 L 560 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="worker2->cache">
+  <path d="M 484 160 L 484 200" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-id="client">
+  <rect x="0" y="80" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">client</text>
+</g>
+<g data-id="lb">
+  <rect x="96" y="80" width="104" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="148" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">load balancer</text>
+</g>
+<g data-id="queue">
+  <rect x="336" y="72" width="72" height="56" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="372" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155"><tspan x="372" dy="-0.575em">queue</tspan><tspan x="372" dy="1.15em">(broker)</tspan></text>
+</g>
+<g data-id="db">
+  <path d="M 560 66 A 52 10 0 0 1 664 66 L 664 126 A 52 10 0 0 1 560 126 Z" fill="url(#tag-gradient-0)" stroke="#334155" stroke-width="1"/><path d="M 560 66 A 52 10 0 0 0 664 66" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="612" y="96" text-anchor="middle" dominant-baseline="central" fill="#334155"><tspan x="612" dy="-0.575em">PostgreSQL</tspan><tspan x="612" dy="1.15em">(primary)</tspan></text>
+</g>
+<g data-id="cache">
+  <path d="M 448 210 A 36 10 0 0 1 520 210 L 520 246 A 36 10 0 0 1 448 246 Z" fill="#ffffff" stroke="#334155" stroke-width="1"/><path d="M 448 210 A 36 10 0 0 0 520 210" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="484" y="228" text-anchor="middle" dominant-baseline="central" fill="#334155"><tspan x="484" dy="-0.575em">Redis</tspan><tspan x="484" dy="1.15em">(cache)</tspan></text>
+</g>
+<g data-id="web1">
+  <rect x="240" y="0" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="268" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">web.1</text>
+</g>
+<g data-id="web2">
+  <rect x="240" y="80" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="268" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">web.2</text>
+</g>
+<g data-id="web3">
+  <rect x="240" y="160" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="268" y="180" text-anchor="middle" dominant-baseline="central" fill="#334155">web.3</text>
+</g>
+<g data-id="worker1">
+  <rect x="448" y="40" width="72" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="484" y="60" text-anchor="middle" dominant-baseline="central" fill="#334155">worker.1</text>
+</g>
+<g data-id="worker2">
+  <rect x="448" y="120" width="72" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="484" y="140" text-anchor="middle" dominant-baseline="central" fill="#334155">worker.2</text>
+</g>
+</g>
+<g data-title-strip="1" transform="translate(0 0)">
+<text x="32" y="33" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#334155" data-row="title" text-anchor="start" dominant-baseline="alphabetic">Twelve-Factor web app</text>
+<text x="32" y="59.05" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13" font-weight="500" fill="#64748b" data-row="subtitle" text-anchor="start" dominant-baseline="alphabetic">Stateless web tier, async workers, attached backing services</text>
+</g>
+<g data-title-strip="1" transform="translate(0 393)">
+<text x="32" y="15.65" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9" font-weight="500" fill="#64748b" data-row="caption" text-anchor="start" dominant-baseline="alphabetic">Source: examples/38-twelve-factor-web.melk</text>
+</g>
+</svg>

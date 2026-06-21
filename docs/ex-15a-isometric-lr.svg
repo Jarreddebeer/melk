@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 264 288" width="264" height="288" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+    <linearGradient id="tag-gradient-0" gradientUnits="objectBoundingBox" x1="0.15" y1="0.15" x2="0.85" y2="0.85">
+    <stop offset="0%" stop-color="#f8fafc"/>
+    <stop offset="100%" stop-color="#cbd5e1"/>
+  </linearGradient>
+</defs>
+<rect width="264" height="288" fill="#fafafa"/>
+<g transform="translate(32 32)">
+<g data-edge="p1->hub">
+  <path d="M 40 44 L 56 44 Q 60 44 60 48 L 60 112 Q 60 116 64 116 L 80 116" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="p2->hub">
+  <path d="M 40 124 L 80 124" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="p3->hub">
+  <path d="M 40 204 L 56 204 Q 60 204 60 200 L 60 136 Q 60 132 64 132 L 80 132" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="hub->c1">
+  <path d="M 120 116 L 136 116 Q 140 116 140 112 L 140 48 Q 140 44 144 44 L 160 44" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="hub->c2">
+  <path d="M 120 124 L 160 124" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="hub->c3">
+  <path d="M 120 132 L 136 132 Q 140 132 140 136 L 140 200 Q 140 204 144 204 L 160 204" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="hub->sidecar">
+  <path d="M 100 96 L 100 40" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-id="sidecar">
+  <rect x="72" y="0" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="100" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">sidecar</text>
+</g>
+<g data-id="hub">
+  <rect x="80" y="96" width="40" height="56" rx="2" ry="2" fill="url(#tag-gradient-0)" stroke="#334155" stroke-width="1"/>
+  <text x="100" y="124" text-anchor="middle" dominant-baseline="central" fill="#334155">hub</text>
+</g>
+<g data-id="p1">
+  <rect x="0" y="24" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="20" y="44" text-anchor="middle" dominant-baseline="central" fill="#334155">p1</text>
+</g>
+<g data-id="p2">
+  <rect x="0" y="104" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="20" y="124" text-anchor="middle" dominant-baseline="central" fill="#334155">p2</text>
+</g>
+<g data-id="p3">
+  <rect x="0" y="184" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="20" y="204" text-anchor="middle" dominant-baseline="central" fill="#334155">p3</text>
+</g>
+<g data-id="c1">
+  <rect x="160" y="24" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="180" y="44" text-anchor="middle" dominant-baseline="central" fill="#334155">c1</text>
+</g>
+<g data-id="c2">
+  <rect x="160" y="104" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="180" y="124" text-anchor="middle" dominant-baseline="central" fill="#334155">c2</text>
+</g>
+<g data-id="c3">
+  <rect x="160" y="184" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="180" y="204" text-anchor="middle" dominant-baseline="central" fill="#334155">c3</text>
+</g>
+</g>
+</svg>

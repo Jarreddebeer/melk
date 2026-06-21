@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 382 607" width="382" height="607" font-family="Inter, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" font-weight="500">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+</defs>
+<rect width="382" height="607" fill="#fafafa"/>
+<g transform="translate(38 49)">
+<g data-nodeset="Bus">
+  <rect x="-6" y="-6" width="212" height="532" rx="4" ry="4" fill="none" stroke="#cbd5e1" stroke-width="0.75" stroke-dasharray="4 3"/>
+  <text x="0" y="-8" text-anchor="start" font-size="9" fill="#64748b">Bus</text>
+</g>
+<g data-edge="source->ingest">
+  <path d="M 56 500 L 96 500" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->metrics">
+  <path d="M 72 196 L 88 196 Q 92 196 92 192 L 92 24 Q 92 20 96 20 L 128 20" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->events">
+  <path d="M 72 204 L 96 204 Q 100 204 100 200 L 100 104 Q 100 100 104 100 L 128 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->audit">
+  <path d="M 72 212 L 104 212 Q 108 212 108 208 L 108 184 Q 108 180 112 180 L 128 180" stroke="#93c5fd" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->alerts">
+  <path d="M 72 220 L 104 220 Q 108 220 108 224 L 108 256 Q 108 260 112 260 L 128 260" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->traces">
+  <path d="M 72 228 L 96 228 Q 100 228 100 232 L 100 336 Q 100 340 104 340 L 128 340" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="router->snapshots">
+  <path d="M 72 236 L 88 236 Q 92 236 92 240 L 92 416 Q 92 420 96 420 L 128 420" stroke="#93c5fd" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="metrics->prometheus">
+  <path d="M 184 20 L 224 20" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="traces->prometheus">
+  <path d="M 156 320 L 156 304 Q 156 300 160 300 L 304 300 Q 308 300 308 296 L 308 56 Q 308 52 304 52 L 272 52 Q 268 52 268 48 L 268 40" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="events->kafka">
+  <path d="M 184 100 L 224 100" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="audit->kafka">
+  <path d="M 168 176 L 192 176 Q 196 176 196 172 L 196 108 Q 196 104 200 104 L 224 104" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="audit->s3">
+  <path d="M 168 180 L 208 180" stroke="#93c5fd" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="snapshots->s3">
+  <path d="M 164 400 L 164 384 Q 164 380 168 380 L 200 380 Q 204 380 204 376 L 204 216 Q 204 212 208 212 L 224 212 Q 228 212 228 208 L 228 200" stroke="#93c5fd" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="alerts->pager">
+  <path d="M 184 260 L 224 260" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="traces->jaeger">
+  <path d="M 184 340 L 224 340" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-edge="ingest->router">
+  <path d="M 124 480 L 124 448 Q 124 444 120 444 L 40 444 Q 36 444 36 440 L 36 256" stroke="#94a3b8" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+</g>
+<g data-id="ingest">
+  <rect x="96" y="480" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="124" y="500" text-anchor="middle" dominant-baseline="central" fill="#334155">ingest</text>
+</g>
+<g data-id="metrics">
+  <rect x="128" y="0" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="156" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">metrics</text>
+</g>
+<g data-id="events">
+  <rect x="128" y="80" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="156" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">events</text>
+</g>
+<g data-id="alerts">
+  <rect x="128" y="240" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="156" y="260" text-anchor="middle" dominant-baseline="central" fill="#334155">alerts</text>
+</g>
+<g data-id="traces">
+  <rect x="128" y="320" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="156" y="340" text-anchor="middle" dominant-baseline="central" fill="#334155">traces</text>
+</g>
+<g data-id="snapshots">
+  <rect x="128" y="400" width="72" height="40" rx="2" ry="2" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="164" y="420" text-anchor="middle" dominant-baseline="central" fill="#334155">snapshots</text>
+</g>
+<g data-id="audit">
+  <rect x="128" y="160" width="40" height="40" rx="2" ry="2" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="148" y="180" text-anchor="middle" dominant-baseline="central" fill="#334155">audit</text>
+</g>
+<g data-id="router">
+  <rect x="0" y="176" width="72" height="80" rx="2" ry="2" fill="#ffffff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="36" y="216" text-anchor="middle" dominant-baseline="central" fill="#334155">router</text>
+</g>
+<g data-id="source">
+  <rect x="0" y="480" width="56" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="28" y="500" text-anchor="middle" dominant-baseline="central" fill="#334155">source</text>
+</g>
+<g data-id="prometheus">
+  <path d="M 224 10 A 44 10 0 0 1 312 10 L 312 30 A 44 10 0 0 1 224 30 Z" fill="#ffffff" stroke="#334155" stroke-width="1"/><path d="M 224 10 A 44 10 0 0 0 312 10" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="268" y="20" text-anchor="middle" dominant-baseline="central" fill="#334155">prometheus</text>
+</g>
+<g data-id="kafka">
+  <path d="M 224 90 A 28 10 0 0 1 280 90 L 280 110 A 28 10 0 0 1 224 110 Z" fill="#ffffff" stroke="#334155" stroke-width="1"/><path d="M 224 90 A 28 10 0 0 0 280 90" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="252" y="100" text-anchor="middle" dominant-baseline="central" fill="#334155">kafka</text>
+</g>
+<g data-id="s3">
+  <path d="M 208 170 A 20 10 0 0 1 248 170 L 248 190 A 20 10 0 0 1 208 190 Z" fill="#ffffff" stroke="#93c5fd" stroke-width="1.5"/><path d="M 208 170 A 20 10 0 0 0 248 170" fill="none" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="228" y="180" text-anchor="middle" dominant-baseline="central" fill="#334155">s3</text>
+</g>
+<g data-id="pager">
+  <rect x="224" y="240" width="72" height="40" rx="2" ry="2" fill="#ffffff" stroke="#334155" stroke-width="1"/>
+  <text x="260" y="260" text-anchor="middle" dominant-baseline="central" fill="#334155">pagerduty</text>
+</g>
+<g data-id="jaeger">
+  <path d="M 224 330 A 36 10 0 0 1 296 330 L 296 350 A 36 10 0 0 1 224 350 Z" fill="#ffffff" stroke="#334155" stroke-width="1"/><path d="M 224 330 A 36 10 0 0 0 296 330" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="260" y="340" text-anchor="middle" dominant-baseline="central" fill="#334155">jaeger</text>
+</g>
+</g>
+</svg>

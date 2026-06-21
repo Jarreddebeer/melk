@@ -279,6 +279,18 @@ describe("icon loader (DESIGN-PHASE5-ICONS §5.1)", () => {
     expect(out).toContain("<line"); // hatching
     expect(out).toContain("stroke-dasharray");
   });
+
+  it("renderIconPlaceholder honours an explicit tint over border-subtle", () => {
+    const theme = loadTheme("document-light");
+    const subtle = theme.tokens["border-subtle"];
+    const tinted = renderIconPlaceholder(0, 0, 40, 40, theme, "#d97706");
+    expect(tinted).toContain('stroke="#d97706"');
+    expect(tinted).not.toContain(`stroke="${subtle}"`);
+    // Default (no tint) still uses border-subtle.
+    expect(renderIconPlaceholder(0, 0, 40, 40, theme)).toContain(
+      `stroke="${subtle}"`,
+    );
+  });
 });
 
 describe("end-to-end render with icons", () => {
@@ -599,6 +611,25 @@ describe("tag-rule icon-color (re-tint via theme tag)", () => {
     // The icon's <g> uses the tag's icon-color (status-error → red).
     const srvGroup = out.match(/<g data-id="srv">[\s\S]*?<\/g>/)![0];
     expect(srvGroup).toContain(`color="${theme.tokens["status-error"]}"`);
+  });
+
+  it("a missing icon's placeholder is tinted by icon-color", () => {
+    // A deliberately-missing icon renders the hatched placeholder; the
+    // tag's icon-color tints it so a broken/intentional gap can be
+    // flagged (e.g. orange) instead of the muted border-subtle hatch.
+    const baseLight = loadTheme("document-light");
+    const raw = JSON.parse(JSON.stringify(baseLight));
+    raw.tags["flag"] = { "icon-color": "#d97706", legend: "Flag" };
+    const theme = validateTheme(raw, "<test>");
+    const src = [
+      'icons: basic from "./basic/"',
+      "mystery { shape: icon(basic/does-not-exist), tags: [flag], label: \"x\" }",
+      "mystery -> b",
+    ].join("\n");
+    const out = renderWith(src, theme);
+    const grp = out.match(/<g data-id="mystery">[\s\S]*?<\/g>/)![0];
+    expect(grp).toContain('data-icon-placeholder="1"');
+    expect(grp).toContain('stroke="#d97706"'); // tinted, not border-subtle
   });
 
   it("custom tag with hex literal icon-color works", () => {

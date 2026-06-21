@@ -1,0 +1,41 @@
+# Showcase copy of examples/10-multi-port-group.melk for the README gallery.
+# Blue border on the router; the snapshots/audit -> s3 paths use a
+# subdued blue trace.
+layout: lr
+crossings: 20
+theme: "./showcase.json"
+
+ingest { size: 7x5 }
+metrics { size: 7x5 }
+events { size: 7x5 }
+alerts { size: 7x5 }
+traces { size: 7x5 }
+snapshots { size: 9x5, tags: [subdued-blue-border] }
+audit     { tags: [subdued-blue-border] }
+router     { shape: rect,     size: 9x9, label: "router", tags: [blue-border] }
+source     { shape: rect,                 label: "source", size: 7x5 }
+prometheus { shape: cylinder, size: 11x5, label: "prometheus" }
+kafka      { shape: cylinder, size: 7x5,  label: "kafka" }
+s3         { shape: cylinder, size: 5x5,  label: "s3", tags: [subdued-blue-border] }
+pager      { shape: rect,     size: 9x5,  label: "pagerduty" }
+jaeger     { shape: cylinder, size: 9x5,  label: "jaeger" }
+
+
+source  -> ingest
+ingest  -> router { avoid: channels }
+fan-out channels: router -> [metrics, events, audit, alerts, traces, snapshots]
+
+# Overlay tags onto two of the fan-out members (the s3-bound paths).
+router    -> snapshots { tags: [blue-trace] }
+router    -> audit     { tags: [blue-trace] }
+
+metrics   -> prometheus
+traces    -> prometheus
+events    -> kafka
+audit     -> kafka
+audit     -> s3        { tags: [blue-trace] }
+snapshots -> s3        { tags: [blue-trace] }
+alerts    -> pager
+traces    -> jaeger
+
+nodeset Bus: ingest, router, metrics, events, audit, alerts, traces, snapshots

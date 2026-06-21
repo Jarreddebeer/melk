@@ -1,21 +1,46 @@
 # melk
 
-Text-first architecture diagrams. Composition-primitive DSL,
-deterministic Manhattan-router output, theme-driven visual style.
+Your project's architecture should be maintained as text, not diagrams.
+melk is a lightweight DSL for your LLM to infer, document, and maintain
+your project's architecture.
 
 ```melk
 layout: lr
 title: "Payment platform"
 
 pipeline data_plane: client -> gateway -> auth -> ledger -> receipt
+gateway { size: 6x5 }
+receipt { size: 6x5 }
 
 branch audit-out:right: ledger -> audit_log
-audit_log { shape: cylinder, tags: [critical] }
+audit_log { shape: cylinder, size: 7x5, tags: [critical] }
 ```
+
+<img width="100%" src="docs/hero.svg" alt="Payment platform rendered by melk">
 
 Renders to a clean orthogonal SVG with a frame, label, and a tinted
 `audit_log` cylinder. The layout is deterministic — the same source
 always produces the same diagram.
+
+## Gallery
+
+<img width="100%" src="docs/ex-02-back-edge.svg" alt="">
+
+<img width="100%" src="docs/ex-10-multi-port-group.svg" alt="">
+
+<img width="100%" src="docs/ex-15a-isometric-lr.svg" alt="">
+
+<img width="100%" src="docs/ex-20-two-highways.svg" alt="">
+
+<img width="100%" src="docs/ex-27-highway-underground.svg" alt="">
+
+<img width="100%" src="docs/ex-28-highway-intersect.svg" alt="">
+
+<img width="100%" src="docs/ex-38-twelve-factor-web.svg" alt="">
+
+<img width="100%" src="docs/ex-44-domain-model.svg" alt="">
+
+<img width="100%" src="docs/ex-31-icons.svg" alt="">
 
 ## Install
 
